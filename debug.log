@@ -1,0 +1,512 @@
+Display Query: 
+        SELECT sfc.student_registration_id, sfc.session_id, sfc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title, ft.title AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_registration s ON sfc.student_registration_id = s.id
+        JOIN classes c ON sfc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sfc.session_id = 10 AND sfc.class_id = 1 
+              AND MONTH(sfc.due_date) = 2 AND YEAR(sfc.due_date) = 2025 AND ft.type = 'Monthly'
+        ORDER BY co.title, c.title, s.name, ft.title
+    
+Result Rows: 3
+Display Query: 
+        SELECT sfc.student_registration_id, sfc.session_id, sfc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title, ft.title AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_registration s ON sfc.student_registration_id = s.id
+        JOIN classes c ON sfc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sfc.session_id = 10 AND sfc.class_id = 1 
+              AND MONTH(sfc.due_date) = 1 AND YEAR(sfc.due_date) = 2025 AND ft.type = 'Monthly'
+        ORDER BY co.title, c.title, s.name, ft.title
+    
+Result Rows: 2
+Display Query: 
+        SELECT sfc.student_registration_id, sfc.session_id, sfc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title, ft.title AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_registration s ON sfc.student_registration_id = s.id
+        JOIN classes c ON sfc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sfc.session_id = 10 AND sfc.class_id = 1 
+              AND MONTH(sfc.due_date) = 2 AND YEAR(sfc.due_date) = 2025 AND ft.type = 'Monthly'
+        ORDER BY co.title, c.title, s.name, ft.title
+    
+Result Rows: 2
+Display Query: 
+        SELECT sfc.student_registration_id, sfc.session_id, sfc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title, ft.title AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_registration s ON sfc.student_registration_id = s.id
+        JOIN classes c ON sfc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sfc.session_id = 10 AND sfc.class_id = 1 
+              AND MONTH(sfc.due_date) = 1 AND YEAR(sfc.due_date) = 2025 AND ft.type = 'Monthly'
+        ORDER BY co.title, c.title, s.name, ft.title
+    
+Result Rows: 2
+Display Query: 
+        SELECT sfc.student_class_id, sc.student_registration_id, sc.session_id, sc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title, ft.title AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_class sc ON sfc.student_class_id = sc.id
+        JOIN student_registration s ON sc.student_registration_id = s.id
+        JOIN classes c ON sc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sc.session_id = 10 AND sc.class_id = 1 
+              AND MONTH(sfc.due_date) = 2 AND YEAR(sfc.due_date) = 2025 AND ft.type = 'Monthly'
+        ORDER BY co.title, c.title, s.name, ft.title
+    
+Result Rows: 2
+Display Query: 
+        SELECT sfc.student_class_id, sc.student_registration_id, sc.session_id, sc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title, ft.title AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_class sc ON sfc.student_class_id = sc.id
+        JOIN student_registration s ON sc.student_registration_id = s.id
+        JOIN classes c ON sc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sc.session_id = 10 AND sc.class_id = 1 
+              AND MONTH(sfc.due_date) = 1 AND YEAR(sfc.due_date) = 2025 AND ft.type = 'Monthly'
+        ORDER BY co.title, c.title, s.name, ft.title
+    
+Result Rows: 0
+Display Query: 
+        SELECT sfc.student_class_id, sc.student_registration_id, sc.session_id, sc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title, ft.title AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_class sc ON sfc.student_class_id = sc.id
+        JOIN student_registration s ON sc.student_registration_id = s.id
+        JOIN classes c ON sc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sc.session_id = 10 AND sc.class_id = 1 
+              AND MONTH(sfc.due_date) = 1 AND YEAR(sfc.due_date) = 2025 AND ft.type = 'Monthly'
+        ORDER BY co.title, c.title, s.name, ft.title
+    
+Result Rows: 0
+Display Query: 
+        SELECT sfc.student_class_id, sc.student_registration_id, sc.session_id, sc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title, ft.title AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_class sc ON sfc.student_class_id = sc.id
+        JOIN student_registration s ON sc.student_registration_id = s.id
+        JOIN classes c ON sc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sc.session_id = 10 AND sc.class_id = 1 
+              AND MONTH(sfc.due_date) = 1 AND YEAR(sfc.due_date) = 2025 AND ft.type = 'Monthly'
+        ORDER BY co.title, c.title, s.name, ft.title
+    
+Result Rows: 0
+Display Query: 
+        SELECT sfc.student_class_id, sc.student_registration_id, sc.session_id, sc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title, ft.title AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_class sc ON sfc.student_class_id = sc.id
+        JOIN student_registration s ON sc.student_registration_id = s.id
+        JOIN classes c ON sc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sc.session_id = 10 AND sc.class_id = 1 
+              AND MONTH(sfc.due_date) = 2 AND YEAR(sfc.due_date) = 2025 AND ft.type = 'Monthly'
+        ORDER BY co.title, c.title, s.name, ft.title
+    
+Result Rows: 0
+Display Query: 
+        SELECT sfc.student_class_id, sc.student_registration_id, sc.session_id, sc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title, ft.title AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_class sc ON sfc.student_class_id = sc.id
+        JOIN student_registration s ON sc.student_registration_id = s.id
+        JOIN classes c ON sc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sc.session_id = 10 AND sc.class_id = 1 
+              AND MONTH(sfc.due_date) = 2 AND YEAR(sfc.due_date) = 2025 AND ft.type = 'Monthly'
+        ORDER BY co.title, c.title, s.name, ft.title
+    
+Result Rows: 0
+Display Query: 
+        SELECT sfc.student_class_id, sc.student_registration_id, sc.session_id, sc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title, ft.title AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_class sc ON sfc.student_class_id = sc.id
+        JOIN student_registration s ON sc.student_registration_id = s.id
+        JOIN classes c ON sc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sc.session_id = ? AND sc.class_id = ? 
+              AND MONTH(sfc.due_date) = ? AND YEAR(sfc.due_date) = ? AND ft.type = 'Monthly'
+        ORDER BY co.title, c.title, s.name, ft.title
+    
+Result Rows: 0
+Inserting: student_class_id=8, fee_type_id=2, amount=1500.00, due_date=2025-02-28, status=Pending, remarks=Monthly fee for February 2025Inserting: student_class_id=9, fee_type_id=2, amount=1500.00, due_date=2025-02-28, status=Pending, remarks=Monthly fee for February 2025Display Query: 
+        SELECT sfc.student_class_id, sc.student_registration_id, sc.session_id, sc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title, ft.title AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_class sc ON sfc.student_class_id = sc.id
+        JOIN student_registration s ON sc.student_registration_id = s.id
+        JOIN classes c ON sc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sc.session_id = ? AND sc.class_id = ? 
+              AND MONTH(sfc.due_date) = ? AND YEAR(sfc.due_date) = ? AND ft.type = 'Monthly'
+        ORDER BY co.title, c.title, s.name, ft.title
+    
+Result Rows: 0
+Inserting: student_class_id=8, fee_type_id=2, amount=1500.00, due_date=2025-02-28, status=Pending, remarks=Monthly fee for February 2025Inserting: student_class_id=9, fee_type_id=2, amount=1500.00, due_date=2025-02-28, status=Pending, remarks=Monthly fee for February 2025Display Query: 
+        SELECT sfc.student_class_id, sc.student_registration_id, sc.session_id, sc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title, ft.title AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_class sc ON sfc.student_class_id = sc.id
+        JOIN student_registration s ON sc.student_registration_id = s.id
+        JOIN classes c ON sc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sc.session_id = ? AND sc.class_id = ? 
+              AND MONTH(sfc.due_date) = ? AND YEAR(sfc.due_date) = ? AND ft.type = 'Monthly'
+        ORDER BY co.title, c.title, s.name, ft.title
+    
+Result Rows: 0
+Display Query: 
+        SELECT sfc.student_class_id, sc.student_registration_id, sc.session_id, sc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title, ft.title AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_class sc ON sfc.student_class_id = sc.id
+        JOIN student_registration s ON sc.student_registration_id = s.id
+        JOIN classes c ON sc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sc.session_id = ? AND sc.class_id = ? 
+              AND MONTH(sfc.due_date) = ? AND YEAR(sfc.due_date) = ? AND ft.type = 'Monthly'
+        ORDER BY co.title, c.title, s.name, ft.title
+    
+Result Rows: 0
+Display Query: 
+        SELECT sfc.student_class_id, sc.student_registration_id, sc.session_id, sc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title, ft.title AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_class sc ON sfc.student_class_id = sc.id
+        JOIN student_registration s ON sc.student_registration_id = s.id
+        JOIN classes c ON sc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sc.session_id = ? AND sc.class_id = ? 
+              AND MONTH(sfc.due_date) = ? AND YEAR(sfc.due_date) = ? AND ft.type = 'Monthly'
+        ORDER BY co.title, c.title, s.name, ft.title
+    
+Result Rows: 0
+Display Parameters: session_id=10, class_id=1, month=2, year=2025Display Query: 
+        SELECT sfc.student_class_id, sc.student_registration_id, sc.session_id, sc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title, ft.title AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_class sc ON sfc.student_class_id = sc.id
+        JOIN student_registration s ON sc.student_registration_id = s.id
+        JOIN classes c ON sc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sc.session_id = ? AND sc.class_id = ? 
+              AND MONTH(sfc.due_date) = ? AND YEAR(sfc.due_date) = ? AND ft.type = 'Monthly'
+        ORDER BY co.title, c.title, s.name, ft.title
+    
+Result Rows: 0
+Fee Types Available: One Time, Monthly, Exam OnlyDisplay Parameters: session_id=10, class_id=1, month=2, year=2025Display Query: 
+        SELECT sfc.student_class_id, sc.student_registration_id, sc.session_id, sc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title, ft.title AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_class sc ON sfc.student_class_id = sc.id
+        JOIN student_registration s ON sc.student_registration_id = s.id
+        JOIN classes c ON sc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sc.session_id = ? AND sc.class_id = ? 
+              AND MONTH(sfc.due_date) = ? AND YEAR(sfc.due_date) = ? AND ft.type = 'Monthly'
+        ORDER BY co.title, c.title, s.name, ft.title
+    
+Result Rows: 0
+Fee Types Available: One Time, Monthly, Exam OnlyDisplay Parameters: session_id=10, class_id=1, month=2, year=2025Display Query: 
+        SELECT sfc.student_class_id, sc.student_registration_id, sc.session_id, sc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title, ft.title AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_class sc ON sfc.student_class_id = sc.id
+        JOIN student_registration s ON sc.student_registration_id = s.id
+        JOIN classes c ON sc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sc.session_id = ? AND sc.class_id = ? 
+              AND MONTH(sfc.due_date) = ? AND YEAR(sfc.due_date) = ? AND ft.type = 'Monthly'
+        ORDER BY co.title, c.title, s.name, ft.title
+    
+Result Rows: 0
+Fee Types Available: One Time, Monthly, Exam OnlyInserting: student_class_id=8, fee_type_id=2, amount=1500.00, due_date=2025-02-28, status=pending, remarks=Monthly fee for February 2025Inserting: student_class_id=9, fee_type_id=2, amount=1500.00, due_date=2025-02-28, status=pending, remarks=Monthly fee for February 2025Display Parameters: session_id=10, class_id=1, month=2, year=2025Display Query: 
+        SELECT sfc.student_class_id, sc.student_registration_id, sc.session_id, sc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title, ft.title AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_class sc ON sfc.student_class_id = sc.id
+        JOIN student_registration s ON sc.student_registration_id = s.id
+        JOIN classes c ON sc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sc.session_id = ? AND sc.class_id = ? 
+              AND MONTH(sfc.due_date) = ? AND YEAR(sfc.due_date) = ? AND ft.type = 'Monthly'
+        ORDER BY co.title, c.title, s.name, ft.title
+    
+Result Rows: 0
+Fee Types Available: One Time, Monthly, Exam OnlyDisplay Parameters: session_id=10, class_id=1, month=2, year=2025, month_name=FebruaryDisplay Query: 
+        SELECT sfc.student_class_id, sc.student_registration_id, sc.session_id, sc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title, ft.title AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_class sc ON sfc.student_class_id = sc.id
+        JOIN student_registration s ON sc.student_registration_id = s.id
+        JOIN classes c ON sc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sc.session_id = ? AND sc.class_id = ?
+              AND (
+                  (sfc.due_date != '0000-00-00' AND MONTH(sfc.due_date) = ? AND YEAR(sfc.due_date) = ?)
+                  OR (sfc.due_date = '0000-00-00' AND sfc.remarks LIKE CONCAT('%', ?, ' ', ?))
+              )
+              AND ft.type = 'Monthly'
+        ORDER BY co.title, c.title, s.name, ft.title
+    
+Result Rows: 2
+Inserting: student_class_id=8, fee_type_id=2, amount=1500.00, due_date=2025-02-28, status=pending, remarks=Monthly fee for February 2025Inserting: student_class_id=9, fee_type_id=2, amount=1500.00, due_date=2025-02-28, status=pending, remarks=Monthly fee for February 2025Display Parameters: session_id=10, class_id=1, month=2, year=2025, month_name=FebruaryDisplay Query: 
+        SELECT sfc.student_class_id, sc.student_registration_id, sc.session_id, sc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title, ft.title AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_class sc ON sfc.student_class_id = sc.id
+        JOIN student_registration s ON sc.student_registration_id = s.id
+        JOIN classes c ON sc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sc.session_id = ? AND sc.class_id = ?
+              AND (
+                  (sfc.due_date != '0000-00-00' AND MONTH(sfc.due_date) = ? AND YEAR(sfc.due_date) = ?)
+                  OR (sfc.due_date = '0000-00-00' AND sfc.remarks LIKE CONCAT('%', ?, ' ', ?))
+              )
+              AND ft.type = 'Monthly'
+        ORDER BY co.title, c.title, s.name, ft.title
+    
+Result Rows: 4
+Inserting: student_class_id=8, fee_type_id=2, amount=1500.00, due_date=2025-02-28, status=pending, remarks=Monthly fee for February 2025Inserting: student_class_id=9, fee_type_id=2, amount=1500.00, due_date=2025-02-28, status=pending, remarks=Monthly fee for February 2025Display Parameters: session_id=10, class_id=1, month=2, year=2025, month_name=FebruaryDisplay Query: 
+        SELECT sfc.student_class_id, sc.student_registration_id, sc.session_id, sc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title, ft.title AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_class sc ON sfc.student_class_id = sc.id
+        JOIN student_registration s ON sc.student_registration_id = s.id
+        JOIN classes c ON sc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sc.session_id = ? AND sc.class_id = ?
+              AND (
+                  (sfc.due_date != '0000-00-00' AND MONTH(sfc.due_date) = ? AND YEAR(sfc.due_date) = ?)
+                  OR (sfc.due_date = '0000-00-00' AND sfc.remarks LIKE CONCAT('%', ?, ' ', ?))
+              )
+              AND ft.type = 'Monthly'
+        ORDER BY co.title, c.title, s.name, ft.title
+    
+Result Rows: 6
+Display Parameters: session_id=10, class_id=1, month=2, year=2025, month_name=FebruaryDisplay Query: 
+        SELECT sfc.student_class_id, sc.student_registration_id, sc.session_id, sc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title,
+               GROUP_CONCAT(ft.title SEPARATOR ', ') AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_class sc ON sfc.student_class_id = sc.id
+        JOIN student_registration s ON sc.student_registration_id = s.id
+        JOIN classes c ON sc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sc.session_id = ? AND sc.class_id = ?
+              AND (
+                  (sfc.due_date != '0000-00-00' AND MONTH(sfc.due_date) = ? AND YEAR(sfc.due_date) = ?)
+                  OR (sfc.due_date = '0000-00-00' AND sfc.remarks LIKE CONCAT('%', ?, ' ', ?))
+              )
+              AND ft.type = 'Monthly'
+        GROUP BY sfc.student_class_id, sfc.due_date
+        ORDER BY co.title, c.title, s.name
+    
+Result Rows: 0
+Fee Types: One Time, Monthly, Exam OnlyInvalid Due Dates: []Inserting: student_class_id=8, fee_type_id=2, amount=1500, due_date=2025-02-28, status=pending, remarks=Monthly fee for Monthly for February 2025Inserting: student_class_id=9, fee_type_id=2, amount=1500, due_date=2025-02-28, status=pending, remarks=Monthly fee for Monthly for February 2025Display Parameters: session_id=10, class_id=1, month=2, year=2025, month_name=FebruaryDisplay Query: 
+        SELECT sfc.student_class_id, sc.student_registration_id, sc.session_id, sc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title,
+               GROUP_CONCAT(ft.title SEPARATOR ', ') AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_class sc ON sfc.student_class_id = sc.id
+        JOIN student_registration s ON sc.student_registration_id = s.id
+        JOIN classes c ON sc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sc.session_id = ? AND sc.class_id = ?
+              AND (
+                  (sfc.due_date != '0000-00-00' AND MONTH(sfc.due_date) = ? AND YEAR(sfc.due_date) = ?)
+                  OR (sfc.due_date = '0000-00-00' AND sfc.remarks LIKE CONCAT('%', ?, ' ', ?))
+              )
+              AND ft.type = 'Monthly'
+        GROUP BY sfc.student_class_id, sfc.due_date
+        ORDER BY co.title, c.title, s.name
+    
+Result Rows: 2
+Inserting: student_class_id=8, fee_type_id=2, amount=1500, due_date=2025-02-28, status=pending, remarks=Monthly fee for Monthly for February 2025Inserting: student_class_id=9, fee_type_id=2, amount=1500, due_date=2025-02-28, status=pending, remarks=Monthly fee for Monthly for February 2025Display Parameters: session_id=10, class_id=1, month=2, year=2025, month_name=FebruaryDisplay Query: 
+        SELECT sfc.student_class_id, sc.student_registration_id, sc.session_id, sc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title,
+               GROUP_CONCAT(ft.title SEPARATOR ', ') AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_class sc ON sfc.student_class_id = sc.id
+        JOIN student_registration s ON sc.student_registration_id = s.id
+        JOIN classes c ON sc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sc.session_id = ? AND sc.class_id = ?
+              AND (
+                  (sfc.due_date != '0000-00-00' AND MONTH(sfc.due_date) = ? AND YEAR(sfc.due_date) = ?)
+                  OR (sfc.due_date = '0000-00-00' AND sfc.remarks LIKE CONCAT('%', ?, ' ', ?))
+              )
+              AND ft.type = 'Monthly'
+        GROUP BY sfc.student_class_id, sfc.due_date
+        ORDER BY co.title, c.title, s.name
+    
+Result Rows: 2
+Inserting: student_class_id=8, fee_type_id=2, amount=1500, due_date=2025-02-28, status=pending, remarks=Monthly fee for Monthly for February 2025Inserting: student_class_id=9, fee_type_id=2, amount=1500, due_date=2025-02-28, status=pending, remarks=Monthly fee for Monthly for February 2025Display Parameters: session_id=10, class_id=1, month=2, year=2025, month_name=FebruaryDisplay Query: 
+        SELECT sfc.student_class_id, sc.student_registration_id, sc.session_id, sc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title,
+               GROUP_CONCAT(ft.title SEPARATOR ', ') AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_class sc ON sfc.student_class_id = sc.id
+        JOIN student_registration s ON sc.student_registration_id = s.id
+        JOIN classes c ON sc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sc.session_id = ? AND sc.class_id = ?
+              AND (
+                  (sfc.due_date != '0000-00-00' AND MONTH(sfc.due_date) = ? AND YEAR(sfc.due_date) = ?)
+                  OR (sfc.due_date = '0000-00-00' AND sfc.remarks LIKE CONCAT('%', ?, ' ', ?))
+              )
+              AND ft.type = 'Monthly'
+        GROUP BY sfc.student_class_id, sfc.due_date
+        ORDER BY co.title, c.title, s.name
+    
+Result Rows: 2
+Inserting: student_class_id=8, fee_type_id=2, amount=1500, due_date=2025-02-28, status=pending, remarks=Monthly fee for Monthly for February 2025Inserting: student_class_id=9, fee_type_id=2, amount=1500, due_date=2025-02-28, status=pending, remarks=Monthly fee for Monthly for February 2025Display Parameters: session_id=10, class_id=1, month=2, year=2025, month_name=FebruaryDisplay Query: 
+        SELECT sfc.student_class_id, sc.student_registration_id, sc.session_id, sc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title,
+               GROUP_CONCAT(ft.title SEPARATOR ', ') AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_class sc ON sfc.student_class_id = sc.id
+        JOIN student_registration s ON sc.student_registration_id = s.id
+        JOIN classes c ON sc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sc.session_id = ? AND sc.class_id = ?
+              AND (
+                  (sfc.due_date != '0000-00-00' AND MONTH(sfc.due_date) = ? AND YEAR(sfc.due_date) = ?)
+                  OR (sfc.due_date = '0000-00-00' AND sfc.remarks LIKE CONCAT('%', ?, ' ', ?))
+              )
+              AND ft.type = 'Monthly'
+        GROUP BY sfc.student_class_id, sfc.due_date
+        ORDER BY co.title, c.title, s.name
+    
+Result Rows: 2
+Input: year=2025, month=01, month_num=1, type=integerCalculated due_date: 2025-01-31Duplicate Check: student_class_id=8, session_id=10, month=1, year=2025, count=0Inserting: student_class_id=8, fee_type_id=2, amount=1500, due_date=2025-01-31, status=pending, remarks=Monthly fee for Monthly for January 2025Duplicate Check: student_class_id=9, session_id=10, month=1, year=2025, count=0Inserting: student_class_id=9, fee_type_id=2, amount=1500, due_date=2025-01-31, status=pending, remarks=Monthly fee for Monthly for January 2025Display Parameters: session_id=10, class_id=1, month=1, year=2025, month_name=JanuaryDisplay Query: 
+        SELECT sfc.student_class_id, sc.student_registration_id, sc.session_id, sc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title,
+               GROUP_CONCAT(ft.title SEPARATOR ', ') AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_class sc ON sfc.student_class_id = sc.id
+        JOIN student_registration s ON sc.student_registration_id = s.id
+        JOIN classes c ON sc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sc.session_id = ? AND sc.class_id = ?
+              AND (
+                  (sfc.due_date != '0000-00-00' AND MONTH(sfc.due_date) = ? AND YEAR(sfc.due_date) = ?)
+                  OR (sfc.due_date = '0000-00-00' AND sfc.remarks LIKE CONCAT('%', ?, ' ', ?))
+              )
+              AND ft.type = 'Monthly'
+        GROUP BY sfc.student_class_id, sfc.due_date
+        ORDER BY co.title, c.title, s.name
+    
+Result Rows: 2
+Input: year=2025, month=01, month_num=1, type=integerCalculated due_date: 2025-01-31Duplicate Check: student_class_id=8, session_id=10, month=1, year=2025, count=1Duplicate Check: student_class_id=9, session_id=10, month=1, year=2025, count=1Display Parameters: session_id=10, class_id=1, month=1, year=2025, month_name=JanuaryDisplay Query: 
+        SELECT sfc.student_class_id, sc.student_registration_id, sc.session_id, sc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title,
+               GROUP_CONCAT(ft.title SEPARATOR ', ') AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_class sc ON sfc.student_class_id = sc.id
+        JOIN student_registration s ON sc.student_registration_id = s.id
+        JOIN classes c ON sc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sc.session_id = ? AND sc.class_id = ?
+              AND (
+                  (sfc.due_date != '0000-00-00' AND MONTH(sfc.due_date) = ? AND YEAR(sfc.due_date) = ?)
+                  OR (sfc.due_date = '0000-00-00' AND sfc.remarks LIKE CONCAT('%', ?, ' ', ?))
+              )
+              AND ft.type = 'Monthly'
+        GROUP BY sfc.student_class_id, sfc.due_date
+        ORDER BY co.title, c.title, s.name
+    
+Result Rows: 2
+Input: year=2025, month=02, month_num=2, type=integerCalculated due_date: 2025-02-28Duplicate Check: student_class_id=8, session_id=10, month=2, year=2025, count=0Inserting: student_class_id=8, fee_type_id=2, amount=1500, due_date=2025-02-28, status=pending, remarks=Monthly fee for Monthly for February 2025Duplicate Check: student_class_id=9, session_id=10, month=2, year=2025, count=0Inserting: student_class_id=9, fee_type_id=2, amount=1500, due_date=2025-02-28, status=pending, remarks=Monthly fee for Monthly for February 2025Display Parameters: session_id=10, class_id=1, month=2, year=2025, month_name=FebruaryDisplay Query: 
+        SELECT sfc.student_class_id, sc.student_registration_id, sc.session_id, sc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title,
+               GROUP_CONCAT(ft.title SEPARATOR ', ') AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_class sc ON sfc.student_class_id = sc.id
+        JOIN student_registration s ON sc.student_registration_id = s.id
+        JOIN classes c ON sc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sc.session_id = ? AND sc.class_id = ?
+              AND (
+                  (sfc.due_date != '0000-00-00' AND MONTH(sfc.due_date) = ? AND YEAR(sfc.due_date) = ?)
+                  OR (sfc.due_date = '0000-00-00' AND sfc.remarks LIKE CONCAT('%', ?, ' ', ?))
+              )
+              AND ft.type = 'Monthly'
+        GROUP BY sfc.student_class_id, sfc.due_date
+        ORDER BY co.title, c.title, s.name
+    
+Result Rows: 2
+Input: year=2025, month=03, month_num=3, type=integerCalculated due_date: 2025-03-31Duplicate Check: student_class_id=8, session_id=10, month=3, year=2025, count=0Inserting: student_class_id=8, fee_type_id=2, amount=1500, due_date=2025-03-31, status=pending, remarks=Monthly fee for Monthly for March 2025Duplicate Check: student_class_id=9, session_id=10, month=3, year=2025, count=0Inserting: student_class_id=9, fee_type_id=2, amount=1500, due_date=2025-03-31, status=pending, remarks=Monthly fee for Monthly for March 2025Display Parameters: session_id=10, class_id=1, month=3, year=2025, month_name=MarchDisplay Query: 
+        SELECT sfc.student_class_id, sc.student_registration_id, sc.session_id, sc.class_id, sfc.fee_type_id, sfc.total_amount, sfc.due_date, sfc.remarks,
+               s.name AS student_name, co.id AS course_id, co.title AS course_title, c.title AS class_title,
+               GROUP_CONCAT(ft.title SEPARATOR ', ') AS fee_type_title
+        FROM student_fee_card sfc
+        JOIN student_class sc ON sfc.student_class_id = sc.id
+        JOIN student_registration s ON sc.student_registration_id = s.id
+        JOIN classes c ON sc.class_id = c.id
+        JOIN courses co ON c.course_id = co.id
+        JOIN fee_types ft ON sfc.fee_type_id = ft.id
+        WHERE sc.session_id = ? AND sc.class_id = ?
+              AND (
+                  (sfc.due_date != '0000-00-00' AND MONTH(sfc.due_date) = ? AND YEAR(sfc.due_date) = ?)
+                  OR (sfc.due_date = '0000-00-00' AND sfc.remarks LIKE CONCAT('%', ?, ' ', ?))
+              )
+              AND ft.type = 'Monthly'
+        GROUP BY sfc.student_class_id, sfc.due_date
+        ORDER BY co.title, c.title, s.name
+    
+Result Rows: 2
+Input: year=2025, month=05, month_num=5, type=integerCalculated due_date: 2025-05-31Duplicate Check: student_class_id=8, session_id=10, month=5, year=2025, count=0Inserting: student_class_id=8, fee_type_id=2, amount=1500, due_date=2025-05-31, status=pending, remarks=Monthly fee for Monthly for May 2025Duplicate Check: student_class_id=9, session_id=10, month=5, year=2025, count=0Inserting: student_class_id=9, fee_type_id=2, amount=1500, due_date=2025-05-31, status=pending, remarks=Monthly fee for Monthly for May 2025Display Parameters: session_id=10, class_id=1, month=5, year=2025, month_name=MayDisplay Query Executed, Rows: 2Input: year=2025, month=05, month_num=5, type=integerCalculated due_date: 2025-05-31Duplicate Check: student_class_id=8, session_id=10, month=5, year=2025, count=1Duplicate Check: student_class_id=9, session_id=10, month=5, year=2025, count=1Display Parameters: session_id=10, class_id=1, month=5, year=2025, month_name=MayDisplay Query Executed, Rows: 2Input: year=2025, month=01, month_num=1, type=integerCalculated due_date: 2025-01-31Duplicate Check: student_class_id=8, session_id=10, month=1, year=2025, count=0Inserting: student_class_id=8, fee_type_id=2, amount=1500, due_date=2025-01-31, status=pending, remarks=Monthly fee for Monthly for January 2025Duplicate Check: student_class_id=9, session_id=10, month=1, year=2025, count=0Inserting: student_class_id=9, fee_type_id=2, amount=1500, due_date=2025-01-31, status=pending, remarks=Monthly fee for Monthly for January 2025Display Parameters: session_id=10, class_id=1, month=1, year=2025, month_name=JanuaryDisplay Query Executed, Rows: 2Input: year=2025, month=01, month_num=1, type=integerCalculated due_date: 2025-01-31Duplicate Check: student_class_id=8, session_id=10, month=1, year=2025, count=1Duplicate Check: student_class_id=9, session_id=10, month=1, year=2025, count=1Display Parameters: session_id=10, class_id=1, month=1, year=2025, month_name=JanuaryDisplay Query Executed, Rows: 22025-06-14 15:45:13 - Prepare failed: 
+2025-06-14 15:45:29 - Prepare failed: 
+2025-06-14 15:47:46 - Table 'vc' does not exist in the database.
+2025-06-14 15:48:07 - Table 'vc' does not exist in the database.
+2025-06-14 15:48:11 - Table 'vc' does not exist in the database.
+2025-06-14 15:48:29 - Table 'vc' does not exist in the database.
+2025-06-14 15:51:39 - Error: Database connection not established in conn_inc.php
+2025-06-14 15:54:40 - Error: Database '3clicks_matta' not selected
+2025-06-14 15:55:27 - Error: Test prepare failed: Table 'softray1_alfarooqia.vc' doesn't exist
+2025-06-14 15:55:53 - Test title inserted successfully
+2025-06-14 15:55:53 - All 152 titles inserted successfully
+2025-06-14 15:59:40 - Test title inserted successfully
+2025-06-14 15:59:40 - All 152 titles inserted successfully
+[14-Jun-2025 16:08:27 Asia/Karachi] PHP Notice:  Undefined variable: titles in /home/softray1/public_html/maf/vc_insert.php on line 40
+[14-Jun-2025 16:08:27 Asia/Karachi] PHP Warning:  Invalid argument supplied for foreach() in /home/softray1/public_html/maf/vc_insert.php on line 40
+2025-06-14 16:17:58 - 146 Urdu titles inserted successfully

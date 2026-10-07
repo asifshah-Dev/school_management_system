@@ -1,0 +1,194 @@
+DEBUG: Starting make_payment.php
+DEBUG: Processing language selection
+DEBUG: Current language: en
+DEBUG: Attempting database connection
+DEBUG: Database connection successful
+DEBUG: Account ID: 1
+DEBUG: Fetching account details for ID: 1
+DEBUG: Account found: {"id":1,"title":"Khurshid khan","type":"Supplier","balance":1800,"mobile_no":"0319877766"}
+DEBUG: Fetching pending invoices for account ID: 1
+DEBUG: Found invoice: {"id":11,"invoice_date":"2025-07-05","total_amount":"1000.00","paid_amount":"200.00","balance_amount":"800.00"}
+DEBUG: Found invoice: {"id":12,"invoice_date":"2025-07-05","total_amount":"2000.00","paid_amount":"1000.00","balance_amount":"1000.00"}
+DEBUG: Total invoices found: 2
+DEBUG: Rendering HTML head
+DEBUG: Rendering navbar
+DEBUG: Rendering language switcher
+DEBUG: Rendering account details
+DEBUG: Rendering invoices section
+DEBUG: Rendering payment form with 2 invoices
+DEBUG: Rendering invoice ID: 11
+DEBUG: Rendering invoice ID: 12
+DEBUG: Closing database connection
+DEBUG: Starting make_payment.php
+DEBUG: Processing language selection
+DEBUG: Current language: en
+DEBUG: Attempting database connection
+DEBUG: Database connection successful
+DEBUG: Account ID: 1
+DEBUG: Fetching account details for ID: 1
+DEBUG: Account found: {"id":1,"title":"Khurshid khan","type":"Supplier","balance":1800,"mobile_no":"0319877766"}
+DEBUG: Fetching pending invoices for account ID: 1
+DEBUG: Found invoice: {"id":11,"invoice_date":"2025-07-05","total_amount":"1000.00","paid_amount":"200.00","balance_amount":"800.00"}
+DEBUG: Found invoice: {"id":12,"invoice_date":"2025-07-05","total_amount":"2000.00","paid_amount":"1000.00","balance_amount":"1000.00"}
+DEBUG: Total invoices found: 2
+DEBUG: Processing POST request
+DEBUG: POST data: {"invoices":{"11":"800.00","12":""},"account_id":"1","transaction_date":"2025-07-05","description":"ggg"}
+DEBUG: Validating payment amounts
+DEBUG: Invoice 11 payment amount: 800
+DEBUG: Invoice 12 payment amount: 0
+DEBUG: Starting database transaction
+DEBUG: Updating account balance by subtracting 800
+DEBUG: Account balance updated successfully
+DEBUG: Fetching updated account balance
+DEBUG: Current account balance: 1000
+DEBUG: Processing payment for invoice 11: 800
+DEBUG: Fetching invoice 11 details
+DEBUG: Invoice data: {"total_amount":"1000.00","paid_amount":"200.00","balance_amount":"800.00"}
+DEBUG: Invoice 11 - New paid amount: 1000.00, New balance: 0
+DEBUG: Updating expenses_master for invoice 11
+DEBUG: Invoice 11 updated successfully
+DEBUG: Recording payment in accounts_details for invoice 11
+DEBUG: Accounts_details recorded for invoice 11, new balance: 200
+DEBUG: Processing payment for invoice 12: 0
+DEBUG: Skipping invoice 12 due to zero or negative payment
+DEBUG: Committing transaction
+DEBUG: Transaction successful, redirecting to account_search.php
+DEBUG: Starting make_payment.php
+DEBUG: Processing language selection
+DEBUG: Current language: en
+DEBUG: Attempting database connection
+DEBUG: Database connection successful
+DEBUG: Account ID: 1
+DEBUG: Fetching account details for ID: 1
+DEBUG: Account found: {"id":1,"title":"Khurshid khan","type":"Supplier","balance":1000,"mobile_no":"0319877766"}
+DEBUG: Fetching pending invoices for account ID: 1
+DEBUG: Found invoice: {"id":12,"invoice_date":"2025-07-05","total_amount":"2000.00","paid_amount":"1000.00","balance_amount":"1000.00"}
+DEBUG: Total invoices found: 1
+DEBUG: Rendering HTML head
+DEBUG: Rendering navbar
+DEBUG: Rendering language switcher
+DEBUG: Displaying session message: Payment recorded successfully!
+DEBUG: Rendering account details
+DEBUG: Rendering invoices section
+DEBUG: Rendering payment form with 1 invoices
+DEBUG: Rendering invoice ID: 12
+DEBUG: Closing database connection
+DEBUG: Starting make_payment.php
+DEBUG: Processing language selection
+DEBUG: Current language: en
+DEBUG: Attempting database connection
+DEBUG: Database connection successful
+DEBUG: Account ID: 1
+DEBUG: Fetching account details for ID: 1
+DEBUG: Account found: {"id":1,"title":"Khurshid khan","type":"Supplier","balance":1000,"mobile_no":"0319877766"}
+DEBUG: Fetching pending invoices for account ID: 1
+DEBUG: Found invoice: {"id":12,"invoice_date":"2025-07-05","total_amount":"2000.00","paid_amount":"1000.00","balance_amount":"1000.00"}
+DEBUG: Total invoices found: 1
+DEBUG: Rendering HTML head
+DEBUG: Rendering navbar
+DEBUG: Rendering language switcher
+DEBUG: Rendering account details
+DEBUG: Rendering invoices section
+DEBUG: Rendering payment form with 1 invoices
+DEBUG: Rendering invoice ID: 12
+DEBUG: Closing database connection
+DEBUG: Starting make_payment.php
+DEBUG: Processing language selection
+DEBUG: Current language: en
+DEBUG: Attempting database connection
+DEBUG: Database connection successful
+DEBUG: Account ID: 1
+DEBUG: Fetching account details for ID: 1
+DEBUG: Account found: {"id":1,"title":"Khurshid khan","type":"Supplier","balance":1000,"mobile_no":"0319877766"}
+DEBUG: Fetching pending invoices for account ID: 1
+DEBUG: Found invoice: {"id":12,"invoice_date":"2025-07-05","total_amount":"2000.00","paid_amount":"1000.00","balance_amount":"1000.00"}
+DEBUG: Total invoices found: 1
+DEBUG: Processing POST request
+DEBUG: POST data: {"invoices":{"12":"200"},"account_id":"1","transaction_date":"2025-07-05","description":"fgfh"}
+DEBUG: Validating payment amounts
+DEBUG: Invoice 12 payment amount: 200
+DEBUG: Starting database transaction
+DEBUG: Updating account balance by subtracting 200
+DEBUG: Account balance updated successfully
+DEBUG: Fetching updated account balance
+DEBUG: Current account balance: 800
+DEBUG: Processing payment for invoice 12: 200
+DEBUG: Fetching invoice 12 details
+DEBUG: Invoice data: {"total_amount":"2000.00","paid_amount":"1000.00","balance_amount":"1000.00"}
+DEBUG: Invoice 12 - New paid amount: 1200, New balance: 800
+DEBUG: Updating expenses_master for invoice 12
+DEBUG: Invoice 12 updated successfully
+DEBUG: Recording payment in accounts_details for invoice 12
+DEBUG: Accounts_details recorded for invoice 12, new balance: 600
+DEBUG: Committing transaction
+DEBUG: Transaction successful, redirecting to account_search.php
+DEBUG: Starting make_payment.php
+DEBUG: Processing language selection
+DEBUG: Current language: en
+DEBUG: Attempting database connection
+DEBUG: Database connection successful
+DEBUG: Account ID: 1
+DEBUG: Fetching account details for ID: 1
+DEBUG: Account found: {"id":1,"title":"Khurshid khan","type":"Supplier","balance":800,"mobile_no":"0319877766"}
+DEBUG: Fetching pending invoices for account ID: 1
+DEBUG: Found invoice: {"id":12,"invoice_date":"2025-07-05","total_amount":"2000.00","paid_amount":"1200.00","balance_amount":"800.00"}
+DEBUG: Total invoices found: 1
+DEBUG: Rendering HTML head
+DEBUG: Rendering navbar
+DEBUG: Rendering language switcher
+DEBUG: Displaying session message: Payment recorded successfully!
+DEBUG: Rendering account details
+DEBUG: Rendering invoices section
+DEBUG: Rendering payment form with 1 invoices
+DEBUG: Rendering invoice ID: 12
+DEBUG: Closing database connection
+DEBUG: Starting make_payment.php
+DEBUG: Processing language selection
+DEBUG: Current language: en
+DEBUG: Attempting database connection
+DEBUG: Database connection successful
+DEBUG: Account ID: 1
+DEBUG: Fetching account details for ID: 1
+DEBUG: Account found: {"id":1,"title":"Khurshid khan","type":"Supplier","balance":800,"mobile_no":"0319877766"}
+DEBUG: Fetching pending invoices for account ID: 1
+DEBUG: Found invoice: {"id":12,"invoice_date":"2025-07-05","total_amount":"2000.00","paid_amount":"1200.00","balance_amount":"800.00"}
+DEBUG: Total invoices found: 1
+DEBUG: Processing POST request
+DEBUG: POST data: {"invoices":{"12":"300"},"account_id":"1","transaction_date":"2025-07-05","description":"ryetyrytrty"}
+DEBUG: Validating payment amounts
+DEBUG: Invoice 12 payment amount: 300
+DEBUG: Starting database transaction
+DEBUG: Updating account balance by subtracting 300
+DEBUG: Account balance updated successfully
+DEBUG: Fetching updated account balance
+DEBUG: Current account balance: 500
+DEBUG: Processing payment for invoice 12: 300
+DEBUG: Fetching invoice 12 details
+DEBUG: Invoice data: {"total_amount":"2000.00","paid_amount":"1200.00","balance_amount":"800.00"}
+DEBUG: Invoice 12 - New paid amount: 1500, New balance: 500
+DEBUG: Updating expenses_master for invoice 12
+DEBUG: Invoice 12 updated successfully
+DEBUG: Recording payment in accounts_details for invoice 12
+DEBUG: Accounts_details recorded for invoice 12, new balance: 200
+DEBUG: Committing transaction
+DEBUG: Transaction successful, redirecting to account_search.php
+DEBUG: Starting make_payment.php
+DEBUG: Processing language selection
+DEBUG: Current language: en
+DEBUG: Attempting database connection
+DEBUG: Database connection successful
+DEBUG: Account ID: 1
+DEBUG: Fetching account details for ID: 1
+DEBUG: Account found: {"id":1,"title":"Khurshid khan","type":"Supplier","balance":500,"mobile_no":"0319877766"}
+DEBUG: Fetching pending invoices for account ID: 1
+DEBUG: Found invoice: {"id":12,"invoice_date":"2025-07-05","total_amount":"2000.00","paid_amount":"1500.00","balance_amount":"500.00"}
+DEBUG: Total invoices found: 1
+DEBUG: Rendering HTML head
+DEBUG: Rendering navbar
+DEBUG: Rendering language switcher
+DEBUG: Displaying session message: Payment recorded successfully!
+DEBUG: Rendering account details
+DEBUG: Rendering invoices section
+DEBUG: Rendering payment form with 1 invoices
+DEBUG: Rendering invoice ID: 12
+DEBUG: Closing database connection

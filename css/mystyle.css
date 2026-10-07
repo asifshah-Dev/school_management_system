@@ -1,0 +1,164 @@
+<link href="https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu&display=swap" rel="stylesheet">
+body, h1, h2, h3, h4, h5, h6, p, .urdu-text {
+  font-family: 'Noto Nastaliq Urdu', serif;
+  direction: rtl; /* اردو کے لیے دائیں سے بائیں */
+  text-align: right;
+}
+
+  body {
+    background-color: #f7f7f7;
+    font-family: 'Segoe UI', sans-serif;
+  }
+
+  /* Navbar Styles */
+  .navbar-blue {
+    background-color: #337ab7;
+    border-color: #2e6da4;
+    border-radius: 0;
+    margin-bottom: 0;
+  }
+
+  .navbar-blue .navbar-brand,
+  .navbar-blue .navbar-nav > li > a {
+    color: #fff !important;
+  }
+
+  .navbar-blue .navbar-brand:hover,
+  .navbar-blue .navbar-nav > li > a:hover,
+  .navbar-blue .navbar-nav > .active > a,
+  .navbar-blue .navbar-nav > .active > a:hover {
+    background-color: #286090;
+    color: #fff !important;
+  }
+
+  /* Navbar Brand & Icon */
+  .navbar-brand {
+    padding: 15px;
+    height: auto;
+    display: flex;
+    align-items: center;
+    margin-right: 15px;
+  }
+
+  .navbar-brand i {
+    font-size: 22px;
+    color: orange;
+    margin-right: 8px;
+  }
+
+  /* Navbar Toggle Button */
+  .navbar-toggle {
+    margin-right: 0;
+    border: none;
+  }
+
+  .navbar-toggle .icon-bar {
+    background-color: #fff;
+  }
+
+  /* Dashboard Styles */
+  .dashboard-title {
+    margin: 30px 0 20px;
+    font-weight: 600;
+    text-align: left !important; 
+  }
+
+  /* Card Styles */
+  .card {
+    background: white;
+    border-radius: 10px;
+    padding: 25px 20px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    text-align: center;
+    transition: transform 0.2s ease;
+    margin-bottom: 20px;
+  }
+
+  .card:hover {
+    transform: translateY(-5px);
+  }
+
+  .card h4 {
+    margin-top: 15px;
+    font-weight: 600;
+    color: #555;
+  }
+
+  .card p {
+    font-size: 22px;
+    margin-top: 5px;
+    font-weight: bold;
+    color: #333;
+  }
+
+  /* Icon Styles */
+  .icon {
+    font-size: 36px;
+    color: white;
+    padding: 15px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-bottom: 10px;
+  }
+
+  .bg-blue { background-color: #5bc0de; }
+  .bg-red { background-color: #d9534f; }
+  .bg-green { background-color: #5cb85c; }
+  .bg-orange { background-color: #f0ad4e; }
+
+  /* Mobile Responsive Adjustments */
+  @media (max-width: 767px) {
+    .navbar-brand {
+      padding: 15px 10px;
+    }
+    
+    .navbar-brand i {
+      font-size: 18px;
+      margin-right: 5px;
+    }
+
+    .dashboard-title {
+      font-size: 24px;
+      margin: 20px 0 15px;
+    }
+
+    .card {
+      padding: 20px 15px;
+    }
+
+    .card p {
+      font-size: 20px;
+    }
+
+    .icon {
+      font-size: 30px;
+      padding: 12px;
+    }
+  }
+
+  /* Fix dropdown menu on mobile */
+  /* Add this to your existing CSS */
+@media (max-width: 767px) {
+  .dropdown-menu {
+    position: relative;
+    float: none;
+    width: 100%;
+    background-color: rgba(0,0,0,0.1);
+    box-shadow: none;
+    border: none;
+    display: none;
+  }
+  
+  .dropdown-menu li a {
+    padding-left: 30px !important;
+    color: #fff !important;
+  }
+  
+  .dropdown-menu li a:hover {
+    background-color: rgba(255,255,255,0.1) !important;
+  }
+  
+  .navbar-nav .open .dropdown-menu {
+    display: block;
+  }
+}

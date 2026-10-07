@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Login Form</title>
+    <link rel="stylesheet" href="bootstrap/bootstrap.min.css">
+</head>
+<body class="p-5">
+    <div class="container">
+        <h2>Login</h2>
+        <form action="login_process.php" method="post">
+            <div class="mb-3">
+                <label class="form-label">Username:</label>
+                <input type="text" name="username" class="form-control" required>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Password:</label>
+                <input type="password" name="password" class="form-control" required>
+            </div>
+
+            <input type="submit" value="Login" class="btn btn-primary">
+            <a href="registration.php" class = "btn btn-info" >Sign Up</a>
+        </form>
+    </div>
+</body>
+</html>
