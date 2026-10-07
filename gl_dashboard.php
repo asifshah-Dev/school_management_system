@@ -55,217 +55,194 @@ $expenses = (float)$stmt->get_result()->fetch_assoc()['net'];
 $stmt->close();
 
 $netProfit = $revenue - $expenses;
+$profitMargin = $revenue > 0 ? ($netProfit / $revenue) * 100 : 0;
 
 // Trial balance
 $tb = $conn->query("SELECT SUM(debit) AS dr, SUM(credit) AS cr FROM gl_journal_lines")->fetch_assoc();
 $tbDr = (float)$tb['dr']; $tbCr = (float)$tb['cr'];
 $tbBalanced = abs($tbDr - $tbCr) < 0.01;
 
-// Recent 5 transactions
+// Recent 10 transactions
 $recent = $conn->query("
     SELECT t.id, t.entry_date, t.description, t.reference_type, t.status,
            (SELECT COALESCE(SUM(l.debit), 0) FROM gl_journal_lines l WHERE l.transaction_id = t.id) AS amt
     FROM gl_transactions t
     ORDER BY t.id DESC
-    LIMIT 5
+    LIMIT 10
 ")->fetch_all(MYSQLI_ASSOC);
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <?php require_once('meta_inc.php'); ?>
+    
     <title>Accounting Dashboard</title>
     <style>
-        body { background: #eef1f5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-
-        .dash {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 30px 20px;
+        * { box-sizing: border-box; }
+        body {
+            background: #eef1f5;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            margin: 0; padding: 0; color: #1e293b;
         }
+        .dash-wrap { max-width: 1300px; margin: 30px auto; padding: 0 20px; }
 
+        /* Header */
         .dash-head {
-            margin-bottom: 24px;
+            background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
+            color: #fff;
+            padding: 34px 40px 30px 40px;
+            border-radius: 12px 12px 0 0;
+            box-shadow: 0 4px 16px rgba(30, 64, 175, 0.15);
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            gap: 20px;
+            flex-wrap: wrap;
         }
-        .dash-head h1 {
-            margin: 0;
-            font-size: 28px;
-            font-weight: 700;
-            color: #1e293b;
+        .dash-head h1 { margin: 0; font-size: 34px; font-weight: 700; letter-spacing: -0.5px; }
+        .dash-head .sub { font-size: 15px; opacity: 0.9; margin-top: 8px; }
+
+        .btn-new {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 10px 18px;
+            background: rgba(255, 255, 255, 0.15);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 8px; text-decoration: none;
+            font-size: 14px; font-weight: 600;
+            transition: all 0.15s;
         }
-        .dash-head .sub {
-            color: #64748b;
-            font-size: 14px;
-            margin-top: 4px;
+        .btn-new:hover {
+            background: #fff; color: #1e40af; text-decoration: none; border-color: #fff;
         }
 
+        /* Status banner */
         .status-banner {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 14px 20px;
-            border-radius: 10px;
-            font-size: 14px;
-            font-weight: 600;
-            margin-bottom: 28px;
+            background: #fff;
+            padding: 18px 30px;
+            border-radius: 0 0 12px 12px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+            margin-bottom: 24px;
+            display: flex; align-items: center; gap: 14px;
+            font-size: 14px; font-weight: 600;
         }
-        .status-banner.ok  { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
-        .status-banner.bad { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
         .status-banner .icon {
-            width: 32px; height: 32px; border-radius: 50%;
+            width: 36px; height: 36px; border-radius: 50%;
             display: inline-flex; align-items: center; justify-content: center;
-            font-size: 16px;
+            font-size: 17px;
         }
         .status-banner.ok .icon  { background: #065f46; color: #fff; }
         .status-banner.bad .icon { background: #991b1b; color: #fff; }
+        .status-banner.ok  { color: #065f46; }
+        .status-banner.bad { color: #991b1b; }
 
+        /* Section title */
         .section-title {
-            font-size: 11px;
-            font-weight: 800;
-            color: #64748b;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-            margin: 28px 0 12px 0;
+            font-size: 12px; font-weight: 800; color: #64748b;
+            text-transform: uppercase; letter-spacing: 2px;
+            margin: 32px 0 14px 0;
         }
         .section-title:first-of-type { margin-top: 0; }
 
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 16px;
+        /* Big profit card */
+        .profit-card {
+            background: linear-gradient(135deg, #064e3b 0%, #065f46 100%);
+            color: #fff;
+            border-radius: 14px;
+            padding: 32px 36px;
+            display: flex; justify-content: space-between;
+            align-items: center; flex-wrap: wrap; gap: 24px;
+            box-shadow: 0 8px 24px rgba(6, 78, 59, 0.25);
+            margin-bottom: 24px;
         }
-        @media (max-width: 900px) {
-            .grid { grid-template-columns: repeat(2, 1fr); }
+        .profit-card.loss {
+            background: linear-gradient(135deg, #7f1d1d 0%, #991b1b 100%);
+            box-shadow: 0 8px 24px rgba(127, 29, 29, 0.25);
         }
-        @media (max-width: 600px) {
-            .grid { grid-template-columns: 1fr; }
-        }
-
-        .card {
-            background: #fff;
-            border-radius: 10px;
-            padding: 20px 22px;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
-            border-left: 4px solid #94a3b8;
-            transition: all 0.2s;
-        }
-        .card:hover {
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-            transform: translateY(-1px);
-        }
-        .card.green  { border-color: #059669; }
-        .card.blue   { border-color: #2563eb; }
-        .card.orange { border-color: #ea580c; }
-        .card.red    { border-color: #dc2626; }
-        .card.purple { border-color: #7c3aed; }
-        .card.teal   { border-color: #0891b2; }
-
-        .card .label {
-            font-size: 11px;
-            color: #64748b;
-            text-transform: uppercase;
-            letter-spacing: 1.2px;
-            font-weight: 700;
+        .profit-card .label {
+            font-size: 13px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 2px;
+            color: rgba(255, 255, 255, 0.75);
             margin-bottom: 10px;
         }
-        .card .value {
-            font-size: 24px;
-            font-weight: 700;
+        .profit-card .value {
+            font-size: 48px; font-weight: 800;
+            font-family: 'SF Mono', 'Monaco', monospace;
+            font-variant-numeric: tabular-nums;
+            letter-spacing: -1.5px; line-height: 1;
+        }
+        .profit-card .right { text-align: right; }
+        .profit-card .right .sub-label {
+            font-size: 11px; text-transform: uppercase;
+            letter-spacing: 1.5px; color: rgba(255, 255, 255, 0.7);
+            font-weight: 700; margin-bottom: 4px;
+        }
+        .profit-card .right .sub-val {
+            font-size: 20px; font-weight: 700;
+            font-family: 'SF Mono', 'Monaco', monospace;
+            color: #fff;
+        }
+        .profit-card .right .sub-val.muted { opacity: 0.75; font-size: 16px; }
+
+        /* Metric grid */
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+            gap: 16px;
+        }
+
+        .metric-card {
+            background: #fff;
+            border-radius: 12px;
+            padding: 20px 24px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+            border-left: 5px solid;
+            transition: all 0.15s;
+        }
+        .metric-card:hover {
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
+            transform: translateY(-2px);
+        }
+        .metric-card.green  { border-color: #059669; }
+        .metric-card.blue   { border-color: #2563eb; }
+        .metric-card.orange { border-color: #ea580c; }
+        .metric-card.red    { border-color: #dc2626; }
+        .metric-card.purple { border-color: #7c3aed; }
+        .metric-card.teal   { border-color: #0891b2; }
+
+        .metric-card .label {
+            font-size: 11px; color: #64748b;
+            text-transform: uppercase; letter-spacing: 1.2px;
+            font-weight: 700; margin-bottom: 10px;
+        }
+        .metric-card .value {
+            font-size: 26px; font-weight: 700;
             font-family: 'SF Mono', 'Monaco', monospace;
             font-variant-numeric: tabular-nums;
             color: #0f172a;
             letter-spacing: -0.5px;
             line-height: 1.1;
         }
-        .card .value.pos { color: #047857; }
-        .card .value.neg { color: #b91c1c; }
-        .card .sub {
-            font-size: 12px;
-            color: #94a3b8;
-            margin-top: 6px;
+        .metric-card .value.pos { color: #047857; }
+        .metric-card .value.neg { color: #b91c1c; }
+        .metric-card .sub {
+            font-size: 12px; color: #94a3b8; margin-top: 6px;
         }
 
-        .profit-card {
-            grid-column: span 3;
-            background: linear-gradient(135deg, #064e3b 0%, #065f46 100%);
-            color: #fff;
-            border-radius: 10px;
-            padding: 30px 32px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 20px;
-        }
-        .profit-card.loss {
-            background: linear-gradient(135deg, #7f1d1d 0%, #991b1b 100%);
-        }
-        @media (max-width: 900px) {
-            .profit-card { grid-column: span 2; }
-        }
-        @media (max-width: 600px) {
-            .profit-card { grid-column: span 1; }
-        }
-
-        .profit-card .left .label {
-            font-size: 12px;
-            color: rgba(255, 255, 255, 0.75);
-            text-transform: uppercase;
-            letter-spacing: 1.5px;
-            font-weight: 700;
-            margin-bottom: 8px;
-        }
-        .profit-card .left .value {
-            font-size: 40px;
-            font-weight: 800;
-            font-family: 'SF Mono', 'Monaco', monospace;
-            font-variant-numeric: tabular-nums;
-            letter-spacing: -1px;
-            line-height: 1;
-        }
-        .profit-card .right {
-            text-align: right;
-        }
-        .profit-card .right .sub-label {
-            font-size: 11px;
-            color: rgba(255, 255, 255, 0.7);
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            font-weight: 600;
-            margin-bottom: 4px;
-        }
-        .profit-card .right .sub-val {
-            font-size: 16px;
-            font-weight: 600;
-            font-family: 'SF Mono', 'Monaco', monospace;
-        }
-        .profit-card .right .sub-val.pos { color: #86efac; }
-        .profit-card .right .sub-val.neg { color: #fca5a5; }
-
+        /* Quick links */
         .quick-grid {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 12px;
         }
-        @media (max-width: 900px) {
-            .quick-grid { grid-template-columns: repeat(2, 1fr); }
-        }
-        @media (max-width: 600px) {
-            .quick-grid { grid-template-columns: 1fr; }
-        }
-
         .quick {
             background: #fff;
             border: 1px solid #e2e8f0;
-            border-radius: 8px;
+            border-radius: 10px;
             padding: 16px 18px;
             text-decoration: none;
             color: #1e293b;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            font-weight: 600;
-            font-size: 14px;
+            display: flex; align-items: center; gap: 12px;
+            font-weight: 600; font-size: 14px;
             transition: all 0.15s;
         }
         .quick:hover {
@@ -276,31 +253,24 @@ $recent = $conn->query("
             transform: translateX(2px);
         }
         .quick .ico {
-            width: 32px;
-            height: 32px;
-            border-radius: 6px;
-            background: #e0e7ff;
-            color: #1e40af;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 14px;
-            flex-shrink: 0;
+            width: 36px; height: 36px; border-radius: 8px;
+            background: #e0e7ff; color: #1e40af;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 15px; flex-shrink: 0;
         }
 
+        /* Recent list */
         .recent-list {
             background: #fff;
-            border-radius: 10px;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
             overflow: hidden;
         }
         .recent-item {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 14px 20px;
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 14px 22px;
             border-bottom: 1px solid #f1f5f9;
-            font-size: 13px;
+            font-size: 14px;
             text-decoration: none;
             color: #1e293b;
             transition: background 0.15s;
@@ -310,50 +280,53 @@ $recent = $conn->query("
         .recent-item:last-child { border-bottom: none; }
         .recent-item .date {
             font-family: 'SF Mono', 'Monaco', monospace;
-            font-size: 12px;
-            color: #64748b;
-            width: 60px;
-            flex-shrink: 0;
+            font-size: 12px; color: #64748b;
+            width: 60px; flex-shrink: 0;
         }
         .recent-item .desc {
-            flex: 1;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            flex: 1; white-space: nowrap;
+            overflow: hidden; text-overflow: ellipsis;
         }
         .recent-item .ref {
-            font-size: 10px;
-            padding: 2px 8px;
-            background: #e0e7ff;
-            color: #3730a3;
-            border-radius: 3px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
+            font-size: 10px; padding: 2px 8px;
+            background: #e0e7ff; color: #3730a3;
+            border-radius: 4px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 0.5px;
             flex-shrink: 0;
         }
         .recent-item .amt {
             font-family: 'SF Mono', 'Monaco', monospace;
-            font-weight: 700;
-            width: 100px;
-            text-align: right;
-            color: #0f172a;
+            font-weight: 700; width: 110px;
+            text-align: right; color: #0f172a;
             flex-shrink: 0;
         }
         .recent-item.reversed { opacity: 0.55; }
         .recent-item.reversed .amt { text-decoration: line-through; color: #b91c1c; }
 
         .empty-state {
-            padding: 30px;
-            text-align: center;
-            color: #94a3b8;
-            font-style: italic;
-            font-size: 13px;
+            padding: 40px; text-align: center;
+            color: #94a3b8; font-style: italic; font-size: 14px;
         }
 
         @media print {
-            .quick-grid { display: none; }
-            body { background: #fff; }
+            @page { size: A4 portrait; margin: 12mm 10mm; }
+            body { background: #fff; font-size: 10pt; }
+            .quick-grid, .btn-new, .status-banner .icon { display: none !important; }
+            .dash-head { background: #fff !important; color: #000 !important; padding: 0 0 8pt 0; border-bottom: 2pt solid #000; border-radius: 0; box-shadow: none; text-align: center; }
+            .dash-head h1 { font-size: 14pt; }
+            .status-banner { border-radius: 0; box-shadow: none; padding: 6pt 0; border-bottom: 1pt solid #808080; }
+            .profit-card { background: #fff !important; color: #000 !important; box-shadow: none; border: 1pt solid #808080; padding: 12pt; }
+            .profit-card .value { font-size: 24pt; color: #000 !important; }
+            .metric-card { box-shadow: none; border: 1pt solid #808080; border-left: 3pt solid #000; }
+            .metric-card .value { font-size: 14pt; color: #000 !important; }
+            .recent-list { box-shadow: none; border: 1pt solid #808080; }
+        }
+
+        @media (max-width: 700px) {
+            .dash-head { padding: 24px 20px; }
+            .dash-head h1 { font-size: 24px; }
+            .profit-card .value { font-size: 32px; }
+            .metric-card .value { font-size: 22px; }
         }
     </style>
 </head>
@@ -361,16 +334,22 @@ $recent = $conn->query("
 
 <?php require_once('navbar.php'); ?>
 
-<div class="dash">
+<div class="dash-wrap">
 
+    <!-- Header -->
     <div class="dash-head">
-        <h1>Accounting Dashboard</h1>
-        <div class="sub">
-            <?php echo htmlspecialchars($sessionTitle); ?> &middot; <?php echo date('l, F j, Y'); ?>
+        <div>
+            <h1>Accounting Dashboard</h1>
+            <div class="sub">
+                <?php echo htmlspecialchars($sessionTitle); ?> &middot; <?php echo date('l, F j, Y'); ?>
+            </div>
         </div>
+        <a href="gl_journal_add.php" class="btn-new">
+            <span class="glyphicon glyphicon-plus"></span> Post Manual Entry
+        </a>
     </div>
 
-    <!-- Status -->
+    <!-- Status banner -->
     <div class="status-banner <?php echo $tbBalanced ? 'ok' : 'bad'; ?>">
         <span class="icon">
             <span class="glyphicon glyphicon-<?php echo $tbBalanced ? 'ok' : 'warning-sign'; ?>"></span>
@@ -379,62 +358,71 @@ $recent = $conn->query("
             <?php if ($tbBalanced): ?>
                 Ledger is balanced. Total debits = total credits = <?php echo number_format($tbDr, 2); ?>.
             <?php else: ?>
-                Ledger is out of balance by <?php echo number_format(abs($tbDr - $tbCr), 2); ?>. Please investigate immediately.
+                Ledger is out of balance by <?php echo number_format(abs($tbDr - $tbCr), 2); ?>. Investigate immediately.
             <?php endif; ?>
         </div>
     </div>
 
-    <!-- Net Profit — the headline number -->
+    <!-- Net Profit Hero -->
     <div class="profit-card <?php echo $netProfit < 0 ? 'loss' : ''; ?>">
-        <div class="left">
+        <div>
             <div class="label"><?php echo $netProfit >= 0 ? 'Net Profit This Session' : 'Net Loss This Session'; ?></div>
             <div class="value"><?php echo number_format(abs($netProfit), 2); ?></div>
         </div>
         <div class="right">
             <div class="sub-label">Revenue</div>
-            <div class="sub-val pos"><?php echo number_format($revenue, 2); ?></div>
+            <div class="sub-val"><?php echo number_format($revenue, 2); ?></div>
             <div class="sub-label" style="margin-top: 12px;">Expenses</div>
-            <div class="sub-val neg"><?php echo number_format($expenses, 2); ?></div>
+            <div class="sub-val muted"><?php echo number_format($expenses, 2); ?></div>
+            <?php if ($revenue > 0): ?>
+                <div class="sub-label" style="margin-top: 12px;">Margin</div>
+                <div class="sub-val"><?php echo number_format($profitMargin, 1); ?>%</div>
+            <?php endif; ?>
         </div>
     </div>
 
     <!-- Cash & Receivables -->
     <div class="section-title">Cash &amp; Receivables</div>
-    <div class="grid">
-        <div class="card green">
+    <div class="metric-grid">
+        <div class="metric-card green">
             <div class="label">Cash in Hand</div>
-            <div class="value"><?php echo number_format($cashInHand, 2); ?></div>
+            <div class="value <?php echo $cashInHand < 0 ? 'neg' : ''; ?>"><?php echo number_format($cashInHand, 2); ?></div>
             <div class="sub">Physical cash</div>
         </div>
-        <div class="card blue">
+        <div class="metric-card blue">
             <div class="label">Cash at Bank</div>
-            <div class="value"><?php echo number_format($cashAtBank, 2); ?></div>
+            <div class="value <?php echo $cashAtBank < 0 ? 'neg' : ''; ?>"><?php echo number_format($cashAtBank, 2); ?></div>
             <div class="sub">In bank accounts</div>
         </div>
-        <div class="card orange">
+        <div class="metric-card orange">
             <div class="label">Owed by Students</div>
             <div class="value"><?php echo number_format($receivable, 2); ?></div>
             <div class="sub">Fee receivable</div>
+        </div>
+        <div class="metric-card teal">
+            <div class="label">Total Liquidity</div>
+            <div class="value"><?php echo number_format($cashInHand + $cashAtBank, 2); ?></div>
+            <div class="sub">Cash + Bank combined</div>
         </div>
     </div>
 
     <!-- Obligations -->
     <div class="section-title">Obligations</div>
-    <div class="grid">
-        <div class="card red">
+    <div class="metric-grid">
+        <div class="metric-card red">
             <div class="label">Advance Held</div>
             <div class="value"><?php echo number_format($advanceLiab, 2); ?></div>
             <div class="sub">Owed to students as services</div>
         </div>
-        <div class="card red">
+        <div class="metric-card red">
             <div class="label">Accounts Payable</div>
             <div class="value"><?php echo number_format($payable, 2); ?></div>
             <div class="sub">Owed to suppliers</div>
         </div>
-        <div class="card teal">
-            <div class="label">Total Liquidity</div>
-            <div class="value"><?php echo number_format($cashInHand + $cashAtBank, 2); ?></div>
-            <div class="sub">Cash + Bank combined</div>
+        <div class="metric-card purple">
+            <div class="label">Total Obligations</div>
+            <div class="value"><?php echo number_format($advanceLiab + $payable, 2); ?></div>
+            <div class="sub">Advance + Payable</div>
         </div>
     </div>
 
@@ -457,9 +445,9 @@ $recent = $conn->query("
             <span class="ico"><span class="glyphicon glyphicon-book"></span></span>
             Journal Entries
         </a>
-        <a href="gl_journal_add.php" class="quick">
-            <span class="ico"><span class="glyphicon glyphicon-plus"></span></span>
-            Post Manual Entry
+        <a href="gl_quick_ledger.php" class="quick">
+            <span class="ico"><span class="glyphicon glyphicon-flash"></span></span>
+            Quick Ledger
         </a>
         <a href="gl_accounts.php" class="quick">
             <span class="ico"><span class="glyphicon glyphicon-tasks"></span></span>

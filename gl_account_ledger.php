@@ -54,24 +54,14 @@ $openingDisplay = $isDebitNormal ? $openingNetRaw : -$openingNetRaw;
 // --- Movements in range ---
 $stmt = $conn->prepare("
     SELECT
-        t.id AS txn_id,
-        t.entry_date,
-        t.description,
-        t.reference_type,
-        t.reference_id,
-        t.posted_by,
-        t.status AS txn_status,
-        t.reversal_of,
-        l.id AS line_id,
-        l.debit,
-        l.credit,
-        l.memo,
+        t.id AS txn_id, t.entry_date, t.description, t.reference_type, t.reference_id,
+        t.posted_by, t.status AS txn_status, t.reversal_of,
+        l.id AS line_id, l.debit, l.credit, l.memo,
         u.username AS posted_by_name
     FROM gl_journal_lines l
     JOIN gl_transactions t ON t.id = l.transaction_id
     LEFT JOIN users u ON u.id = t.posted_by
-    WHERE l.account_id = ?
-      AND t.entry_date BETWEEN ? AND ?
+    WHERE l.account_id = ? AND t.entry_date BETWEEN ? AND ?
     ORDER BY t.entry_date ASC, t.id ASC, l.line_no ASC
 ");
 $stmt->bind_param("iss", $account['id'], $fromDate, $toDate);
@@ -95,7 +85,7 @@ unset($r);
 $closingRaw = $runningRaw;
 $closingDisplay = $isDebitNormal ? $closingRaw : -$closingRaw;
 
-// --- For grouping accounts: children ---
+// --- For grouping accounts ---
 $isGrouping = ((int)$account['is_postable'] === 0);
 $children = [];
 $groupAggregate = 0.0;
@@ -122,141 +112,131 @@ if ($isGrouping) {
     unset($c);
 }
 
-// Helper for the period filter URLs
 $accId = (int)$account['id'];
-$today = date('Y-m-d');
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
    
-    <title><?php echo htmlspecialchars($account['code'] . ' — ' . $account['name']); ?></title>
+    <title>Account Ledger</title>
     <style>
-        body { background: #eef1f5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-
-        .led-container {
-            max-width: 1300px;
-            margin: 30px auto;
-            background: #fff;
-            border-radius: 12px;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
-            overflow: hidden;
+        * { box-sizing: border-box; }
+        body {
+            background: #eef1f5;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            margin: 0; padding: 0; color: #1e293b;
         }
+        .report-wrap { max-width: 1300px; margin: 30px auto; padding: 0 20px; }
 
-        .led-header {
-            padding: 30px 40px;
+        /* Header */
+        .report-head {
             background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
             color: #fff;
+            padding: 32px 40px 28px 40px;
+            border-radius: 12px 12px 0 0;
+            box-shadow: 0 4px 16px rgba(30, 64, 175, 0.15);
         }
-        .led-header .company {
-            font-size: 12px; letter-spacing: 2px; text-transform: uppercase;
-            opacity: 0.75; margin-bottom: 8px; font-weight: 600;
-        }
-        .led-header h1 {
+        .report-head h1 {
             margin: 0; font-size: 26px; font-weight: 700;
-            letter-spacing: -0.4px;
-            display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+            letter-spacing: -0.4px; display: flex; align-items: center;
+            gap: 14px; flex-wrap: wrap;
         }
-        .led-header h1 .code {
+        .report-head h1 .code {
             font-family: 'SF Mono', 'Monaco', monospace;
-            font-size: 20px;
-            opacity: 0.85;
-            font-weight: 600;
+            font-size: 20px; opacity: 0.85; font-weight: 600;
         }
-        .led-header .period {
-            font-size: 14px; opacity: 0.85; margin-top: 8px;
-        }
-
+        .report-head .period { font-size: 14px; opacity: 0.9; margin-top: 8px; }
         .type-pill {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 10px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            background: rgba(255, 255, 255, 0.15);
-            color: #fff;
+            display: inline-block; padding: 4px 12px;
+            border-radius: 20px; font-size: 10px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 1px;
+            background: rgba(255, 255, 255, 0.15); color: #fff;
         }
         .type-pill.grouping {
-            background: rgba(255, 255, 255, 0.3);
-            color: #fff;
+            background: rgba(255, 255, 255, 0.3); color: #fff;
             border: 1px solid rgba(255, 255, 255, 0.4);
         }
 
-        .led-controls {
+        /* Toolbar */
+        .toolbar {
+            background: #fff;
+            border-radius: 0 0 12px 12px;
             padding: 20px 40px;
-            background: #f8fafc;
-            border-bottom: 1px solid #e5e9ef;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+            margin-bottom: 24px;
             display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
+            flex-direction: column;
             gap: 14px;
         }
-        .led-controls form {
-            display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+        .toolbar-row {
+            display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
         }
-        .led-controls label {
-            font-size: 13px; color: #475569; font-weight: 500; margin: 0;
+        .toolbar-row .spacer { flex: 1; }
+        .date-group {
+            display: flex; align-items: center; gap: 10px;
+            background: #f8fafc; padding: 8px 14px;
+            border-radius: 8px; border: 1px solid #e2e8f0;
         }
-        .led-controls input[type=date] {
-            height: 38px; padding: 6px 12px;
-            border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px;
-            background: #fff;
+        .date-group label {
+            font-size: 12px; font-weight: 700; color: #64748b;
+            text-transform: uppercase; letter-spacing: 0.8px; margin: 0;
         }
-        .btn-action {
-            height: 38px; padding: 0 18px; border-radius: 6px;
-            font-size: 13px; font-weight: 600; border: none;
+        .date-group input[type=date] {
+            height: 36px; padding: 6px 12px;
+            border: 1px solid #cbd5e1; border-radius: 6px;
+            font-size: 14px; background: #fff; color: #0f172a;
+        }
+        .date-group input[type=date]:focus {
+            outline: none; border-color: #1e40af;
+            box-shadow: 0 0 0 3px rgba(30, 64, 175, 0.1);
+        }
+        .btn-tool {
+            height: 40px; padding: 0 16px; border-radius: 8px;
+            font-size: 13px; font-weight: 600; border: 1px solid;
             cursor: pointer; display: inline-flex; align-items: center;
-            gap: 6px; transition: all 0.15s;
+            gap: 7px; text-decoration: none; transition: all 0.15s;
+            background: #fff; color: #475569; border-color: #cbd5e1;
+            white-space: nowrap;
+        }
+        .btn-tool:hover {
+            background: #f8fafc; border-color: #94a3b8; color: #1e293b;
             text-decoration: none;
         }
-        .btn-primary { background: #1e40af; color: #fff; }
-        .btn-primary:hover { background: #1e3a8a; color: #fff; text-decoration: none; }
-        .btn-ghost { background: #fff; border: 1px solid #cbd5e1; color: #475569; }
-        .btn-ghost:hover { background: #f8fafc; color: #1e293b; text-decoration: none; }
+        .btn-tool.primary { background: #1e40af; color: #fff; border-color: #1e40af; }
+        .btn-tool.primary:hover { background: #1e3a8a; border-color: #1e3a8a; }
+        .btn-tool.export-copy  { color: #6366f1; border-color: #c7d2fe; background: #eef2ff; }
+        .btn-tool.export-copy:hover  { background: #6366f1; color: #fff; border-color: #6366f1; }
+        .btn-tool.export-csv   { color: #059669; border-color: #a7f3d0; background: #ecfdf5; }
+        .btn-tool.export-csv:hover   { background: #059669; color: #fff; border-color: #059669; }
+        .btn-tool.export-excel { color: #0369a1; border-color: #bae6fd; background: #f0f9ff; }
+        .btn-tool.export-excel:hover { background: #0369a1; color: #fff; border-color: #0369a1; }
+        .btn-tool.export-pdf   { color: #dc2626; border-color: #fecaca; background: #fef2f2; }
+        .btn-tool.export-pdf:hover   { background: #dc2626; color: #fff; border-color: #dc2626; }
 
-        /* Period filter strip */
+        /* Period strip */
         .period-strip {
-            padding: 14px 40px;
-            background: #fff;
+            padding: 14px 40px; background: #fff;
             border-bottom: 1px solid #e5e9ef;
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-            align-items: center;
+            display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
         }
         .period-strip .label {
-            font-size: 12px;
-            color: #64748b;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-right: 6px;
+            font-size: 12px; color: #64748b; font-weight: 600;
+            text-transform: uppercase; letter-spacing: 1px; margin-right: 6px;
         }
         .period-btn {
-            padding: 6px 14px;
-            border-radius: 20px;
-            font-size: 13px;
-            font-weight: 600;
-            text-decoration: none;
-            background: #f1f5f9;
-            color: #475569;
-            border: 1px solid transparent;
+            padding: 6px 14px; border-radius: 20px;
+            font-size: 13px; font-weight: 600;
+            text-decoration: none; background: #f1f5f9;
+            color: #475569; border: 1px solid transparent;
             transition: all 0.15s;
         }
         .period-btn:hover {
-            background: #e2e8f0;
-            color: #1e293b;
-            text-decoration: none;
+            background: #e2e8f0; color: #1e293b; text-decoration: none;
         }
-        .period-btn.active {
-            background: #1e40af;
-            color: #fff;
-        }
+        .period-btn.active { background: #1e40af; color: #fff; }
 
-        .led-body { padding: 30px 40px 40px 40px; }
+        /* Body */
+        .report-body { background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06); overflow: hidden; padding: 30px; margin-bottom: 24px; }
 
         .summary-grid {
             display: grid;
@@ -268,10 +248,8 @@ $today = date('Y-m-d');
         @media (max-width: 500px) { .summary-grid { grid-template-columns: 1fr; } }
 
         .sum-card {
-            padding: 18px 20px;
-            background: #fff;
-            border-radius: 8px;
-            border: 1px solid #e2e8f0;
+            padding: 18px 20px; background: #fff;
+            border-radius: 8px; border: 1px solid #e2e8f0;
             border-left: 4px solid #94a3b8;
         }
         .sum-card.opening  { border-left-color: #64748b; }
@@ -292,29 +270,23 @@ $today = date('Y-m-d');
         .sum-card .val.pos { color: #047857; }
         .sum-card .val.neg { color: #b91c1c; }
 
+        /* Grouping children grid */
         .children-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
             gap: 12px;
         }
         .child-card {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 14px;
-            padding: 14px 18px;
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
-            text-decoration: none;
-            color: #1e293b;
+            display: flex; justify-content: space-between;
+            align-items: center; gap: 14px;
+            padding: 14px 18px; background: #f8fafc;
+            border: 1px solid #e2e8f0; border-radius: 8px;
+            text-decoration: none; color: #1e293b;
             transition: all 0.15s;
         }
         .child-card:hover {
-            background: #eff6ff;
-            border-color: #bfdbfe;
-            text-decoration: none;
-            color: #1e293b;
+            background: #eff6ff; border-color: #bfdbfe;
+            text-decoration: none; color: #1e293b;
             transform: translateY(-1px);
             box-shadow: 0 4px 12px rgba(30, 64, 175, 0.08);
         }
@@ -335,10 +307,8 @@ $today = date('Y-m-d');
         .child-card .balance.zero { color: #94a3b8; font-weight: 500; }
 
         .grouping-panel {
-            background: #fff;
-            border: 1px solid #e2e8f0;
-            border-radius: 10px;
-            padding: 28px 30px;
+            background: #fff; border: 1px solid #e2e8f0;
+            border-radius: 10px; padding: 28px 30px;
         }
         .grouping-panel .icon-wrap { text-align: center; margin-bottom: 20px; }
         .grouping-panel .icon-wrap .glyphicon { font-size: 48px; color: #bfdbfe; }
@@ -351,46 +321,26 @@ $today = date('Y-m-d');
             max-width: 560px; margin: 0 auto 28px auto; line-height: 1.6;
         }
 
+        /* Ledger table */
         .ledger-table-wrap {
-            background: #fff;
-            border-radius: 10px;
-            border: 1px solid #e2e8f0;
-            overflow: hidden;
+            background: #fff; border-radius: 10px;
+            border: 1px solid #e2e8f0; overflow: hidden;
         }
-
-        .ledger-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 13px;
-        }
+        .ledger-table { width: 100%; border-collapse: collapse; font-size: 13px; }
         .ledger-table thead th {
-            background: #1e293b;
-            color: #fff;
-            padding: 14px 10px;
-            font-size: 11px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            text-align: left;
-            white-space: nowrap;
+            background: #1e293b; color: #fff;
+            padding: 14px 12px; font-size: 11px;
+            font-weight: 700; text-transform: uppercase;
+            letter-spacing: 1px; text-align: left; white-space: nowrap;
         }
         .ledger-table thead th.amount-col { text-align: right; }
-
         .ledger-table tbody tr { border-bottom: 1px solid #f1f5f9; }
         .ledger-table tbody tr:hover { background: #f8fafc; }
         .ledger-table tbody tr.reversed-row { background: #fef5f5; opacity: 0.75; }
         .ledger-table tbody tr.reversed-row:hover { background: #fdecec; }
-        .ledger-table tbody td {
-            padding: 11px 10px;
-            vertical-align: top;
-            color: #1e293b;
-        }
+        .ledger-table tbody td { padding: 12px; vertical-align: top; color: #1e293b; }
 
-        .date-col {
-            font-family: 'SF Mono', 'Monaco', monospace;
-            font-size: 12px; color: #475569;
-            white-space: nowrap; width: 90px;
-        }
+        .date-col { font-family: 'SF Mono', 'Monaco', monospace; font-size: 12px; color: #475569; white-space: nowrap; width: 90px; }
         .desc-col { min-width: 240px; max-width: 380px; }
         .desc-col .txn-desc { font-weight: 500; color: #0f172a; }
         .desc-col .txn-meta {
@@ -404,16 +354,12 @@ $today = date('Y-m-d');
             letter-spacing: 0.5px; font-size: 9px;
         }
         .desc-col .txn-meta .user { color: #94a3b8; }
-        .desc-col .line-memo {
-            font-size: 11px; color: #64748b;
-            font-style: italic; margin-top: 4px;
-        }
+        .desc-col .line-memo { font-size: 11px; color: #64748b; font-style: italic; margin-top: 4px; }
 
         .amount-col {
             text-align: right;
             font-family: 'SF Mono', 'Monaco', monospace;
-            font-size: 12px;
-            font-variant-numeric: tabular-nums;
+            font-size: 12px; font-variant-numeric: tabular-nums;
             width: 110px; white-space: nowrap;
         }
         .amount-col.zero { color: #cbd5e1; }
@@ -423,8 +369,7 @@ $today = date('Y-m-d');
         .balance-col {
             text-align: right;
             font-family: 'SF Mono', 'Monaco', monospace;
-            font-size: 12px;
-            font-weight: 700;
+            font-size: 12px; font-weight: 700;
             font-variant-numeric: tabular-nums;
             width: 120px; white-space: nowrap;
             background: #f8fafc;
@@ -448,60 +393,55 @@ $today = date('Y-m-d');
         }
 
         .opening-row td {
-            background: #f1f5f9;
-            font-weight: 600; font-size: 13px;
-            color: #334155; padding: 14px 10px;
-            border-top: 2px solid #cbd5e1;
-            border-bottom: 1px solid #cbd5e1;
+            background: #f1f5f9; font-weight: 600;
+            font-size: 13px; color: #334155;
+            padding: 14px 12px;
+            border-top: 2px solid #cbd5e1; border-bottom: 1px solid #cbd5e1;
         }
-
-        /* Totals row */
         .totals-row td {
-            background: #f0f5ff;
-            color: #1e293b;
-            font-weight: 700;
-            font-size: 13px;
-            padding: 14px 10px;
-            border-top: 2px solid #1e40af;
-            border-bottom: 2px solid #1e40af;
+            background: #f0f5ff; color: #1e293b;
+            font-weight: 700; font-size: 13px;
+            padding: 14px 12px;
+            border-top: 2px solid #1e40af; border-bottom: 2px solid #1e40af;
         }
         .totals-row .total-debit { color: #047857; font-weight: 800; }
         .totals-row .total-credit { color: #b91c1c; font-weight: 800; }
-
         .closing-row td {
-            background: #1e293b;
-            color: #fff;
-            font-weight: 700;
-            font-size: 14px;
-            padding: 16px 10px;
+            background: #1e293b; color: #fff;
+            font-weight: 700; font-size: 14px;
+            padding: 16px 12px;
             border-top: 3px double #1e40af;
         }
         .closing-row .balance-col { background: #1e293b; color: #fff; font-size: 14px; }
 
         .empty-state {
-            padding: 50px 30px;
-            text-align: center;
-            color: #94a3b8;
-            font-size: 14px;
-            font-style: italic;
+            padding: 50px 30px; text-align: center;
+            color: #94a3b8; font-size: 14px; font-style: italic;
         }
 
-        .footer-note {
-            padding: 20px 40px;
-            background: #f8fafc;
-            border-top: 1px solid #e5e9ef;
-            font-size: 12px;
-            color: #64748b;
-            line-height: 1.6;
-        }
-
+        /* Print */
         @media print {
-            body { background: #fff; }
-            .led-container { box-shadow: none; margin: 0; border-radius: 0; max-width: none; }
-            .led-controls { display: none !important; }
-            .period-strip { display: none !important; }
-            .led-body { padding: 20px; }
-            .footer-note { background: #fff; }
+            @page { size: A4 landscape; margin: 10mm 8mm; }
+            body { background: #fff; font-size: 8pt; font-family: Calibri, Arial, sans-serif; }
+            .report-wrap { max-width: 100%; margin: 0; padding: 0; }
+            .toolbar, .period-strip, .navbar { display: none !important; }
+            .report-head {
+                background: #fff !important; color: #000 !important;
+                padding: 0 0 4pt 0; border-radius: 0; box-shadow: none;
+                border-bottom: 2pt solid #000; margin-bottom: 6pt; text-align: center;
+            }
+            .report-head h1 { font-size: 13pt; }
+            .report-head .period { font-size: 8pt; color: #333 !important; }
+            .report-body { padding: 0; box-shadow: none; border-radius: 0; }
+            .ledger-table { font-size: 7.5pt; }
+            .ledger-table thead th { background: #e8e8e8 !important; color: #000 !important; font-size: 7pt; text-transform: none; padding: 2pt 4pt !important; border: 0.5pt solid #808080; }
+            .ledger-table tbody td { padding: 1.5pt 4pt !important; border: 0.5pt solid #c0c0c0; font-size: 7.5pt; color: #000; }
+            .amount-col, .balance-col, .date-col { font-family: Calibri, Arial, sans-serif; font-size: 7.5pt; color: #000 !important; }
+            .summary-grid { display: none !important; }
+            .opening-row td, .totals-row td { background: #f2f2f2 !important; color: #000; border: 0.5pt solid #808080; padding: 2pt 4pt !important; font-size: 8pt; }
+            .closing-row td { background: #e8e8e8 !important; color: #000 !important; border: 0.5pt solid #808080; padding: 2pt 4pt !important; font-size: 8pt; font-weight: bold; }
+            .status-reversed, .status-reversal { background: none !important; color: #000; padding: 0; font-size: 7pt; text-transform: none; }
+            .ledger-table tbody tr.reversed-row { background: #f5f5f5 !important; opacity: 1; }
         }
     </style>
 </head>
@@ -509,20 +449,14 @@ $today = date('Y-m-d');
 
 <?php require_once('navbar.php'); ?>
 
-<div class="led-container">
+<div class="report-wrap">
 
-    <div class="led-header">
-        <div class="company">Dar-e-Arqm School</div>
+    <!-- Header -->
+    <div class="report-head">
         <h1>
-            <span class="code"><?php echo htmlspecialchars($account['code']); ?></span>
+           
             <?php echo htmlspecialchars($account['name']); ?>
-            <span class="type-pill"><?php echo gl_type_label($account['account_type']); ?></span>
-            <?php if (!empty($account['is_contra'])): ?>
-                <span class="type-pill">Contra</span>
-            <?php endif; ?>
-            <?php if ($isGrouping): ?>
-                <span class="type-pill grouping">Grouping</span>
-            <?php endif; ?>
+            
         </h1>
         <div class="period">
             <?php echo date('F j, Y', strtotime($fromDate)); ?>
@@ -531,31 +465,49 @@ $today = date('Y-m-d');
         </div>
     </div>
 
-    <div class="led-controls">
-        <form method="get" action="">
-            <input type="hidden" name="id" value="<?php echo $accId; ?>">
-            <label for="from">From:</label>
-            <input type="date" id="from" name="from" value="<?php echo htmlspecialchars($fromDate); ?>">
-            <label for="to">To:</label>
-            <input type="date" id="to" name="to" value="<?php echo htmlspecialchars($toDate); ?>">
-            <button type="submit" class="btn-action btn-primary">
-                <span class="glyphicon glyphicon-refresh"></span> Apply
-            </button>
-        </form>
-        <div>
-            <a href="gl_trial_balance.php" class="btn-action btn-ghost">
+    <!-- Toolbar -->
+    <div class="toolbar">
+        <div class="toolbar-row">
+            <form method="get" action="" style="display: contents;">
+                <input type="hidden" name="id" value="<?php echo $accId; ?>">
+                <div class="date-group">
+                    <label for="from">From</label>
+                    <input type="date" id="from" name="from" value="<?php echo htmlspecialchars($fromDate); ?>">
+                </div>
+                <div class="date-group">
+                    <label for="to">To</label>
+                    <input type="date" id="to" name="to" value="<?php echo htmlspecialchars($toDate); ?>">
+                </div>
+                <button type="submit" class="btn-tool primary">
+                    <span class="glyphicon glyphicon-refresh"></span> Update
+                </button>
+            </form>
+            <span class="spacer"></span>
+            <a href="gl_trial_balance.php" class="btn-tool">
                 <span class="glyphicon glyphicon-arrow-left"></span> Back
             </a>
-            <button type="button" class="btn-action btn-ghost" onclick="window.print()" style="margin-left: 8px;">
-                <span class="glyphicon glyphicon-print"></span> Print
+        </div>
+
+        <div class="toolbar-row">
+            <span class="spacer"></span>
+            <button type="button" class="btn-tool export-copy" onclick="copyToClipboard()">
+                <span class="glyphicon glyphicon-copy"></span> Copy
+            </button>
+            <button type="button" class="btn-tool export-csv" onclick="exportCSV()">
+                <span class="glyphicon glyphicon-file"></span> CSV
+            </button>
+            <button type="button" class="btn-tool export-excel" onclick="exportExcel()">
+                <span class="glyphicon glyphicon-save"></span> Excel
+            </button>
+            <button type="button" class="btn-tool export-pdf" onclick="window.print()">
+                <span class="glyphicon glyphicon-print"></span> PDF / Print
             </button>
         </div>
     </div>
 
-    <!-- Period filter strip -->
+    <!-- Period strip -->
     <div class="period-strip">
         <span class="label">Quick Period:</span>
-
         <?php
         $thisMonthFrom = date('Y-m-01');
         $thisMonthTo   = date('Y-m-d');
@@ -568,26 +520,18 @@ $today = date('Y-m-d');
         $isThisYear  = ($fromDate === $thisYearFrom && $toDate === $thisMonthTo);
         $isAllTime   = ($fromDate === $allFrom && $toDate === $thisMonthTo);
         ?>
-
         <a href="?id=<?php echo $accId; ?>&from=<?php echo urlencode($thisMonthFrom); ?>&to=<?php echo urlencode($thisMonthTo); ?>"
-           class="period-btn <?php echo $isThisMonth ? 'active' : ''; ?>">
-            This Month
-        </a>
+           class="period-btn <?php echo $isThisMonth ? 'active' : ''; ?>">This Month</a>
         <a href="?id=<?php echo $accId; ?>&from=<?php echo urlencode($last3From); ?>&to=<?php echo urlencode($thisMonthTo); ?>"
-           class="period-btn <?php echo $isLast3 ? 'active' : ''; ?>">
-            Last 3 Months
-        </a>
+           class="period-btn <?php echo $isLast3 ? 'active' : ''; ?>">Last 3 Months</a>
         <a href="?id=<?php echo $accId; ?>&from=<?php echo urlencode($thisYearFrom); ?>&to=<?php echo urlencode($thisMonthTo); ?>"
-           class="period-btn <?php echo $isThisYear ? 'active' : ''; ?>">
-            This Year
-        </a>
+           class="period-btn <?php echo $isThisYear ? 'active' : ''; ?>">This Year</a>
         <a href="?id=<?php echo $accId; ?>&from=<?php echo urlencode($allFrom); ?>&to=<?php echo urlencode($thisMonthTo); ?>"
-           class="period-btn <?php echo $isAllTime ? 'active' : ''; ?>">
-            All Time
-        </a>
+           class="period-btn <?php echo $isAllTime ? 'active' : ''; ?>">All Time</a>
     </div>
 
-    <div class="led-body">
+    <!-- Body -->
+    <div class="report-body">
 
         <?php if ($isGrouping): ?>
             <!-- GROUPING ACCOUNT -->
@@ -649,7 +593,6 @@ $today = date('Y-m-d');
 
         <?php else: ?>
             <!-- LEAF ACCOUNT -->
-
             <div class="summary-grid">
                 <div class="sum-card opening">
                     <div class="lbl">Opening Balance</div>
@@ -679,7 +622,7 @@ $today = date('Y-m-d');
                         No transactions on this account during the selected period.
                     </div>
                 <?php else: ?>
-                    <table class="ledger-table">
+                    <table class="ledger-table" id="ledgerTable">
                         <thead>
                             <tr>
                                 <th style="width: 90px;">Date</th>
@@ -690,7 +633,6 @@ $today = date('Y-m-d');
                             </tr>
                         </thead>
                         <tbody>
-                            <!-- Opening row -->
                             <tr class="opening-row">
                                 <td><?php echo date('M j, Y', strtotime($fromDate . ' -1 day')); ?></td>
                                 <td colspan="3" style="text-align: right;">Opening Balance</td>
@@ -702,9 +644,8 @@ $today = date('Y-m-d');
                             <?php foreach ($rows as $r):
                                 $isReversed = $r['txn_status'] === 'REVERSED';
                                 $isReversal = !empty($r['reversal_of']);
-                                $rowClass = $isReversed ? 'reversed-row' : '';
                             ?>
-                            <tr class="<?php echo $rowClass; ?>">
+                            <tr class="<?php echo $isReversed ? 'reversed-row' : ''; ?> data-row">
                                 <td class="date-col">
                                     <?php echo date('M j, Y', strtotime($r['entry_date'])); ?>
                                 </td>
@@ -737,9 +678,7 @@ $today = date('Y-m-d');
                                         </a>
                                     </div>
                                     <?php if (!empty($r['memo'])): ?>
-                                        <div class="line-memo">
-                                            <?php echo htmlspecialchars($r['memo']); ?>
-                                        </div>
+                                        <div class="line-memo"><?php echo htmlspecialchars($r['memo']); ?></div>
                                     <?php endif; ?>
                                 </td>
                                 <td class="amount-col <?php echo $r['debit'] == 0 ? 'zero' : 'debit'; ?>">
@@ -754,24 +693,16 @@ $today = date('Y-m-d');
                             </tr>
                             <?php endforeach; ?>
 
-                            <!-- Totals row -->
                             <tr class="totals-row">
                                 <td colspan="2" style="text-align: right;">
                                     <span class="glyphicon glyphicon-sum"></span>
                                     Period Totals
-                                    <span style="color: #64748b; font-weight: 500;">
-                                        (<?php echo count($rows); ?> entries)
-                                    </span>
+                                    <span style="color: #64748b; font-weight: 500;">(<?php echo count($rows); ?> entries)</span>
                                 </td>
-                                <td class="amount-col">
-                                    <span class="total-debit"><?php echo number_format($totalDr, 2); ?></span>
-                                </td>
-                                <td class="amount-col">
-                                    <span class="total-credit"><?php echo number_format($totalCr, 2); ?></span>
-                                </td>
+                                <td class="amount-col"><span class="total-debit"><?php echo number_format($totalDr, 2); ?></span></td>
+                                <td class="amount-col"><span class="total-credit"><?php echo number_format($totalCr, 2); ?></span></td>
                                 <td class="balance-col" style="background: #f0f5ff;">
                                     <?php
-                                    // Period net movement in display direction
                                     $netMovementRaw = $totalDr - $totalCr;
                                     $netMovementDisplay = $isDebitNormal ? $netMovementRaw : -$netMovementRaw;
                                     ?>
@@ -781,13 +712,10 @@ $today = date('Y-m-d');
                                 </td>
                             </tr>
 
-                            <!-- Closing row -->
                             <tr class="closing-row">
                                 <td><?php echo date('M j, Y', strtotime($toDate)); ?></td>
                                 <td colspan="3" style="text-align: right;">Closing Balance</td>
-                                <td class="balance-col">
-                                    <?php echo number_format(abs($closingDisplay), 2); ?>
-                                </td>
+                                <td class="balance-col"><?php echo number_format(abs($closingDisplay), 2); ?></td>
                             </tr>
                         </tbody>
                     </table>
@@ -798,25 +726,83 @@ $today = date('Y-m-d');
 
     </div>
 
-    <div class="footer-note">
-        <?php if ($isGrouping): ?>
-            <strong>Grouping account:</strong> This account doesn't hold money directly. Click any child account above to see its ledger.
-        <?php else: ?>
-            <strong>Running Balance</strong> is calculated in the natural direction of this account.
-            <?php if ($isDebitNormal): ?>
-                (Debit-normal — a positive balance means the account is <em>net debit</em>.)
-            <?php else: ?>
-                (Credit-normal — a positive balance means the account is <em>net credit</em>.)
-            <?php endif; ?>
-            <br>
-            <strong>Period Totals</strong> row shows the sum of debits and credits within the selected date range.
-            Reversed transactions are grayed out but still shown for audit purposes.
-        <?php endif; ?>
-    </div>
 </div>
 
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+function buildLedgerData() {
+    var rows = [];
+    $('#ledgerTable tbody tr.data-row').each(function() {
+        var date = $(this).find('.date-col').text().trim();
+        var desc = $(this).find('.txn-desc').clone().children().remove().end().text().trim();
+        var cells = $(this).find('td.amount-col');
+        var dr = cells.eq(0).text().trim();
+        var cr = cells.eq(1).text().trim();
+        var bal = $(this).find('.balance-col').text().trim();
+        if (date) rows.push([date, desc, dr, cr, bal]);
+    });
+    return rows;
+}
+
+function parseAmt(t) {
+    if (!t || t === '—') return 0;
+    var n = parseFloat(t.replace(/[,\s]/g, ''));
+    return isNaN(n) ? 0 : n;
+}
+
+function copyToClipboard() {
+    var rows = buildLedgerData();
+    var lines = ['Date\tDescription\tDebit\tCredit\tBalance'];
+    rows.forEach(function(r) { lines.push(r.join('\t')); });
+    var text = lines.join('\n');
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(function() { showToast('Copied'); }).catch(function() { fallbackCopy(text); });
+    } else {
+        fallbackCopy(text);
+    }
+}
+function fallbackCopy(text) {
+    var t = document.createElement('textarea');
+    t.value = text; t.style.position = 'fixed'; t.style.opacity = '0';
+    document.body.appendChild(t); t.select();
+    try { document.execCommand('copy'); showToast('Copied'); } catch(e) { alert('Copy failed'); }
+    document.body.removeChild(t);
+}
+function exportCSV() {
+    var rows = buildLedgerData();
+    var csv = 'Date,Description,Debit,Credit,Balance\n';
+    rows.forEach(function(r) {
+        csv += '"' + r[0] + '","' + r[1].replace(/"/g, '""') + '",' + parseAmt(r[2]) + ',' + parseAmt(r[3]) + ',' + parseAmt(r[4]) + '\n';
+    });
+    var blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    var link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'ledger_<?php echo $account['code']; ?>_' + new Date().toISOString().slice(0,10) + '.csv';
+    document.body.appendChild(link); link.click(); document.body.removeChild(link);
+    showToast('CSV downloaded');
+}
+function exportExcel() {
+    if (typeof XLSX === 'undefined') { alert('Excel library not loaded'); return; }
+    var rows = buildLedgerData();
+    var data = [['Date', 'Description', 'Debit', 'Credit', 'Balance']];
+    rows.forEach(function(r) {
+        data.push([r[0], r[1], parseAmt(r[2]), parseAmt(r[3]), parseAmt(r[4])]);
+    });
+    var ws = XLSX.utils.aoa_to_sheet(data);
+    ws['!cols'] = [{wch:12},{wch:50},{wch:14},{wch:14},{wch:16}];
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Ledger');
+    XLSX.writeFile(wb, 'ledger_<?php echo $account['code']; ?>_' + new Date().toISOString().slice(0,10) + '.xlsx');
+    showToast('Excel downloaded');
+}
+function showToast(msg) {
+    var $t = $('<div style="position:fixed;bottom:24px;right:24px;background:#1e293b;color:#fff;padding:12px 20px;border-radius:8px;font-size:14px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,0.15);z-index:9999;"><span class="glyphicon glyphicon-ok-sign" style="margin-right:8px;color:#4ade80;"></span>' + msg + '</div>');
+    $('body').append($t);
+    setTimeout(function() { $t.fadeOut(300, function() { $(this).remove(); }); }, 2200);
+}
+</script>
 
 </body>
 </html>
