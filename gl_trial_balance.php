@@ -136,7 +136,7 @@ foreach ($byType as $type => $list) {
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <?php require_once('meta_inc.php'); ?>
+   
     <title>Trial Balance</title>
     <style>
         * { box-sizing: border-box; }
@@ -956,7 +956,7 @@ foreach ($byType as $type => $list) {
 
     <!-- Header -->
     <div class="report-head">
-        <div class="company">Dar-e-Arqm School</div>
+     
         <h1>Trial Balance</h1>
         <div class="period">
             <span><strong>Period:</strong> <?php echo date('F j, Y', strtotime($fromDate)); ?> — <?php echo date('F j, Y', strtotime($toDate)); ?></span>
