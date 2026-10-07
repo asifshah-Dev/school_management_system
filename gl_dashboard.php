@@ -453,6 +453,10 @@ $recent = $conn->query("
             <span class="ico"><span class="glyphicon glyphicon-tasks"></span></span>
             Chart of Accounts
         </a>
+         <a href="gl_voucher_add.php" class="quick">
+            <span class="ico"><span class="glyphicon glyphicon-tasks"></span></span>
+             Vouchers
+        </a>
     </div>
 
     <!-- Recent Activity -->

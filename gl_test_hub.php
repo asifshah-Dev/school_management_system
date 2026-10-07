@@ -371,6 +371,14 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
                 <div class="url">gl_quick_ledger.php</div>
             </div>
         </a>
+        <a href="gl_voucher_add.php" class="link-card report">
+            <div class="icon"><span class="glyphicon glyphicon-tasks"></span></div>
+            <div class="body">
+                <div class="title">Vouchers</div>
+                <div class="desc">Create and manage accounting vouchers.</div>
+                <div class="url">gl_voucher_add.php</div>
+            </div>
+        </a>
 
     </div>
 
