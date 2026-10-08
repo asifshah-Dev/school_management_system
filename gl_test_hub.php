@@ -379,6 +379,14 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
                 <div class="url">gl_voucher_add.php</div>
             </div>
         </a>
+          <a href="gl_opening_balance.php" class="link-card report">
+            <div class="icon"><span class="glyphicon glyphicon-tasks"></span></div>
+            <div class="body">
+                <div class="title">Opening Balance</div>
+                <div class="desc">Create and manage opening balance entries.</div>
+                <div class="url">gl_opening_balance.php</div>
+            </div>
+        </a>
 
     </div>
 

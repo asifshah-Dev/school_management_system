@@ -457,6 +457,10 @@ $recent = $conn->query("
             <span class="ico"><span class="glyphicon glyphicon-tasks"></span></span>
              Vouchers
         </a>
+        <a href="gl_opening_balance.php" class="quick">
+            <span class="ico"><span class="glyphicon glyphicon-tasks"></span></span>
+             Opening Balance
+        </a>
     </div>
 
     <!-- Recent Activity -->
