@@ -33,6 +33,25 @@ $tbBalanced = abs($tbDr - $tbCr) < 0.01;
 $sessionRow = $conn->query("SELECT id, title FROM sessions WHERE status = 0 ORDER BY id DESC LIMIT 1")->fetch_assoc();
 $currentSession = $sessionRow ? $sessionRow['title'] : 'N/A';
 
+// ---------- SUPPLIER / AP HEALTH ----------
+$supplierCount      = (int)$conn->query("SELECT COUNT(*) AS c FROM gl_parties WHERE party_type='SUPPLIER'")->fetch_assoc()['c'];
+$activeSupplierCount= (int)$conn->query("SELECT COUNT(*) AS c FROM gl_parties WHERE party_type='SUPPLIER' AND status=1")->fetch_assoc()['c'];
+$apRecon            = gl_ap_reconciliation($conn);
+
+$suppliersWithBalance = 0;
+foreach (gl_list_suppliers($conn, false) as $s) {
+    if (abs((float)$s['ap_balance']) > 0.01) $suppliersWithBalance++;
+}
+
+// ---------- SESSION CLOSURE HEALTH ----------
+$closuresCount = 0;
+$closuresTableExists = false;
+$tableCheck = $conn->query("SHOW TABLES LIKE 'gl_session_closures'");
+if ($tableCheck && $tableCheck->num_rows > 0) {
+    $closuresTableExists = true;
+    $closuresCount = (int)$conn->query("SELECT COUNT(*) AS c FROM gl_session_closures")->fetch_assoc()['c'];
+}
+
 // Diagnostic flags
 $ledgerEmpty = ($ledgerCount === 0 && $lineCount === 0);
 $coaSeeded   = ($accountCount >= 40);
@@ -42,33 +61,38 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>GL Test Hub — All Links</title>
     <style>
-        body { background: #eef1f5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        * { box-sizing: border-box; }
+        body { background: #eef1f5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; }
 
-        .hub {
-            max-width: 1200px;
-            margin: 30px auto;
-            padding: 0 20px;
-        }
+        .hub { max-width: 1200px; margin: 30px auto; padding: 0 20px; }
 
         .hub-head {
             margin-bottom: 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            gap: 20px;
+            flex-wrap: wrap;
         }
-        .hub-head h1 {
-            margin: 0;
-            font-size: 30px;
-            font-weight: 700;
-            color: #1e293b;
-        }
-        .hub-head .sub {
-            color: #64748b;
-            font-size: 14px;
-            margin-top: 4px;
-        }
+        .hub-head h1 { margin: 0; font-size: 30px; font-weight: 700; color: #1e293b; }
+        .hub-head .sub { color: #64748b; font-size: 14px; margin-top: 4px; }
 
-        /* -- Status board -- */
+        .btn-danger-soft {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 10px 18px;
+            background: #fee2e2; color: #991b1b;
+            border: 1px solid #fecaca;
+            border-radius: 8px;
+            font-size: 14px; font-weight: 600;
+            cursor: pointer; font-family: inherit;
+            transition: all 0.15s;
+        }
+        .btn-danger-soft:hover { background: #fecaca; }
+
         .status-board {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -101,10 +125,7 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
             color: #0f172a;
             font-family: 'SF Mono', 'Monaco', monospace;
         }
-        .status-tile .sub {
-            font-size: 12px;
-            color: #94a3b8;
-        }
+        .status-tile .sub { font-size: 12px; color: #94a3b8; }
         .status-pill {
             display: inline-block;
             padding: 2px 8px;
@@ -118,7 +139,6 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
         .status-pill.bad { background: #fee2e2; color: #991b1b; }
         .status-pill.warn { background: #fef3c7; color: #92400e; }
 
-        /* -- Section -- */
         .section-title {
             font-size: 12px;
             font-weight: 800;
@@ -137,7 +157,6 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
             background: #cbd5e1;
         }
 
-        /* -- Link grid -- */
         .link-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -183,22 +202,12 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
         .link-card.admin .icon       { background: #f3e8ff; color: #6b21a8; }
         .link-card.report .icon      { background: #dbeafe; color: #1e40af; }
         .link-card.danger .icon      { background: #fee2e2; color: #b91c1c; }
+        .link-card.supplier .icon    { background: #fce7f3; color: #9d174d; }
+        .link-card.session .icon     { background: #cffafe; color: #0e7490; }
 
-        .link-card .body {
-            flex: 1;
-            min-width: 0;
-        }
-        .link-card .title {
-            font-size: 15px;
-            font-weight: 700;
-            color: #0f172a;
-            margin-bottom: 4px;
-        }
-        .link-card .desc {
-            font-size: 12px;
-            color: #64748b;
-            line-height: 1.5;
-        }
+        .link-card .body { flex: 1; min-width: 0; }
+        .link-card .title { font-size: 15px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
+        .link-card .desc { font-size: 12px; color: #64748b; line-height: 1.5; }
         .link-card .url {
             font-family: 'SF Mono', 'Monaco', monospace;
             font-size: 11px;
@@ -206,21 +215,6 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
             margin-top: 6px;
             word-break: break-all;
         }
-
-        .link-card .badge {
-            position: absolute;
-            top: 14px;
-            right: 14px;
-            font-size: 9px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            padding: 2px 8px;
-            border-radius: 10px;
-        }
-        .link-card .badge.new      { background: #d1fae5; color: #065f46; }
-        .link-card .badge.testing  { background: #fef3c7; color: #92400e; }
-        .link-card .badge.warn     { background: #fee2e2; color: #991b1b; }
 
         .footer-note {
             margin-top: 40px;
@@ -233,10 +227,144 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
             border: 1px solid #e2e8f0;
         }
         .footer-note strong { color: #1e293b; }
+        .footer-note code { background: #e2e8f0; padding: 1px 5px; border-radius: 3px; }
+
+        /* ============ Reset Modal ============ */
+        .modal-overlay {
+            display: none;
+            position: fixed; inset: 0;
+            background: rgba(15, 23, 42, 0.6);
+            z-index: 9999;
+            align-items: flex-start; justify-content: center;
+            padding: 40px 20px;
+            overflow-y: auto;
+        }
+        .modal-overlay.open { display: flex; }
+
+        .modal-box {
+            background: #fff;
+            width: 100%; max-width: 620px;
+            border-radius: 12px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.3);
+            overflow: hidden;
+            animation: modalIn 0.15s ease-out;
+        }
+        @keyframes modalIn {
+            from { opacity: 0; transform: translateY(-8px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        .modal-head {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 18px 24px;
+            background: linear-gradient(135deg, #991b1b 0%, #b91c1c 100%);
+            color: #fff;
+        }
+        .modal-head h3 { margin: 0; font-size: 17px; font-weight: 700; }
+        .modal-head .modal-sub { font-size: 12px; opacity: 0.85; margin-top: 2px; }
+        .modal-close {
+            background: rgba(255,255,255,0.15);
+            border: 1px solid rgba(255,255,255,0.3);
+            color: #fff;
+            width: 32px; height: 32px;
+            border-radius: 8px;
+            font-size: 18px; line-height: 1;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .modal-close:hover { background: #fff; color: #991b1b; }
+        .modal-body { padding: 22px 24px 8px 24px; }
+        .modal-foot {
+            display: flex; justify-content: flex-end; gap: 10px;
+            padding: 16px 24px;
+            background: #f8fafc;
+            border-top: 1px solid #e2e8f0;
+        }
+
+        .reset-option {
+            display: flex; gap: 10px;
+            padding: 14px 16px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            cursor: pointer;
+        }
+        .reset-option:hover { border-color: #cbd5e1; background: #f1f5f9; }
+        .reset-option input[type="radio"] { margin-top: 4px; cursor: pointer; }
+        .reset-option label { cursor: pointer; flex: 1; }
+        .reset-option label strong { display: block; font-size: 14px; color: #0f172a; margin-bottom: 4px; }
+        .reset-option .scope-desc { display: block; font-size: 12px; color: #64748b; line-height: 1.5; }
+        .reset-option .scope-desc code { background: #e2e8f0; padding: 1px 5px; border-radius: 3px; font-size: 11px; }
+
+        .confirm-block {
+            margin-top: 20px;
+            padding: 16px;
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 10px;
+        }
+        .confirm-block label {
+            display: block;
+            font-size: 12px; font-weight: 700; color: #991b1b;
+            text-transform: uppercase; letter-spacing: 0.8px;
+            margin-bottom: 8px;
+        }
+        .confirm-text {
+            font-family: 'SF Mono', 'Monaco', monospace;
+            font-size: 15px; font-weight: 700;
+            color: #991b1b;
+            padding: 8px 12px;
+            background: #fff;
+            border: 1px solid #fecaca;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            transition: all 0.15s;
+        }
+        .confirm-block input[type="text"] {
+            width: 100%; height: 40px;
+            padding: 8px 12px;
+            border: 1px solid #cbd5e1; border-radius: 8px;
+            font-size: 14px; font-family: 'SF Mono', monospace;
+        }
+        .confirm-block input:focus {
+            outline: none; border-color: #991b1b;
+            box-shadow: 0 0 0 3px rgba(153, 27, 27, 0.1);
+        }
+
+        .feedback {
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            margin-top: 14px;
+            line-height: 1.6;
+        }
+        .feedback.ok  { background: #d1fae5; border: 1px solid #a7f3d0; color: #065f46; }
+        .feedback.err { background: #fee2e2; border: 1px solid #fecaca; color: #991b1b; }
+
+        .btn-ghost-custom {
+            height: 40px; padding: 0 20px;
+            background: #fff; color: #334155;
+            border: 1px solid #cbd5e1; border-radius: 8px;
+            font-size: 13px; font-weight: 600;
+            cursor: pointer; font-family: inherit;
+        }
+        .btn-ghost-custom:hover { background: #f1f5f9; }
+
+        .btn-danger {
+            height: 40px; padding: 0 20px;
+            background: #991b1b; color: #fff;
+            border: none; border-radius: 8px;
+            font-size: 13px; font-weight: 600;
+            cursor: pointer; font-family: inherit;
+            display: inline-flex; align-items: center; gap: 6px;
+        }
+        .btn-danger:hover:not(:disabled) { background: #7f1d1d; }
+        .btn-danger:disabled { opacity: 0.45; cursor: not-allowed; }
 
         @media (max-width: 600px) {
             .hub-head h1 { font-size: 22px; }
             .link-grid { grid-template-columns: 1fr; }
+            .hub-head { flex-direction: column; align-items: flex-start; }
         }
     </style>
 </head>
@@ -247,10 +375,15 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
 <div class="hub">
 
     <div class="hub-head">
-        <h1>GL Test Hub</h1>
-        <div class="sub">
-            Every page in one place &middot; Session: <strong><?php echo htmlspecialchars($currentSession); ?></strong> &middot; <?php echo date('l, F j, Y'); ?>
+        <div>
+            <h1>GL Test Hub</h1>
+            <div class="sub">
+                Every page in one place &middot; Session: <strong><?php echo htmlspecialchars($currentSession); ?></strong> &middot; <?php echo date('l, F j, Y'); ?>
+            </div>
         </div>
+        <button type="button" class="btn-danger-soft" onclick="openResetPanel()">
+            <span class="glyphicon glyphicon-refresh"></span> Reset Ledger
+        </button>
     </div>
 
     <!-- ===== System Status ===== -->
@@ -312,6 +445,88 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
                 <?php endif; ?>
             </div>
         </div>
+
+        <div class="status-tile <?php echo $apRecon['ok'] ? 'ok' : 'err'; ?>">
+            <div class="label">Suppliers / AP</div>
+            <div class="value"><?php echo $activeSupplierCount; ?> active</div>
+            <div class="sub">
+                <?php if ($apRecon['ok']): ?>
+                    <span class="status-pill ok">Sub-ledger OK</span>
+                <?php else: ?>
+                    <span class="status-pill bad">Broken (diff <?php echo number_format($apRecon['diff'], 2); ?>)</span>
+                <?php endif; ?>
+                &middot; <?php echo $suppliersWithBalance; ?> with balance
+            </div>
+        </div>
+
+        <div class="status-tile <?php
+            if (!$closuresTableExists) echo 'err';
+            elseif ($closuresCount > 0)  echo 'ok';
+            else                          echo 'warn';
+        ?>">
+            <div class="label">Session Closures</div>
+            <div class="value"><?php echo $closuresCount; ?> snapshot<?php echo $closuresCount === 1 ? '' : 's'; ?></div>
+            <div class="sub">
+                <?php if (!$closuresTableExists): ?>
+                    <span class="status-pill bad">Table missing</span>
+                <?php elseif ($closuresCount > 0): ?>
+                    <span class="status-pill ok">Snapshots recorded</span>
+                <?php else: ?>
+                    <span class="status-pill warn">None yet</span>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Suppliers & Payables ===== -->
+    <div class="section-title">Suppliers &amp; Payables</div>
+    <div class="link-grid">
+
+        <a href="gl_parties.php" class="link-card supplier">
+            <div class="icon"><span class="glyphicon glyphicon-user"></span></div>
+            <div class="body">
+                <div class="title">Suppliers</div>
+                <div class="desc">Register suppliers, view live AP balance per supplier, toggle active status, drill into a ledger.</div>
+                <div class="url">gl_parties.php &middot; <?php echo $supplierCount; ?> total</div>
+            </div>
+        </a>
+
+        <a href="gl_purchase_add.php" class="link-card supplier">
+            <div class="icon"><span class="glyphicon glyphicon-shopping-cart"></span></div>
+            <div class="body">
+                <div class="title">New Credit Purchase</div>
+                <div class="desc">Record goods/services received on credit. Posts Dr Expense, Cr 2010 AP tagged to the supplier. <strong>Increases what the school owes.</strong></div>
+                <div class="url">gl_purchase_add.php</div>
+            </div>
+        </a>
+
+        <a href="gl_voucher_add.php" class="link-card supplier">
+            <div class="icon"><span class="glyphicon glyphicon-duplicate"></span></div>
+            <div class="body">
+                <div class="title">Pay a Supplier</div>
+                <div class="desc">Post a CPV/BPV against <code>2010 Accounts Payable</code>. A supplier dropdown appears. <strong>Decreases what the school owes.</strong></div>
+                <div class="url">gl_voucher_add.php &rarr; account 2010</div>
+            </div>
+        </a>
+
+        <a href="gl_ap_aging.php" class="link-card supplier">
+            <div class="icon"><span class="glyphicon glyphicon-time"></span></div>
+            <div class="body">
+                <div class="title">AP Aging Report</div>
+                <div class="desc">Outstanding supplier balances bucketed by 0–30 / 31–60 / 61–90 / 90+ days.</div>
+                <div class="url">gl_ap_aging.php</div>
+            </div>
+        </a>
+
+        <a href="gl_transactions.php?ref_type=purchase" class="link-card supplier">
+            <div class="icon"><span class="glyphicon glyphicon-list"></span></div>
+            <div class="body">
+                <div class="title">Credit Purchase Entries</div>
+                <div class="desc">Filtered view of all supplier bills posted via the credit-purchase page.</div>
+                <div class="url">gl_transactions.php?ref_type=purchase</div>
+            </div>
+        </a>
+
     </div>
 
     <!-- ===== Reports ===== -->
@@ -322,7 +537,7 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
             <div class="icon"><span class="glyphicon glyphicon-dashboard"></span></div>
             <div class="body">
                 <div class="title">Accounting Dashboard</div>
-                <div class="desc">One-page overview: cash, receivables, obligations, net profit, recent activity.</div>
+                <div class="desc">One-page overview: cash, receivables, obligations, net profit, recent activity. Includes AP sub-ledger health banner.</div>
                 <div class="url">gl_dashboard.php</div>
             </div>
         </a>
@@ -363,24 +578,26 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
             </div>
         </a>
 
-         <a href="gl_quick_ledger.php" class="link-card report">
-            <div class="icon"><span class="glyphicon glyphicon-tasks"></span></div>
+        <a href="gl_quick_ledger.php" class="link-card report">
+            <div class="icon"><span class="glyphicon glyphicon-flash"></span></div>
             <div class="body">
                 <div class="title">Quick Ledger</div>
                 <div class="desc">Summary of account activity with key financial metrics.</div>
                 <div class="url">gl_quick_ledger.php</div>
             </div>
         </a>
-        <a href="gl_voucher_add.php" class="link-card report">
-            <div class="icon"><span class="glyphicon glyphicon-tasks"></span></div>
+
+        <a href="gl_vouchers.php" class="link-card report">
+            <div class="icon"><span class="glyphicon glyphicon-file"></span></div>
             <div class="body">
-                <div class="title">Vouchers</div>
-                <div class="desc">Create and manage accounting vouchers.</div>
-                <div class="url">gl_voucher_add.php</div>
+                <div class="title">All Vouchers</div>
+                <div class="desc">List every CPV, CRV, BPV, BRV. Filter by type, status, date.</div>
+                <div class="url">gl_vouchers.php</div>
             </div>
         </a>
-          <a href="gl_opening_balance.php" class="link-card report">
-            <div class="icon"><span class="glyphicon glyphicon-tasks"></span></div>
+
+        <a href="gl_opening_balance.php" class="link-card report">
+            <div class="icon"><span class="glyphicon glyphicon-cog"></span></div>
             <div class="body">
                 <div class="title">Opening Balance</div>
                 <div class="desc">Create and manage opening balance entries.</div>
@@ -427,6 +644,30 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
                 <div class="title">Fee Payment Entries</div>
                 <div class="desc">Filtered view of fee payments only.</div>
                 <div class="url">gl_transactions.php?ref_type=fee_payment</div>
+            </div>
+        </a>
+
+    </div>
+
+    <!-- ===== Session Management & Audit ===== -->
+    <div class="section-title">Session Management &amp; Audit</div>
+    <div class="link-grid">
+
+        <a href="gl_session_close.php" class="link-card session">
+            <div class="icon"><span class="glyphicon glyphicon-lock"></span></div>
+            <div class="body">
+                <div class="title">Session Close</div>
+                <div class="desc">Freeze a session and record a permanent snapshot: revenue, expenses, net profit, assets, liabilities, equity. Two-step preview then confirm.</div>
+                <div class="url">gl_session_close.php &middot; <?php echo $closuresCount; ?> snapshot<?php echo $closuresCount === 1 ? '' : 's'; ?></div>
+            </div>
+        </a>
+
+        <a href="gl_user_activity.php" class="link-card session">
+            <div class="icon"><span class="glyphicon glyphicon-eye-open"></span></div>
+            <div class="body">
+                <div class="title">User Activity</div>
+                <div class="desc">Pick a user and a date range — see every journal entry they posted, every voucher they created, and every reversal they performed.</div>
+                <div class="url">gl_user_activity.php</div>
             </div>
         </a>
 
@@ -560,7 +801,7 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
             <div class="icon"><span class="glyphicon glyphicon-shopping-cart"></span></div>
             <div class="body">
                 <div class="title">Expense Invoicing</div>
-                <div class="desc">Record expenses. Each posts to a category-mapped expense account.</div>
+                <div class="desc">Record expenses. Optionally pick a supplier → posts to AP. Otherwise immediate cash/bank payment.</div>
                 <div class="url">expenses.php</div>
             </div>
         </a>
@@ -600,7 +841,7 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
 
     </div>
 
-    <!-- ===== Danger Zone ===== -->
+    <!-- ===== Testing Utilities ===== -->
     <div class="section-title">Testing Utilities</div>
     <div class="link-grid">
 
@@ -637,17 +878,209 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
         <strong>How to use this page:</strong>
         <ul style="margin: 8px 0 0 20px; padding: 0;">
             <li>Bookmark this page as your home for the ledger system.</li>
-            <li>The status board at the top shows the health of the entire engine at a glance.</li>
+            <li>The status board at the top shows the health of the entire engine at a glance &mdash; including <strong>Suppliers/AP sub-ledger reconciliation</strong> and <strong>session closures</strong>.</li>
             <li>Reports read the ledger. Admin pages define the Chart of Accounts. Mappings connect operational data to GL accounts.</li>
-            <li>Operational pages write to the ledger automatically via <code>sp_post_transaction</code>.</li>
-            <li>If a status tile shows red, click through to the relevant page to investigate.</li>
+            <li><strong>Suppliers &amp; Payables:</strong> use <code>gl_purchase_add.php</code> to record bills (AP up), and <code>gl_voucher_add.php</code> against account 2010 to record payments (AP down).</li>
+            <li><strong>Session Management:</strong> use <code>gl_session_close.php</code> to freeze a session at year end and record a permanent financial snapshot.</li>
+            <li><strong>Audit:</strong> use <code>gl_user_activity.php</code> to review any user's postings, vouchers, and reversals.</li>
+            <li><strong>Reset Ledger:</strong> top-right button wipes test data. <strong>Remove this page and <code>gl_test_hub_reset.php</code> before handing over to a real client.</strong></li>
         </ul>
     </div>
 
 </div>
 
+<!-- ============ Reset Ledger Modal ============ -->
+<div class="modal-overlay" id="resetModal">
+    <div class="modal-box">
+        <div class="modal-head">
+            <div>
+                <h3>⚠ Reset Ledger Data</h3>
+                <div class="modal-sub">This cannot be undone from the UI. Take a backup first.</div>
+            </div>
+            <button type="button" class="modal-close" onclick="closeResetPanel()">&times;</button>
+        </div>
+        <div class="modal-body">
+
+            <p style="font-size:13px; color:#475569; margin-top:0;">
+                Choose what to wipe. In both cases, <strong>the Chart of Accounts, Suppliers, and Mapping tables are preserved.</strong>
+            </p>
+
+            <div class="reset-option" data-scope="ledger_only">
+                <input type="radio" name="reset_scope" value="ledger_only" id="rs_ledger">
+                <label for="rs_ledger">
+                    <strong>Ledger only</strong>
+                    <span class="scope-desc">
+                        Wipes <code>gl_transactions</code>, <code>gl_journal_lines</code>, <code>vouchers</code>,
+                        <code>voucher_counters</code>, and <code>gl_session_closures</code>.
+                        Leaves operational data untouched.
+                    </span>
+                </label>
+            </div>
+
+            <div class="reset-option" data-scope="ledger_and_operational">
+                <input type="radio" name="reset_scope" value="ledger_and_operational" id="rs_all">
+                <label for="rs_all">
+                    <strong>Ledger + Operational (full clean slate)</strong>
+                    <span class="scope-desc">
+                        Everything above, <em>plus</em> <code>expenses</code>, <code>expanse_inventory_details</code>,
+                        <code>student_fee_card</code>, <code>fee_payments</code>, <code>advance_fees</code>, and <code>user_salary</code>.
+                        <strong style="color:#991b1b;">Use this only while testing — real fee/salary history will be destroyed.</strong>
+                    </span>
+                </label>
+            </div>
+
+            <div class="confirm-block">
+                <label>Type this exact text to confirm:</label>
+                <div class="confirm-text" id="confirm_expected">— select a scope —</div>
+                <input type="text" id="confirm_input" placeholder="Type the text above" autocomplete="off">
+            </div>
+
+            <div id="resetFeedback" class="feedback" style="display:none;"></div>
+        </div>
+        <div class="modal-foot">
+            <button type="button" class="btn-ghost-custom" onclick="closeResetPanel()">Cancel / Not now</button>
+            <button type="button" class="btn-danger" id="btnConfirmReset" onclick="doReset()" disabled>
+                <span class="glyphicon glyphicon-trash"></span> Confirm Reset
+            </button>
+        </div>
+    </div>
+</div>
+
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js"></script>
+<script>
+var resetModal = document.getElementById('resetModal');
+var confirmInput = document.getElementById('confirm_input');
+var confirmExpected = document.getElementById('confirm_expected');
+var btnConfirm = document.getElementById('btnConfirmReset');
+var feedback = document.getElementById('resetFeedback');
+
+function getScope() {
+    var checked = document.querySelector('input[name="reset_scope"]:checked');
+    return checked ? checked.value : '';
+}
+
+function updateExpectedText() {
+    var scope = getScope();
+    if (!scope) {
+        confirmExpected.textContent = '— select a scope —';
+        confirmExpected.style.background = '#fff';
+        confirmExpected.style.color = '#991b1b';
+        confirmExpected.style.borderColor = '#fecaca';
+        confirmInput.value = '';
+        btnConfirm.disabled = true;
+        return;
+    }
+
+    var expected = 'RESET-' + scope.toUpperCase();
+    confirmExpected.textContent = expected;
+    confirmInput.value = '';
+    btnConfirm.disabled = true;
+
+    if (scope === 'ledger_and_operational') {
+        confirmExpected.style.background = '#7f1d1d';
+        confirmExpected.style.color = '#fff';
+        confirmExpected.style.borderColor = '#7f1d1d';
+    } else {
+        confirmExpected.style.background = '#fff';
+        confirmExpected.style.color = '#991b1b';
+        confirmExpected.style.borderColor = '#fecaca';
+    }
+}
+
+document.querySelectorAll('input[name="reset_scope"]').forEach(function(r){
+    r.addEventListener('change', updateExpectedText);
+});
+
+confirmInput.addEventListener('input', function(){
+    var scope = getScope();
+    if (!scope) return;
+    var expected = 'RESET-' + scope.toUpperCase();
+    btnConfirm.disabled = (this.value.trim() !== expected);
+});
+
+function openResetPanel() {
+    document.querySelectorAll('input[name="reset_scope"]').forEach(function(r){ r.checked = false; });
+    updateExpectedText();
+    feedback.style.display = 'none';
+    resetModal.classList.add('open');
+    document.body.style.overflow = 'hidden';
+}
+
+function closeResetPanel() {
+    resetModal.classList.remove('open');
+    document.body.style.overflow = '';
+}
+
+resetModal.addEventListener('click', function(e){
+    if (e.target === resetModal) closeResetPanel();
+});
+document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape' && resetModal.classList.contains('open')) closeResetPanel();
+});
+
+function doReset() {
+    var scope = getScope();
+    if (!scope) { alert('Select a scope.'); return; }
+
+    var expected = 'RESET-' + scope.toUpperCase();
+    if (confirmInput.value.trim() !== expected) {
+        alert('Confirmation text does not match.');
+        return;
+    }
+
+    if (!confirm(
+        'FINAL WARNING\n\n' +
+        'You are about to delete ledger data.\n' +
+        'Scope: ' + scope + '\n\n' +
+        'This CANNOT be undone. Continue?'
+    )) return;
+
+    btnConfirm.disabled = true;
+    btnConfirm.innerHTML = '<span class="glyphicon glyphicon-refresh"></span> Resetting...';
+    feedback.style.display = 'none';
+
+    var fd = new FormData();
+    fd.append('scope', scope);
+    fd.append('confirm', expected);
+
+    fetch('gl_test_hub_reset.php', { method: 'POST', body: fd })
+        .then(function(r){ return r.json(); })
+        .then(function(resp){
+            btnConfirm.disabled = false;
+            btnConfirm.innerHTML = '<span class="glyphicon glyphicon-trash"></span> Confirm Reset';
+
+            if (!resp.ok) {
+                feedback.className = 'feedback err';
+                feedback.innerHTML = '<strong>Reset failed:</strong> ' + (resp.error || 'unknown');
+                feedback.style.display = 'block';
+                return;
+            }
+
+            var html = '<strong>✓ Reset complete.</strong><br>';
+            html += '<table style="width:100%; margin-top:8px; font-size:12px; border-collapse:collapse;">';
+            html += '<tr style="border-bottom:1px solid rgba(0,0,0,0.1);"><th style="text-align:left; padding:4px 0;">Table</th><th style="text-align:right; padding:4px 0;">Rows Deleted</th></tr>';
+            Object.keys(resp.report).forEach(function(k){
+                html += '<tr><td style="padding:3px 0; font-family:monospace;">' + k + '</td><td style="text-align:right; font-family:monospace;">' + resp.report[k] + '</td></tr>';
+            });
+            html += '</table>';
+            html += '<div style="margin-top:10px; font-size:12px;">Reloading in 3 seconds…</div>';
+
+            feedback.className = 'feedback ok';
+            feedback.innerHTML = html;
+            feedback.style.display = 'block';
+
+            setTimeout(function(){ window.location.reload(); }, 3000);
+        })
+        .catch(function(err){
+            btnConfirm.disabled = false;
+            btnConfirm.innerHTML = '<span class="glyphicon glyphicon-trash"></span> Confirm Reset';
+            feedback.className = 'feedback err';
+            feedback.innerHTML = '<strong>Network error:</strong> ' + err;
+            feedback.style.display = 'block';
+        });
+}
+</script>
 
 </body>
 </html>

@@ -26,8 +26,23 @@ $cashInHand  = acct_balance($conn, '1010');
 $cashAtBank  = acct_balance($conn, '1020');
 $receivable  = acct_balance($conn, '1030');
 $advanceLiab = -acct_balance($conn, '2020');
-$payable     = -acct_balance($conn, '2010');
 
+// ============================================================
+// ACCOUNTS PAYABLE — sub-ledger (per-supplier) based
+// ============================================================
+$apRecon     = gl_ap_reconciliation($conn);
+$payable     = $apRecon['sub'];
+
+// Count active suppliers with a non-zero balance
+$suppliersWithBalance = 0;
+$supplierRows = gl_list_suppliers($conn, false);
+foreach ($supplierRows as $s) {
+    if (abs((float)$s['ap_balance']) > 0.01) $suppliersWithBalance++;
+}
+
+// ============================================================
+// Revenue / Expenses / Net Profit
+// ============================================================
 $stmt = $conn->prepare("
     SELECT COALESCE(SUM(CASE WHEN a.is_contra = 0 THEN l.credit - l.debit ELSE l.debit - l.credit END), 0) AS net
     FROM gl_journal_lines l
@@ -70,11 +85,31 @@ $recent = $conn->query("
     ORDER BY t.id DESC
     LIMIT 10
 ")->fetch_all(MYSQLI_ASSOC);
+
+// ============================================================
+// SESSION CLOSE indicator
+// ============================================================
+$closedCurrentSession = false;
+$currentSessionClosure = null;
+if ($sessionRow) {
+    $chkClosure = $conn->prepare("
+        SELECT id, closed_at, closed_by, total_revenue, total_expenses, net_profit
+        FROM gl_session_closures
+        WHERE session_id = ?
+        LIMIT 1
+    ");
+    $chkClosure->bind_param("i", $sessionRow['id']);
+    $chkClosure->execute();
+    $currentSessionClosure = $chkClosure->get_result()->fetch_assoc();
+    $chkClosure->close();
+    if ($currentSessionClosure) $closedCurrentSession = true;
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Accounting Dashboard</title>
     <style>
         * { box-sizing: border-box; }
@@ -85,7 +120,6 @@ $recent = $conn->query("
         }
         .dash-wrap { max-width: 1300px; margin: 30px auto; padding: 0 20px; }
 
-        /* Header */
         .dash-head {
             background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
             color: #fff;
@@ -115,7 +149,6 @@ $recent = $conn->query("
             background: #fff; color: #1e40af; text-decoration: none; border-color: #fff;
         }
 
-        /* Status banner */
         .status-banner {
             background: #fff;
             padding: 18px 30px;
@@ -135,7 +168,47 @@ $recent = $conn->query("
         .status-banner.ok  { color: #065f46; }
         .status-banner.bad { color: #991b1b; }
 
-        /* Section title */
+        .ap-banner {
+            background: #fff;
+            padding: 14px 24px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+            margin-bottom: 24px;
+            display: flex; align-items: center; gap: 12px;
+            font-size: 13px; font-weight: 600;
+            border-left: 5px solid;
+        }
+        .ap-banner.ok  { border-color: #059669; color: #065f46; }
+        .ap-banner.bad { border-color: #dc2626; color: #991b1b; }
+        .ap-banner .icon {
+            width: 28px; height: 28px; border-radius: 50%;
+            display: inline-flex; align-items: center; justify-content: center;
+            font-size: 13px; flex-shrink: 0;
+        }
+        .ap-banner.ok  .icon { background: #059669; color: #fff; }
+        .ap-banner.bad .icon { background: #dc2626; color: #fff; }
+        .ap-banner a { color: inherit; text-decoration: underline; margin-left: 6px; }
+
+        /* Session snapshot banner — shown only when current session is closed */
+        .snapshot-banner {
+            background: #fff;
+            padding: 14px 24px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+            margin-bottom: 24px;
+            display: flex; align-items: center; gap: 12px;
+            font-size: 13px; font-weight: 600;
+            border-left: 5px solid #1e40af;
+            color: #1e3a8a;
+        }
+        .snapshot-banner .icon {
+            width: 28px; height: 28px; border-radius: 50%;
+            background: #1e40af; color: #fff;
+            display: inline-flex; align-items: center; justify-content: center;
+            font-size: 13px; flex-shrink: 0;
+        }
+        .snapshot-banner a { color: inherit; text-decoration: underline; margin-left: 6px; }
+
         .section-title {
             font-size: 12px; font-weight: 800; color: #64748b;
             text-transform: uppercase; letter-spacing: 2px;
@@ -143,7 +216,6 @@ $recent = $conn->query("
         }
         .section-title:first-of-type { margin-top: 0; }
 
-        /* Big profit card */
         .profit-card {
             background: linear-gradient(135deg, #064e3b 0%, #065f46 100%);
             color: #fff;
@@ -183,7 +255,6 @@ $recent = $conn->query("
         }
         .profit-card .right .sub-val.muted { opacity: 0.75; font-size: 16px; }
 
-        /* Metric grid */
         .metric-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
@@ -197,6 +268,7 @@ $recent = $conn->query("
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
             border-left: 5px solid;
             transition: all 0.15s;
+            position: relative;
         }
         .metric-card:hover {
             box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
@@ -227,8 +299,17 @@ $recent = $conn->query("
         .metric-card .sub {
             font-size: 12px; color: #94a3b8; margin-top: 6px;
         }
+        .metric-card .sub a { color: #1e40af; text-decoration: none; font-weight: 600; }
+        .metric-card .sub a:hover { text-decoration: underline; }
 
-        /* Quick links */
+        .metric-card .warn-badge {
+            position: absolute; top: 14px; right: 14px;
+            background: #fee2e2; color: #991b1b;
+            font-size: 10px; font-weight: 800;
+            padding: 3px 8px; border-radius: 10px;
+            text-transform: uppercase; letter-spacing: 0.5px;
+        }
+
         .quick-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -258,8 +339,11 @@ $recent = $conn->query("
             display: flex; align-items: center; justify-content: center;
             font-size: 15px; flex-shrink: 0;
         }
+        .quick .ico.pink   { background: #fce7f3; color: #9d174d; }
+        .quick .ico.amber  { background: #fef3c7; color: #b45309; }
+        .quick .ico.teal   { background: #cffafe; color: #0e7490; }
+        .quick .ico.slate  { background: #f1f5f9; color: #475569; }
 
-        /* Recent list */
         .recent-list {
             background: #fff;
             border-radius: 12px;
@@ -311,7 +395,7 @@ $recent = $conn->query("
         @media print {
             @page { size: A4 portrait; margin: 12mm 10mm; }
             body { background: #fff; font-size: 10pt; }
-            .quick-grid, .btn-new, .status-banner .icon { display: none !important; }
+            .quick-grid, .btn-new, .status-banner .icon, .ap-banner, .snapshot-banner { display: none !important; }
             .dash-head { background: #fff !important; color: #000 !important; padding: 0 0 8pt 0; border-bottom: 2pt solid #000; border-radius: 0; box-shadow: none; text-align: center; }
             .dash-head h1 { font-size: 14pt; }
             .status-banner { border-radius: 0; box-shadow: none; padding: 6pt 0; border-bottom: 1pt solid #808080; }
@@ -362,6 +446,37 @@ $recent = $conn->query("
             <?php endif; ?>
         </div>
     </div>
+
+    <!-- AP reconciliation banner — only when broken -->
+    <?php if (!$apRecon['ok']): ?>
+        <div class="ap-banner bad">
+            <span class="icon"><span class="glyphicon glyphicon-warning-sign"></span></span>
+            <div>
+                <strong>Accounts Payable sub-ledger is broken.</strong>
+                GL 2010 = PKR <?php echo number_format($apRecon['gl'], 2); ?>
+                vs sum of supplier balances = PKR <?php echo number_format($apRecon['sub'], 2); ?>
+                (difference PKR <?php echo number_format($apRecon['diff'], 2); ?>).
+                Some AP journal lines were posted without a supplier (<code>party_id</code>).
+                <a href="gl_parties.php">Open Suppliers</a>
+            </div>
+        </div>
+    <?php endif; ?>
+
+    <!-- Session snapshot banner — only when the current session has been closed -->
+    <?php if ($closedCurrentSession): ?>
+        <div class="snapshot-banner">
+            <span class="icon"><span class="glyphicon glyphicon-lock"></span></span>
+            <div>
+                <strong>Current session has been snapshotted.</strong>
+                Closure #<?php echo (int)$currentSessionClosure['id'] ?>
+                recorded on <?php echo htmlspecialchars($currentSessionClosure['closed_at']); ?>.
+                Frozen: Revenue <?php echo number_format((float)$currentSessionClosure['total_revenue'], 2); ?>,
+                Expenses <?php echo number_format((float)$currentSessionClosure['total_expenses'], 2); ?>,
+                Net <?php echo number_format((float)$currentSessionClosure['net_profit'], 2); ?>.
+                <a href="gl_session_close.php">View all closures</a>
+            </div>
+        </div>
+    <?php endif; ?>
 
     <!-- Net Profit Hero -->
     <div class="profit-card <?php echo $netProfit < 0 ? 'loss' : ''; ?>">
@@ -414,11 +529,19 @@ $recent = $conn->query("
             <div class="value"><?php echo number_format($advanceLiab, 2); ?></div>
             <div class="sub">Owed to students as services</div>
         </div>
+
         <div class="metric-card red">
+            <?php if (!$apRecon['ok']): ?>
+                <span class="warn-badge">&#9888; Broken</span>
+            <?php endif; ?>
             <div class="label">Accounts Payable</div>
             <div class="value"><?php echo number_format($payable, 2); ?></div>
-            <div class="sub">Owed to suppliers</div>
+            <div class="sub">
+                Owed to <?php echo (int)$suppliersWithBalance; ?> supplier<?php echo $suppliersWithBalance === 1 ? '' : 's'; ?>
+                &middot; <a href="gl_parties.php">Open Suppliers</a>
+            </div>
         </div>
+
         <div class="metric-card purple">
             <div class="label">Total Obligations</div>
             <div class="value"><?php echo number_format($advanceLiab + $payable, 2); ?></div>
@@ -429,6 +552,22 @@ $recent = $conn->query("
     <!-- Quick Links -->
     <div class="section-title">Reports &amp; Actions</div>
     <div class="quick-grid">
+        <a href="gl_parties.php" class="quick">
+            <span class="ico pink"><span class="glyphicon glyphicon-user"></span></span>
+            Suppliers
+        </a>
+        <a href="gl_ap_aging.php" class="quick">
+            <span class="ico pink"><span class="glyphicon glyphicon-time"></span></span>
+            AP Aging
+        </a>
+        <a href="gl_purchase_add.php" class="quick">
+            <span class="ico amber"><span class="glyphicon glyphicon-shopping-cart"></span></span>
+            New Credit Purchase
+        </a>
+        <a href="gl_voucher_add.php" class="quick">
+            <span class="ico amber"><span class="glyphicon glyphicon-duplicate"></span></span>
+            New Voucher
+        </a>
         <a href="gl_trial_balance.php" class="quick">
             <span class="ico"><span class="glyphicon glyphicon-list-alt"></span></span>
             Trial Balance
@@ -453,13 +592,17 @@ $recent = $conn->query("
             <span class="ico"><span class="glyphicon glyphicon-tasks"></span></span>
             Chart of Accounts
         </a>
-         <a href="gl_voucher_add.php" class="quick">
-            <span class="ico"><span class="glyphicon glyphicon-tasks"></span></span>
-             Vouchers
-        </a>
         <a href="gl_opening_balance.php" class="quick">
-            <span class="ico"><span class="glyphicon glyphicon-tasks"></span></span>
-             Opening Balance
+            <span class="ico slate"><span class="glyphicon glyphicon-cog"></span></span>
+            Opening Balance
+        </a>
+        <a href="gl_user_activity.php" class="quick">
+            <span class="ico slate"><span class="glyphicon glyphicon-eye-open"></span></span>
+            User Activity
+        </a>
+        <a href="gl_session_close.php" class="quick">
+            <span class="ico teal"><span class="glyphicon glyphicon-lock"></span></span>
+            Session Close
         </a>
     </div>
 

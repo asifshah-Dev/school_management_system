@@ -23,11 +23,6 @@ if (!isset($conn) || !($conn instanceof mysqli)) {
 
 class VoucherService
 {
-    /**
-     * Cash account codes by voucher type.
-     * CPV/CRV → 1010 Cash in Hand
-     * BPV/BRV → 1020 Cash at Bank
-     */
     private const CASH_ACCOUNT_CODES = [
         'CPV' => '1010',
         'CRV' => '1010',
@@ -35,9 +30,6 @@ class VoucherService
         'BRV' => '1020',
     ];
 
-    /**
-     * Valid payment methods for bank vouchers (BPV/BRV).
-     */
     public const BANK_PAYMENT_METHODS = [
         'cheque',
         'online',
@@ -46,9 +38,6 @@ class VoucherService
         'other',
     ];
 
-    /**
-     * Valid voucher types.
-     */
     public const VOUCHER_TYPES = ['CPV', 'CRV', 'BPV', 'BRV'];
 
     private mysqli $conn;
@@ -62,10 +51,6 @@ class VoucherService
     // Number generation
     // =========================================================================
 
-    /**
-     * Reserve the next voucher number for the given type and year.
-     * Calls the stored procedure sp_next_voucher_number which handles atomicity.
-     */
     public function nextVoucherNumber(string $type, int $year): string
     {
         if (!in_array($type, self::VOUCHER_TYPES, true)) {
@@ -95,55 +80,64 @@ class VoucherService
     /**
      * Create a new voucher in DRAFT state.
      *
-     * @param array $data {
-     *   voucher_type:   'CPV'|'CRV'|'BPV'|'BRV',
-     *   entry_date:     'YYYY-MM-DD',
-     *   session_id:     int,
-     *   amount:         float,
-     *   party_name:     string,
-     *   party_contact:  string|null,
-     *   payment_method: string|null,   // required for BPV/BRV
-     *   reference_number: string|null,
-     *   bank_name:      string|null,
-     *   account_id:     int,           // non-cash side
-     *   narration:      string|null,
-     *   attachment_path: string|null,
-     *   created_by:     int,
-     * }
-     * @return array { id, voucher_number }
+     * INSERT has 15 placeholders (status is literal 'DRAFT').
+     * Column order and bind order MUST match exactly:
+     *
+     *   1. voucher_type       s
+     *   2. voucher_number     s
+     *   3. entry_date         s
+     *   4. session_id         i
+     *   5. amount             d
+     *   6. party_name         s
+     *   7. party_contact      s
+     *   8. party_id           i
+     *   9. payment_method     s
+     *  10. reference_number   s
+     *  11. bank_name          s
+     *  12. account_id         i
+     *  13. narration          s
+     *  14. attachment_path    s
+     *  15. created_by         i
      */
     public function createDraft(array $data): array
     {
         $this->validateVoucherData($data, true);
 
-        $year = (int)substr($data['entry_date'], 0, 4);
+        $year   = (int)substr($data['entry_date'], 0, 4);
         $number = $this->nextVoucherNumber($data['voucher_type'], $year);
 
         $stmt = $this->conn->prepare("
             INSERT INTO vouchers
               (voucher_type, voucher_number, entry_date, session_id, amount,
-               party_name, party_contact, payment_method, reference_number, bank_name,
+               party_name, party_contact, party_id, payment_method, reference_number, bank_name,
                account_id, narration, attachment_path,
                status, created_by)
             VALUES
-              (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?)
+              (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?)
         ");
+
+        $partyId = isset($data['party_id']) && (int)$data['party_id'] > 0
+                 ? (int)$data['party_id']
+                 : null;
+
+        // Type string: s s s i d s s i s s s i s s i  = "sssidssisssissi" (15 chars)
         $stmt->bind_param(
-            "sssids" . "ssss" . "issi",
-            $data['voucher_type'],
-            $number,
-            $data['entry_date'],
-            $data['session_id'],
-            $data['amount'],
-            $data['party_name'],
-            $data['party_contact'],
-            $data['payment_method'],
-            $data['reference_number'],
-            $data['bank_name'],
-            $data['account_id'],
-            $data['narration'],
-            $data['attachment_path'],
-            $data['created_by']
+            "sssidssisssissi",
+            $data['voucher_type'],     // 1  s
+            $number,                   // 2  s
+            $data['entry_date'],       // 3  s
+            $data['session_id'],       // 4  i
+            $data['amount'],           // 5  d
+            $data['party_name'],       // 6  s
+            $data['party_contact'],    // 7  s
+            $partyId,                  // 8  i
+            $data['payment_method'],   // 9  s
+            $data['reference_number'], // 10 s
+            $data['bank_name'],        // 11 s
+            $data['account_id'],       // 12 i
+            $data['narration'],        // 13 s
+            $data['attachment_path'],  // 14 s
+            $data['created_by']        // 15 i
         );
 
         if (!$stmt->execute()) {
@@ -159,6 +153,23 @@ class VoucherService
 
     /**
      * Update a draft voucher. Only works while status = DRAFT.
+     *
+     * UPDATE has 13 placeholders (12 SET + 1 WHERE id).
+     * Bind order:
+     *
+     *   1. entry_date          s
+     *   2. session_id          i
+     *   3. amount              d
+     *   4. party_name          s
+     *   5. party_contact       s
+     *   6. party_id            i
+     *   7. payment_method      s
+     *   8. reference_number    s
+     *   9. bank_name           s
+     *  10. account_id          i
+     *  11. narration           s
+     *  12. attachment_path     s
+     *  13. id (WHERE)          i
      */
     public function updateDraft(int $voucherId, array $data): void
     {
@@ -175,26 +186,34 @@ class VoucherService
         $stmt = $this->conn->prepare("
             UPDATE vouchers
                SET entry_date = ?, session_id = ?, amount = ?,
-                   party_name = ?, party_contact = ?,
+                   party_name = ?, party_contact = ?, party_id = ?,
                    payment_method = ?, reference_number = ?, bank_name = ?,
                    account_id = ?, narration = ?, attachment_path = ?
              WHERE id = ? AND status = 'DRAFT'
         ");
+
+        $partyId = isset($data['party_id']) && (int)$data['party_id'] > 0
+                 ? (int)$data['party_id']
+                 : null;
+
+        // Type string: s i d s s i s s s i s s i  = "sidsississisii" (13 chars)
         $stmt->bind_param(
-            "sids" . "ssss" . "issi",
-            $data['entry_date'],
-            $data['session_id'],
-            $data['amount'],
-            $data['party_name'],
-            $data['party_contact'],
-            $data['payment_method'],
-            $data['reference_number'],
-            $data['bank_name'],
-            $data['account_id'],
-            $data['narration'],
-            $data['attachment_path'],
-            $voucherId
+            "sidsississisii",
+            $data['entry_date'],       // 1  s
+            $data['session_id'],       // 2  i
+            $data['amount'],           // 3  d
+            $data['party_name'],       // 4  s
+            $data['party_contact'],    // 5  s
+            $partyId,                  // 6  i
+            $data['payment_method'],   // 7  s
+            $data['reference_number'], // 8  s
+            $data['bank_name'],        // 9  s
+            $data['account_id'],       // 10 i
+            $data['narration'],        // 11 s
+            $data['attachment_path'],  // 12 s
+            $voucherId                 // 13 i
         );
+
         if (!$stmt->execute()) {
             $err = $stmt->error;
             $stmt->close();
@@ -203,9 +222,6 @@ class VoucherService
         $stmt->close();
     }
 
-    /**
-     * Delete a draft voucher.
-     */
     public function deleteDraft(int $voucherId): void
     {
         $existing = $this->getVoucher($voucherId);
@@ -226,13 +242,6 @@ class VoucherService
     // Posting
     // =========================================================================
 
-    /**
-     * Post a DRAFT voucher to the GL.
-     *
-     * @param int $voucherId
-     * @param int $postedBy    users.id
-     * @return int             the new gl_transactions.id
-     */
     public function postVoucher(int $voucherId, int $postedBy): int
     {
         $v = $this->getVoucher($voucherId);
@@ -243,7 +252,6 @@ class VoucherService
             throw new RuntimeException("Only DRAFT vouchers can be posted. Current: " . $v['status']);
         }
 
-        // Resolve cash/bank account
         $cashCode = self::CASH_ACCOUNT_CODES[$v['voucher_type']];
         $cashAcc  = gl_get_account_by_code($this->conn, $cashCode);
         if (!$cashAcc) {
@@ -251,17 +259,17 @@ class VoucherService
         }
         $cashAccountId = (int)$cashAcc['id'];
 
-        // Resolve the non-cash account (already stored on the voucher)
         $otherAcc = gl_get_account($this->conn, (int)$v['account_id']);
         if (!$otherAcc) {
             throw new RuntimeException("Account #{$v['account_id']} not found");
         }
 
-        // Build the journal lines based on voucher type
-        // CPV/BPV (payment):  Dr non-cash account, Cr cash/bank
-        // CRV/BRV (receipt):  Dr cash/bank,      Cr non-cash account
         $amount = round((float)$v['amount'], 2);
         $isPayment = in_array($v['voucher_type'], ['CPV', 'BPV'], true);
+
+        $partyId = isset($v['party_id']) && (int)$v['party_id'] > 0
+                 ? (int)$v['party_id']
+                 : null;
 
         $lines = [];
         if ($isPayment) {
@@ -270,6 +278,7 @@ class VoucherService
                 'debit'      => $amount,
                 'credit'     => 0.00,
                 'memo'       => $v['narration'] ?: ('Voucher ' . $v['voucher_number']),
+                'party_id'   => $partyId,
             ];
             $lines[] = [
                 'account_id' => $cashAccountId,
@@ -289,10 +298,10 @@ class VoucherService
                 'debit'      => 0.00,
                 'credit'     => $amount,
                 'memo'       => $v['narration'] ?: ('Voucher ' . $v['voucher_number']),
+                'party_id'   => $partyId,
             ];
         }
 
-        // Post via the standard procedure
         $glError = null;
         $txnId = post_journal_entry($this->conn, [
             'entry_date'  => $v['entry_date'],
@@ -311,7 +320,6 @@ class VoucherService
             throw new RuntimeException("GL post failed: " . ($glError ?: 'unknown'));
         }
 
-        // Update voucher to POSTED
         $stmt = $this->conn->prepare("
             UPDATE vouchers
                SET status = 'POSTED',
@@ -335,9 +343,6 @@ class VoucherService
     // Cancel / Reverse
     // =========================================================================
 
-    /**
-     * Cancel a DRAFT voucher (no GL effect).
-     */
     public function cancelDraft(int $voucherId): void
     {
         $v = $this->getVoucher($voucherId);
@@ -354,9 +359,6 @@ class VoucherService
         $stmt->close();
     }
 
-    /**
-     * Reverse a POSTED voucher's GL entry and mark the voucher CANCELLED.
-     */
     public function reverseVoucher(int $voucherId, string $reason, int $postedBy): void
     {
         $v = $this->getVoucher($voucherId);
@@ -396,9 +398,6 @@ class VoucherService
     // Read
     // =========================================================================
 
-    /**
-     * Fetch a single voucher with joined user/account details.
-     */
     public function getVoucher(int $voucherId): ?array
     {
         $stmt = $this->conn->prepare("
@@ -422,14 +421,6 @@ class VoucherService
         return $row ?: null;
     }
 
-    /**
-     * List vouchers with filters.
-     *
-     * @param array $filters {
-     *   voucher_type, status, from_date, to_date, search, session_id, page, per_page
-     * }
-     * @return array { rows: [], total: int, page: int, per_page: int, total_pages: int }
-     */
     public function listVouchers(array $filters = []): array
     {
         $where = " WHERE 1=1 ";
@@ -470,7 +461,6 @@ class VoucherService
             $types .= "sss";
         }
 
-        // Count
         $countSql = "SELECT COUNT(*) AS cnt FROM vouchers v" . $where;
         $countStmt = $this->conn->prepare($countSql);
         if (!empty($params)) $countStmt->bind_param($types, ...$params);
@@ -478,7 +468,6 @@ class VoucherService
         $total = (int)$countStmt->get_result()->fetch_assoc()['cnt'];
         $countStmt->close();
 
-        // Page
         $page = max(1, (int)($filters['page'] ?? 1));
         $perPage = min(500, max(10, (int)($filters['per_page'] ?? 50)));
         $offset = ($page - 1) * $perPage;
@@ -517,12 +506,6 @@ class VoucherService
     // Validation
     // =========================================================================
 
-    /**
-     * Validate voucher data before insert/update.
-     *
-     * @param array $data
-     * @param bool $isCreate  If true, voucher_type is required.
-     */
     private function validateVoucherData(array $data, bool $isCreate): void
     {
         if ($isCreate) {
@@ -549,7 +532,6 @@ class VoucherService
 
         $type = $data['voucher_type'] ?? null;
 
-        // Bank vouchers require payment_method
         if (in_array($type, ['BPV','BRV'], true)) {
             if (empty($data['payment_method'])) {
                 throw new InvalidArgumentException("Payment method required for bank vouchers");
@@ -559,7 +541,6 @@ class VoucherService
             }
         }
 
-        // Account type validation
         if ($type !== null) {
             $acc = gl_get_account($this->conn, (int)$data['account_id']);
             if (!$acc) {
@@ -568,12 +549,10 @@ class VoucherService
             $accType = $acc['account_type'];
 
             if (in_array($type, ['CPV','BPV'], true)) {
-                // Payments: debit side is expense or liability (or any non-asset for adjustments)
                 if (!in_array($accType, ['EXPENSE','LIABILITY'], true)) {
                     throw new InvalidArgumentException("For a payment voucher, account must be Expense or Liability");
                 }
             } else {
-                // Receipts: credit side is revenue or asset receivable
                 if (!in_array($accType, ['REVENUE','ASSET'], true)) {
                     throw new InvalidArgumentException("For a receipt voucher, account must be Revenue or Asset");
                 }

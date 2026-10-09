@@ -692,6 +692,371 @@ if ($user_id) {
   }
 </style>
 
+<?php if (basename($_SERVER['PHP_SELF']) === 'index.php'): ?>
+<?php
+$dashboard_username = trim((string) ($_SESSION['username'] ?? 'Account'));
+$dashboard_initials = strtoupper(substr($dashboard_username, 0, 2));
+$dashboard_icon_for_title = static function ($title) {
+    $title = strtolower((string) $title);
+    $icon_rules = [
+        ['dashboard', 'fa-gauge-high'],
+        ['student', 'fa-user-graduate'],
+        ['admission', 'fa-user-plus'],
+        ['parent', 'fa-people-roof'],
+        ['teacher', 'fa-chalkboard-user'],
+        ['staff', 'fa-people-group'],
+        ['attendance', 'fa-calendar-check'],
+        ['fee', 'fa-coins'],
+        ['payment', 'fa-credit-card'],
+        ['salary', 'fa-money-check-dollar'],
+        ['finance', 'fa-wallet'],
+        ['expense', 'fa-receipt'],
+        ['class', 'fa-chalkboard'],
+        ['section', 'fa-users'],
+        ['subject', 'fa-book-open'],
+        ['exam', 'fa-file-pen'],
+        ['result', 'fa-square-poll-vertical'],
+        ['timetable', 'fa-calendar-days'],
+        ['report', 'fa-chart-pie'],
+        ['transport', 'fa-bus'],
+        ['vehicle', 'fa-truck'],
+        ['library', 'fa-book'],
+        ['book', 'fa-book-open'],
+        ['inventory', 'fa-boxes-stacked'],
+        ['hostel', 'fa-building'],
+        ['message', 'fa-comments'],
+        ['notice', 'fa-bullhorn'],
+        ['event', 'fa-calendar-day'],
+        ['website', 'fa-globe'],
+        ['setting', 'fa-gear'],
+        ['role', 'fa-shield-halved'],
+        ['permission', 'fa-key'],
+        ['user', 'fa-users'],
+        ['account', 'fa-address-card'],
+        ['certificate', 'fa-certificate'],
+        ['subscription', 'fa-rotate'],
+        ['gateway', 'fa-arrow-right-arrow-left'],
+        ['app', 'fa-table-cells'],
+        ['hr', 'fa-briefcase'],
+        ['logout', 'fa-right-from-bracket']
+    ];
+    foreach ($icon_rules as [$keyword, $icon]) {
+        if (strpos($title, $keyword) !== false) {
+            return $icon;
+        }
+    }
+    return 'fa-layer-group';
+};
+$dashboard_due_notifications = [];
+if (isset($upcoming_dues_result) && $upcoming_dues_result instanceof mysqli_result) {
+    while ($due_notification = $upcoming_dues_result->fetch_assoc()) {
+        $dashboard_due_notifications[] = $due_notification;
+    }
+}
+$dashboard_accessible_urls = [];
+foreach ($role_modules as $dashboard_module) {
+    if (!empty($dashboard_module['url']) && $dashboard_module['url'] !== '#') {
+        $dashboard_accessible_urls[] = $dashboard_module['url'];
+    }
+    foreach (($dashboard_module['children'] ?? []) as $dashboard_child) {
+        if (!empty($dashboard_child['url']) && $dashboard_child['url'] !== '#') {
+            $dashboard_accessible_urls[] = $dashboard_child['url'];
+        }
+    }
+}
+$dashboard_quick_actions = [
+    ['url' => 'student_registration.php', 'icon' => 'fa-user-plus', 'label' => 'New student'],
+    ['url' => 'fee_collection.php', 'icon' => 'fa-money-bill-wave', 'label' => 'Collect fee'],
+    ['url' => 'attendance.php', 'icon' => 'fa-calendar-check', 'label' => 'Attendance'],
+    ['url' => 'expense.php', 'icon' => 'fa-receipt', 'label' => 'Add expense']
+];
+$dashboard_quick_actions = array_values(array_filter($dashboard_quick_actions, function ($action) use ($dashboard_accessible_urls) {
+    return in_array($action['url'], $dashboard_accessible_urls, true);
+}));
+?>
+<header class="dashboard-topbar">
+  <button type="button" class="dashboard-menu-toggle" id="dashboardSidebarToggle" aria-label="Toggle navigation" aria-expanded="false">
+    <i class="fa-solid fa-bars"></i>
+  </button>
+  <a class="dashboard-brand" href="index.php">
+    <img src="logo2.png" alt="">
+    <span>DAR-E-ARQAM <small>SCHOOL AND COLLEGE</small></span>
+  </a>
+  <div class="dashboard-topbar-actions">
+    <button type="button" class="dashboard-topbar-icon" id="dashboardSearchToggle" aria-label="Search students" aria-expanded="false">
+      <i class="fa-solid fa-magnifying-glass"></i>
+    </button>
+    <?php if (!empty($dashboard_quick_actions)): ?>
+    <div class="dashboard-topbar-menu-wrap">
+      <button type="button" class="dashboard-topbar-icon" data-dashboard-menu="quickActionsMenu" aria-label="Quick actions" aria-expanded="false">
+        <i class="fa-solid fa-plus"></i>
+      </button>
+      <div class="dashboard-topbar-menu dashboard-quick-menu" id="quickActionsMenu" hidden>
+        <div class="dashboard-menu-heading">Quick actions</div>
+        <?php foreach ($dashboard_quick_actions as $quick_action): ?>
+          <a href="<?php echo htmlspecialchars($quick_action['url'], ENT_QUOTES, 'UTF-8'); ?>">
+            <i class="fa-solid <?php echo htmlspecialchars($quick_action['icon'], ENT_QUOTES, 'UTF-8'); ?>"></i>
+            <?php echo htmlspecialchars($quick_action['label'], ENT_QUOTES, 'UTF-8'); ?>
+          </a>
+        <?php endforeach; ?>
+      </div>
+    </div>
+    <?php endif; ?>
+    <div class="dashboard-topbar-menu-wrap">
+      <button type="button" class="dashboard-topbar-icon dashboard-notification-button" data-dashboard-menu="notificationsMenu" aria-label="Upcoming fee reminders" aria-expanded="false">
+        <i class="fa-regular fa-bell"></i>
+        <?php if (!empty($dashboard_due_notifications)): ?>
+          <span class="dashboard-notification-count"><?php echo count($dashboard_due_notifications); ?></span>
+        <?php endif; ?>
+      </button>
+      <div class="dashboard-topbar-menu dashboard-notifications-menu" id="notificationsMenu" hidden>
+        <div class="dashboard-menu-heading">Upcoming fee dues</div>
+        <?php if (!empty($dashboard_due_notifications)): ?>
+          <?php foreach (array_slice($dashboard_due_notifications, 0, 5) as $due_notification): ?>
+            <a class="dashboard-notification-item" href="student_feecards.php">
+              <span class="dashboard-notification-icon"><i class="fa-solid fa-calendar-day"></i></span>
+              <span>
+                <strong><?php echo (int) $due_notification['student_count']; ?> students</strong>
+                <small><?php echo htmlspecialchars(date('M j, Y', strtotime($due_notification['due_date'])), ENT_QUOTES, 'UTF-8'); ?> · Rs. <?php echo number_format((float) $due_notification['total_amount']); ?></small>
+              </span>
+            </a>
+          <?php endforeach; ?>
+          <a class="dashboard-notifications-all" href="student_feecards.php">View fee cards</a>
+        <?php else: ?>
+          <p class="dashboard-notifications-empty">No upcoming fee dues.</p>
+        <?php endif; ?>
+      </div>
+    </div>
+    <button type="button" class="dashboard-topbar-icon" id="dashboardModulesToggle" aria-label="Browse modules">
+      <i class="fa-solid fa-grip"></i>
+    </button>
+    <span class="dashboard-account-name"><?php echo htmlspecialchars($dashboard_username, ENT_QUOTES, 'UTF-8'); ?></span>
+    <div class="dashboard-topbar-menu-wrap">
+      <button type="button" class="dashboard-user-avatar" data-dashboard-menu="userMenu" aria-label="Account options" aria-expanded="false" title="<?php echo htmlspecialchars($dashboard_username, ENT_QUOTES, 'UTF-8'); ?>">
+        <?php echo htmlspecialchars($dashboard_initials, ENT_QUOTES, 'UTF-8'); ?>
+      </button>
+      <div class="dashboard-topbar-menu dashboard-user-menu" id="userMenu" hidden>
+        <div class="dashboard-menu-heading"><?php echo htmlspecialchars($dashboard_username, ENT_QUOTES, 'UTF-8'); ?></div>
+        <a href="logout.php"><i class="fa-solid fa-right-from-bracket"></i> Logout</a>
+      </div>
+    </div>
+  </div>
+</header>
+
+<aside class="dashboard-sidebar" id="dashboardSidebar" aria-label="Main navigation">
+  <nav class="dashboard-sidebar-nav">
+    <label class="dashboard-sidebar-search">
+      <i class="fa-solid fa-magnifying-glass"></i>
+      <input type="search" id="dashboardSidebarSearch" placeholder="Search menu" autocomplete="off">
+    </label>
+    <div class="dashboard-nav-caption">MAIN NAVIGATION</div>
+    <a class="dashboard-sidebar-link active" href="index.php">
+      <i class="fa-solid fa-gauge-high"></i>
+      <span>Dashboard</span>
+    </a>
+
+    <div class="dashboard-nav-caption dashboard-nav-caption-spaced">MANAGEMENT</div>
+    <?php foreach ($role_modules as $module_id => $module): ?>
+      <?php
+      if (isset($module_parents[$module_id])) {
+          continue;
+      }
+      $module_title = (string) ($module['title'] ?? '');
+      $module_url = (string) ($module['url'] ?? '#');
+      $module_children = $module['children'] ?? [];
+      $module_dom_id = 'dashboard-module-' . (int) $module_id;
+      ?>
+      <?php if (!empty($module_children)): ?>
+        <section class="dashboard-sidebar-group">
+          <button type="button" class="dashboard-sidebar-link dashboard-sidebar-group-toggle" aria-expanded="false" aria-controls="<?php echo htmlspecialchars($module_dom_id, ENT_QUOTES, 'UTF-8'); ?>">
+            <i class="fa-solid <?php echo htmlspecialchars($dashboard_icon_for_title($module_title), ENT_QUOTES, 'UTF-8'); ?>"></i>
+            <span><?php echo htmlspecialchars($module_title, ENT_QUOTES, 'UTF-8'); ?></span>
+            <i class="fa-solid fa-chevron-down dashboard-sidebar-chevron"></i>
+          </button>
+          <div class="dashboard-sidebar-submenu" id="<?php echo htmlspecialchars($module_dom_id, ENT_QUOTES, 'UTF-8'); ?>" hidden>
+            <?php foreach ($module_children as $child): ?>
+              <?php
+              $child_title = (string) ($child['title'] ?? 'Untitled');
+              $child_url = (string) ($child['url'] ?? '#');
+              ?>
+              <a class="dashboard-sidebar-sublink" href="<?php echo htmlspecialchars($child_url, ENT_QUOTES, 'UTF-8'); ?>">
+                <i class="fa-solid <?php echo htmlspecialchars($dashboard_icon_for_title($child_title), ENT_QUOTES, 'UTF-8'); ?>"></i>
+                <span><?php echo htmlspecialchars($child_title, ENT_QUOTES, 'UTF-8'); ?></span>
+              </a>
+            <?php endforeach; ?>
+          </div>
+        </section>
+      <?php elseif ($module_url !== '#'): ?>
+        <a class="dashboard-sidebar-link" href="<?php echo htmlspecialchars($module_url, ENT_QUOTES, 'UTF-8'); ?>">
+          <i class="fa-solid <?php echo htmlspecialchars($dashboard_icon_for_title($module_title), ENT_QUOTES, 'UTF-8'); ?>"></i>
+          <span><?php echo htmlspecialchars($module_title, ENT_QUOTES, 'UTF-8'); ?></span>
+        </a>
+      <?php endif; ?>
+    <?php endforeach; ?>
+  </nav>
+  <div class="dashboard-sidebar-footer">
+    <a class="dashboard-sidebar-link" href="logout.php">
+      <i class="fa-solid fa-right-from-bracket"></i>
+      <span>Logout</span>
+    </a>
+  </div>
+</aside>
+<button type="button" class="dashboard-sidebar-backdrop" id="dashboardSidebarBackdrop" aria-label="Close navigation"></button>
+
+<script>
+  (function () {
+    var toggle = document.getElementById('dashboardSidebarToggle');
+    var backdrop = document.getElementById('dashboardSidebarBackdrop');
+
+    function syncNavigationForViewport() {
+      var isMobile = window.matchMedia('(max-width: 767.98px)').matches;
+      if (isMobile) {
+        document.body.classList.remove('dashboard-sidebar-collapsed');
+      } else {
+        document.body.classList.remove('dashboard-sidebar-open');
+      }
+      if (toggle) {
+        var isExpanded = isMobile
+          ? document.body.classList.contains('dashboard-sidebar-open')
+          : !document.body.classList.contains('dashboard-sidebar-collapsed');
+        toggle.setAttribute('aria-expanded', String(isExpanded));
+      }
+    }
+
+    syncNavigationForViewport();
+    window.addEventListener('resize', syncNavigationForViewport);
+
+    function closeMobileSidebar() {
+      document.body.classList.remove('dashboard-sidebar-open');
+      if (toggle && window.matchMedia('(max-width: 767.98px)').matches) {
+        toggle.setAttribute('aria-expanded', 'false');
+      }
+    }
+
+    if (toggle) {
+      toggle.addEventListener('click', function () {
+        if (window.matchMedia('(max-width: 767.98px)').matches) {
+          var isOpen = document.body.classList.toggle('dashboard-sidebar-open');
+          toggle.setAttribute('aria-expanded', String(isOpen));
+        } else {
+          var isCollapsed = document.body.classList.toggle('dashboard-sidebar-collapsed');
+          toggle.setAttribute('aria-expanded', String(!isCollapsed));
+        }
+      });
+    }
+
+    if (backdrop) backdrop.addEventListener('click', closeMobileSidebar);
+
+    document.querySelectorAll('.dashboard-sidebar-group-toggle').forEach(function (groupToggle) {
+      groupToggle.addEventListener('click', function () {
+        var submenu = document.getElementById(groupToggle.getAttribute('aria-controls'));
+        var isExpanded = groupToggle.getAttribute('aria-expanded') === 'true';
+        groupToggle.setAttribute('aria-expanded', String(!isExpanded));
+        if (submenu) submenu.hidden = isExpanded;
+      });
+    });
+
+    document.querySelectorAll('[data-dashboard-menu]').forEach(function (menuButton) {
+      menuButton.addEventListener('click', function (event) {
+        event.stopPropagation();
+        var menu = document.getElementById(menuButton.getAttribute('data-dashboard-menu'));
+        var shouldOpen = menu && menu.hidden;
+        document.querySelectorAll('.dashboard-topbar-menu').forEach(function (item) {
+          item.hidden = true;
+        });
+        document.querySelectorAll('[data-dashboard-menu]').forEach(function (button) {
+          button.setAttribute('aria-expanded', 'false');
+        });
+        if (menu && shouldOpen) {
+          menu.hidden = false;
+          menuButton.setAttribute('aria-expanded', 'true');
+        }
+      });
+    });
+
+    document.addEventListener('click', function (event) {
+      if (!event.target.closest('.dashboard-topbar-menu-wrap')) {
+        document.querySelectorAll('.dashboard-topbar-menu').forEach(function (menu) {
+          menu.hidden = true;
+        });
+        document.querySelectorAll('[data-dashboard-menu]').forEach(function (button) {
+          button.setAttribute('aria-expanded', 'false');
+        });
+      }
+    });
+
+    var searchToggle = document.getElementById('dashboardSearchToggle');
+    if (searchToggle) {
+      searchToggle.addEventListener('click', function () {
+        var searchInput = document.getElementById('searchInput');
+        if (searchInput) {
+          var isOpen = document.body.classList.toggle('dashboard-student-search-open');
+          searchToggle.setAttribute('aria-expanded', String(isOpen));
+          if (isOpen) {
+            searchInput.focus();
+            searchInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }
+      });
+    }
+
+    var modulesToggle = document.getElementById('dashboardModulesToggle');
+    if (modulesToggle) {
+      modulesToggle.addEventListener('click', function () {
+        var moduleHub = document.getElementById('ecosystemHub');
+        if (moduleHub) {
+          moduleHub.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          var moduleSearch = document.getElementById('moduleSearch');
+          if (moduleSearch) moduleSearch.focus({ preventScroll: true });
+        }
+      });
+    }
+
+    var sidebarSearch = document.getElementById('dashboardSidebarSearch');
+    if (sidebarSearch) {
+      sidebarSearch.addEventListener('input', function () {
+        var searchTerm = sidebarSearch.value.trim().toLowerCase();
+        document.querySelectorAll('.dashboard-sidebar-group').forEach(function (group) {
+          var toggle = group.querySelector('.dashboard-sidebar-group-toggle');
+          var submenu = group.querySelector('.dashboard-sidebar-submenu');
+          var groupMatches = toggle && toggle.innerText.toLowerCase().includes(searchTerm);
+          var visibleChildren = 0;
+
+          group.querySelectorAll('.dashboard-sidebar-sublink').forEach(function (link) {
+            var matches = !searchTerm || groupMatches || link.innerText.toLowerCase().includes(searchTerm);
+            link.hidden = !matches;
+            if (matches) visibleChildren += 1;
+          });
+
+          group.hidden = searchTerm !== '' && !groupMatches && visibleChildren === 0;
+          if (searchTerm && !group.hidden && submenu && !groupMatches) {
+            submenu.hidden = false;
+            if (toggle) toggle.setAttribute('aria-expanded', 'true');
+          }
+        });
+
+        document.querySelectorAll('.dashboard-sidebar-nav > .dashboard-sidebar-link').forEach(function (link) {
+          link.hidden = searchTerm !== '' && !link.innerText.toLowerCase().includes(searchTerm);
+        });
+      });
+    }
+
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') {
+        closeMobileSidebar();
+        document.body.classList.remove('dashboard-student-search-open');
+        if (searchToggle) searchToggle.setAttribute('aria-expanded', 'false');
+        document.querySelectorAll('.dashboard-topbar-menu').forEach(function (menu) {
+          menu.hidden = true;
+        });
+        document.querySelectorAll('[data-dashboard-menu]').forEach(function (button) {
+          button.setAttribute('aria-expanded', 'false');
+        });
+      }
+    });
+  }());
+</script>
+<?php else: ?>
 <!-- Top Quick Links Bar -->
 <div class="top-quick-bar" style="background-color: #3b3a85 !important;">
   <div class="quick-links-horizontal">
@@ -792,5 +1157,6 @@ if ($user_id) {
     </div>
   </div>
 </nav>
+<?php endif; ?>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>

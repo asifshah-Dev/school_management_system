@@ -17,9 +17,8 @@ $currentSession = $conn->query("
 $currentSessionId = $currentSession ? (int)$currentSession['id'] : 0;
 
 $errors = [];
-$success = null;
 
-// Form state (for redisplay on error)
+// Form state
 $form = [
     'voucher_type'     => $_POST['voucher_type']     ?? 'CPV',
     'entry_date'       => $_POST['entry_date']       ?? date('Y-m-d'),
@@ -27,6 +26,7 @@ $form = [
     'amount'           => $_POST['amount']           ?? '',
     'party_name'       => $_POST['party_name']       ?? '',
     'party_contact'    => $_POST['party_contact']    ?? '',
+    'party_id'         => $_POST['party_id']         ?? '',
     'payment_method'   => $_POST['payment_method']   ?? '',
     'reference_number' => $_POST['reference_number'] ?? '',
     'bank_name'        => $_POST['bank_name']        ?? '',
@@ -40,12 +40,10 @@ $form = [
 // ---------------------------------------------------------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_voucher'])) {
 
-    // Handle file upload
     if (!empty($_FILES['attachment']['name'])) {
         $uploadDir = __DIR__ . '/uploads/vouchers/' . date('Y');
-        if (!is_dir($uploadDir)) {
-            @mkdir($uploadDir, 0755, true);
-        }
+        if (!is_dir($uploadDir)) @mkdir($uploadDir, 0755, true);
+
         $ext = strtolower(pathinfo($_FILES['attachment']['name'], PATHINFO_EXTENSION));
         $allowed = ['jpg','jpeg','png','pdf'];
         if (!in_array($ext, $allowed, true)) {
@@ -65,6 +63,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_voucher'])) {
 
     $action = $_POST['save_action'] ?? 'draft';
 
+    // If posting to 2010, require a supplier
+    if (!empty($form['account_id'])) {
+        $acc = gl_get_account($conn, (int)$form['account_id']);
+        if ($acc && $acc['code'] === '2010' && (int)$form['party_id'] <= 0) {
+            $errors[] = "Please select a supplier when posting to Accounts Payable (2010).";
+        }
+    }
+
     if (empty($errors)) {
         try {
             $data = [
@@ -74,6 +80,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_voucher'])) {
                 'amount'           => (float)$form['amount'],
                 'party_name'       => trim($form['party_name']),
                 'party_contact'    => trim($form['party_contact']) ?: null,
+                'party_id'         => (int)$form['party_id'] > 0 ? (int)$form['party_id'] : null,
                 'payment_method'   => trim($form['payment_method']) ?: null,
                 'reference_number' => trim($form['reference_number']) ?: null,
                 'bank_name'        => trim($form['bank_name']) ?: null,
@@ -101,37 +108,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_voucher'])) {
 }
 
 // ---------------------------------------------------------------------------
-// Load accounts for the dropdown
+// Load accounts
 // ---------------------------------------------------------------------------
 $allAccounts = gl_list_accounts($conn, null, true);
-
-$paymentAccounts = [];   // For CPV/BPV: Expenses and Liabilities
-$receiptAccounts = [];   // For CRV/BRV: Revenue and Assets
-
+$paymentAccounts = [];
+$receiptAccounts = [];
 foreach ($allAccounts as $a) {
-    if (in_array($a['account_type'], ['EXPENSE','LIABILITY'], true)) {
-        $paymentAccounts[] = $a;
-    }
-    if (in_array($a['account_type'], ['REVENUE','ASSET'], true)) {
-        $receiptAccounts[] = $a;
-    }
-}
-
-// Suggest next voucher number for display (not reserved)
-$previewNumber = null;
-try {
-    $year = (int)substr($form['entry_date'], 0, 4);
-    // We don't actually call the procedure here — just show the format
-    $previewNumber = $form['voucher_type'] . '-' . $year . '-XXXX';
-} catch (Exception $e) {
-    // silent
+    if (in_array($a['account_type'], ['EXPENSE','LIABILITY'], true)) $paymentAccounts[] = $a;
+    if (in_array($a['account_type'], ['REVENUE','ASSET'], true))     $receiptAccounts[] = $a;
 }
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>New Voucher</title>
+    <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
     <style>
         * { box-sizing: border-box; }
         body {
@@ -195,41 +188,49 @@ try {
         .field input[type=number],
         .field select,
         .field textarea {
-            width: 100%;
-            height: 44px;
-            padding: 10px 14px;
-            border: 1px solid #cbd5e1;
-            border-radius: 8px;
-            font-size: 15px;
-            background: #fff;
-            color: #0f172a;
-            transition: all 0.15s;
+            width: 100%; height: 44px; padding: 10px 14px;
+            border: 1px solid #cbd5e1; border-radius: 8px;
+            font-size: 15px; background: #fff; color: #0f172a;
+            transition: all 0.15s; font-family: inherit;
         }
-        .field textarea { height: auto; min-height: 80px; resize: vertical; font-family: inherit; }
-        .field input:focus,
-        .field select:focus,
-        .field textarea:focus {
+        .field textarea { height: auto; min-height: 80px; resize: vertical; }
+        .field input:focus, .field select:focus, .field textarea:focus {
             outline: none; border-color: #1e40af;
             box-shadow: 0 0 0 3px rgba(30, 64, 175, 0.1);
         }
         .field .help { font-size: 12px; color: #64748b; margin-top: 5px; }
 
         .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-        .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
-        @media (max-width: 700px) {
-            .grid-2, .grid-3 { grid-template-columns: 1fr; }
+        @media (max-width: 700px) { .grid-2 { grid-template-columns: 1fr; } }
+
+        /* Select2 tuning to match our theme */
+        .select2-container .select2-selection--single {
+            height: 44px !important;
+            border: 1px solid #cbd5e1 !important;
+            border-radius: 8px !important;
+            padding: 6px 14px;
         }
+        .select2-container--default .select2-selection--single .select2-selection__rendered {
+            line-height: 30px !important;
+            color: #0f172a !important;
+            font-size: 15px;
+        }
+        .select2-container--default .select2-selection--single .select2-selection__arrow {
+            height: 42px !important;
+        }
+        .select2-container--focus .select2-selection--single,
+        .select2-container--open .select2-selection--single {
+            border-color: #1e40af !important;
+            box-shadow: 0 0 0 3px rgba(30, 64, 175, 0.1) !important;
+        }
+        .select2-dropdown { border-color: #cbd5e1; border-radius: 8px; }
 
         /* Type selector cards */
         .type-cards {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 12px;
-            margin-bottom: 18px;
+            display: grid; grid-template-columns: repeat(4, 1fr);
+            gap: 12px; margin-bottom: 18px;
         }
-        @media (max-width: 800px) {
-            .type-cards { grid-template-columns: repeat(2, 1fr); }
-        }
+        @media (max-width: 800px) { .type-cards { grid-template-columns: repeat(2, 1fr); } }
         .type-card {
             display: flex; flex-direction: column; align-items: center;
             gap: 8px; padding: 16px 12px;
@@ -247,8 +248,7 @@ try {
         .type-card .icon {
             width: 44px; height: 44px;
             display: flex; align-items: center; justify-content: center;
-            border-radius: 10px;
-            font-size: 20px; color: #fff;
+            border-radius: 10px; font-size: 20px; color: #fff;
         }
         .type-card .label {
             font-size: 12px; font-weight: 700; text-transform: uppercase;
@@ -262,18 +262,15 @@ try {
         /* Amount preview */
         .amount-preview {
             background: #f0f5ff; border: 1px solid #bfdbfe;
-            border-radius: 10px; padding: 16px 20px;
-            margin-bottom: 18px;
+            border-radius: 10px; padding: 16px 20px; margin-bottom: 18px;
         }
         .amount-preview .lbl {
             font-size: 11px; color: #64748b; font-weight: 700;
-            text-transform: uppercase; letter-spacing: 1px;
-            margin-bottom: 6px;
+            text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;
         }
         .amount-preview .val {
             font-family: 'SF Mono', 'Monaco', monospace;
-            font-size: 22px; font-weight: 700;
-            color: #1e40af;
+            font-size: 22px; font-weight: 700; color: #1e40af;
         }
 
         .error-box {
@@ -294,7 +291,7 @@ try {
             font-size: 14px; font-weight: 600; line-height: 1.2;
             border: none; cursor: pointer; white-space: nowrap;
             display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-            text-decoration: none; transition: all 0.15s;
+            text-decoration: none; transition: all 0.15s; font-family: inherit;
         }
         .actions .btn-ghost { background: #64748b; border: 1px solid #64748b; color: #fff !important; }
         .actions .btn-ghost:hover { background: #475569; color: #fff !important; text-decoration: none; border-color: #475569; }
@@ -304,15 +301,8 @@ try {
         .actions .btn-post:hover { background: #1e3a8a; color: #fff !important; }
 
         @media (max-width: 600px) {
-            .actions {
-                display: grid;
-                grid-template-columns: 1fr;
-                justify-content: stretch;
-            }
-            .btn {
-                width: 100%;
-                min-width: 0;
-            }
+            .actions { display: grid; grid-template-columns: 1fr; justify-content: stretch; }
+            .btn { width: 100%; min-width: 0; }
         }
     </style>
 </head>
@@ -458,6 +448,7 @@ try {
                     <optgroup label="Expenses" id="opt_expenses">
                         <?php foreach ($paymentAccounts as $a): if ($a['account_type'] !== 'EXPENSE') continue; ?>
                             <option value="<?php echo (int)$a['id']; ?>"
+                                    data-code="<?php echo htmlspecialchars($a['code']); ?>"
                                 <?php echo ((int)$form['account_id'] === (int)$a['id']) ? 'selected' : ''; ?>>
                                 <?php echo htmlspecialchars($a['code'] . ' — ' . $a['name']); ?>
                             </option>
@@ -466,6 +457,7 @@ try {
                     <optgroup label="Liabilities" id="opt_liabilities">
                         <?php foreach ($paymentAccounts as $a): if ($a['account_type'] !== 'LIABILITY') continue; ?>
                             <option value="<?php echo (int)$a['id']; ?>"
+                                    data-code="<?php echo htmlspecialchars($a['code']); ?>"
                                 <?php echo ((int)$form['account_id'] === (int)$a['id']) ? 'selected' : ''; ?>>
                                 <?php echo htmlspecialchars($a['code'] . ' — ' . $a['name']); ?>
                             </option>
@@ -474,6 +466,7 @@ try {
                     <optgroup label="Revenue" id="opt_revenue">
                         <?php foreach ($receiptAccounts as $a): if ($a['account_type'] !== 'REVENUE') continue; ?>
                             <option value="<?php echo (int)$a['id']; ?>"
+                                    data-code="<?php echo htmlspecialchars($a['code']); ?>"
                                 <?php echo ((int)$form['account_id'] === (int)$a['id']) ? 'selected' : ''; ?>>
                                 <?php echo htmlspecialchars($a['code'] . ' — ' . $a['name']); ?>
                             </option>
@@ -482,6 +475,7 @@ try {
                     <optgroup label="Assets" id="opt_assets">
                         <?php foreach ($receiptAccounts as $a): if ($a['account_type'] !== 'ASSET') continue; ?>
                             <option value="<?php echo (int)$a['id']; ?>"
+                                    data-code="<?php echo htmlspecialchars($a['code']); ?>"
                                 <?php echo ((int)$form['account_id'] === (int)$a['id']) ? 'selected' : ''; ?>>
                                 <?php echo htmlspecialchars($a['code'] . ' — ' . $a['name']); ?>
                             </option>
@@ -489,6 +483,28 @@ try {
                     </optgroup>
                 </select>
                 <div class="help" id="account_help">The non-cash account for this transaction</div>
+            </div>
+
+            <!-- Supplier dropdown — shown only when account = 2010 -->
+            <div class="field" id="supplier_field" style="display:none;">
+                <label for="party_id">Supplier <span class="required">*</span></label>
+                <select id="party_id" name="party_id">
+                    <option value="">— Select supplier —</option>
+                    <?php
+                    $supRes = $conn->query("
+                        SELECT id, name FROM gl_parties
+                        WHERE party_type='SUPPLIER' AND status=1
+                        ORDER BY name COLLATE utf8mb4_general_ci
+                    ");
+                    while ($sp = $supRes->fetch_assoc()):
+                    ?>
+                        <option value="<?= (int)$sp['id'] ?>"
+                            <?= ((int)$form['party_id'] === (int)$sp['id']) ? 'selected' : '' ?>>
+                            <?= htmlspecialchars($sp['name']) ?>
+                        </option>
+                    <?php endwhile; ?>
+                </select>
+                <div class="help">Required when posting to <code>2010 Accounts Payable</code></div>
             </div>
 
             <div class="field">
@@ -528,29 +544,29 @@ try {
 </div>
 
 <script>
+// Load jQuery only if not already present
+if (typeof jQuery === 'undefined') {
+    document.write('<script src="https://code.jquery.com/jquery-3.7.1.min.js"><\/script>');
+}
+</script>
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+<script>
 function onTypeChange(type) {
-    // Highlight selected card
     document.querySelectorAll('.type-card').forEach(el => {
         el.classList.toggle('selected', el.dataset.type === type);
     });
 
-    // Show/hide bank fields
     const bankFields = document.getElementById('bank_fields');
     const isBank = (type === 'BPV' || type === 'BRV');
     bankFields.style.display = isBank ? '' : 'none';
     document.getElementById('payment_method').required = isBank;
 
-    // Update account dropdown groups
     const isPayment = (type === 'CPV' || type === 'BPV');
-    const showExpLiab = isPayment;
-    const showRevAsset = !isPayment;
+    document.getElementById('opt_expenses').style.display    = isPayment ? '' : 'none';
+    document.getElementById('opt_liabilities').style.display = isPayment ? '' : 'none';
+    document.getElementById('opt_revenue').style.display     = isPayment ? 'none' : '';
+    document.getElementById('opt_assets').style.display      = isPayment ? 'none' : '';
 
-    document.getElementById('opt_expenses').style.display    = showExpLiab ? '' : 'none';
-    document.getElementById('opt_liabilities').style.display = showExpLiab ? '' : 'none';
-    document.getElementById('opt_revenue').style.display     = showRevAsset ? '' : 'none';
-    document.getElementById('opt_assets').style.display      = showRevAsset ? '' : 'none';
-
-    // Update labels
     const accountLabel = document.getElementById('account_label');
     const partyHelp    = document.getElementById('party_help');
     const accountHelp  = document.getElementById('account_help');
@@ -565,15 +581,18 @@ function onTypeChange(type) {
         accountHelp.textContent  = 'The revenue or receivable being recorded';
     }
 
-    // Clear the account dropdown selection if the currently selected one
-    // is no longer visible
+    // Reset account selection if it's now hidden
     const sel = document.getElementById('account_id');
     const opt = sel.options[sel.selectedIndex];
-    if (opt && opt.parentNode) {
-        if (opt.parentNode.style.display === 'none') {
+    if (opt && opt.parentNode && opt.parentNode.style.display === 'none') {
+        if (window.jQuery && jQuery(sel).data('select2')) {
+            jQuery(sel).val('').trigger('change');
+        } else {
             sel.value = '';
         }
     }
+
+    syncSupplierField();
 }
 
 function updateAmountPreview() {
@@ -582,11 +601,48 @@ function updateAmountPreview() {
         amt.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-// Initialize on page load
+function syncSupplierField() {
+    var accSel = document.getElementById('account_id');
+    var supField = document.getElementById('supplier_field');
+    var supSel = document.getElementById('party_id');
+    if (!accSel || !supField || !supSel) return;
+
+    var opt = accSel.options[accSel.selectedIndex];
+    var code = opt ? (opt.getAttribute('data-code') || '') : '';
+    if (code === '2010') {
+        supField.style.display = '';
+        supSel.required = true;
+    } else {
+        supField.style.display = 'none';
+        supSel.required = false;
+        if (window.jQuery && jQuery(supSel).data('select2')) {
+            jQuery(supSel).val('').trigger('change');
+        } else {
+            supSel.value = '';
+        }
+    }
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     const currentType = document.querySelector('input[name="voucher_type"]:checked').value;
     onTypeChange(currentType);
     updateAmountPreview();
+
+    // Init Select2 if available
+    if (window.jQuery && jQuery.fn.select2) {
+        jQuery('#session_id').select2({ width: '100%' });
+        jQuery('#account_id').select2({ width: '100%', placeholder: '— Select Account —' });
+        jQuery('#party_id').select2({
+            width: '100%',
+            placeholder: '— Select supplier —',
+            dropdownParent: jQuery('body')
+        });
+
+        // Wire Select2 changes back into our visibility logic
+        jQuery('#account_id').on('change', function(){ syncSupplierField(); });
+    } else {
+        document.getElementById('account_id').addEventListener('change', syncSupplierField);
+    }
 });
 </script>
 

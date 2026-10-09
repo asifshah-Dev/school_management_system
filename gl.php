@@ -687,3 +687,201 @@ function gl_quick_ledger_balances(mysqli $conn, int $accountId, string $fromDate
         'closing' => $closing,
     ];
 }
+
+
+/* ============================================================
+   SUPPLIER / PARTY SUB-LEDGER HELPERS  (v3 — schema-verified)
+   gl_parties columns: id, party_type, name, phone, email, address,
+                       contact, mobile, tax_id, legacy_id, status,
+                       created_at, updated_at
+   gl_transactions:    id, idempotency_key, entry_date, session_id,
+                       description, reference_type, reference_id,
+                       posted_by, posted_at, reversal_of, status
+   ============================================================ */
+
+/**
+ * List all suppliers with live AP balance from gl_journal_lines.
+ * Balance: credit - debit on account 2010. Positive = school owes supplier.
+ */
+function gl_list_suppliers(mysqli $conn, bool $include_inactive = false): array {
+    $where = $include_inactive ? "1=1" : "p.status = 1";
+    $sql = "
+        SELECT
+            p.id,
+            p.party_type,
+            p.name,
+            p.phone,
+            p.email,
+            p.address,
+            p.contact,
+            p.mobile,
+            p.tax_id,
+            p.legacy_id,
+            p.status,
+            p.created_at,
+            COALESCE((
+                SELECT SUM(l.credit - l.debit)
+                FROM gl_journal_lines l
+                JOIN gl_accounts a ON a.id = l.account_id
+                WHERE l.party_id = p.id AND a.code = '2010'
+            ), 0) AS ap_balance,
+            COALESCE((
+                SELECT SUM(l.debit - l.credit)
+                FROM gl_journal_lines l
+                JOIN gl_accounts a ON a.id = l.account_id
+                WHERE l.party_id = p.id AND a.code <> '2010'
+            ), 0) AS other_balance
+        FROM gl_parties p
+        WHERE p.party_type = 'SUPPLIER'
+          AND $where
+        ORDER BY p.name ASC
+    ";
+    $res = $conn->query($sql);
+    $rows = [];
+    if ($res) { while ($r = $res->fetch_assoc()) $rows[] = $r; }
+    return $rows;
+}
+
+/**
+ * Fetch one supplier by id. Returns null if not found or not a SUPPLIER.
+ */
+function gl_get_supplier(mysqli $conn, int $id): ?array {
+    if ($id <= 0) return null;
+    $stmt = $conn->prepare("
+        SELECT id, party_type, name, phone, email, address,
+               contact, mobile, tax_id, legacy_id, status, created_at
+        FROM gl_parties
+        WHERE id = ? AND party_type = 'SUPPLIER'
+        LIMIT 1
+    ");
+    $stmt->bind_param("i", $id);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    return $row ?: null;
+}
+
+/**
+ * Live AP balance for one supplier (credit - debit on 2010).
+ */
+function gl_supplier_balance(mysqli $conn, int $party_id): float {
+    if ($party_id <= 0) return 0.0;
+    $stmt = $conn->prepare("
+        SELECT COALESCE(SUM(l.credit - l.debit), 0) AS bal
+        FROM gl_journal_lines l
+        JOIN gl_accounts a ON a.id = l.account_id
+        WHERE l.party_id = ? AND a.code = '2010'
+    ");
+    $stmt->bind_param("i", $party_id);
+    $stmt->execute();
+    $bal = (float)$stmt->get_result()->fetch_assoc()['bal'];
+    $stmt->close();
+    return $bal;
+}
+
+/**
+ * Total GL balance of account 2010.
+ */
+function gl_total_ap_balance(mysqli $conn): float {
+    $res = $conn->query("
+        SELECT COALESCE(SUM(l.credit - l.debit), 0) AS bal
+        FROM gl_journal_lines l
+        JOIN gl_accounts a ON a.id = l.account_id
+        WHERE a.code = '2010'
+    ");
+    return $res ? (float)$res->fetch_assoc()['bal'] : 0.0;
+}
+
+/**
+ * Sum of all supplier sub-ledger balances (only lines with party_id set).
+ */
+function gl_total_subledger_balance(mysqli $conn): float {
+    $res = $conn->query("
+        SELECT COALESCE(SUM(x.party_balance), 0) AS bal
+        FROM (
+            SELECT l.party_id, SUM(l.credit - l.debit) AS party_balance
+            FROM gl_journal_lines l
+            JOIN gl_accounts a ON a.id = l.account_id
+            WHERE a.code = '2010' AND l.party_id IS NOT NULL
+            GROUP BY l.party_id
+        ) x
+    ");
+    return $res ? (float)$res->fetch_assoc()['bal'] : 0.0;
+}
+
+/**
+ * Reconciliation: GL 2010 total vs sum of party sub-ledgers.
+ */
+function gl_ap_reconciliation(mysqli $conn): array {
+    $gl   = gl_total_ap_balance($conn);
+    $sub  = gl_total_subledger_balance($conn);
+    $diff = round($gl - $sub, 2);
+    return ['gl' => $gl, 'sub' => $sub, 'diff' => $diff, 'ok' => abs($diff) < 0.01];
+}
+
+/**
+ * Full ledger for one supplier. Every line tagged to this party, chronologically.
+ * Joins LEFT to vouchers for the voucher number when available.
+ */
+function gl_supplier_ledger(mysqli $conn, int $party_id, ?string $from = null, ?string $to = null): array {
+    if ($party_id <= 0) return [];
+
+    $sql = "
+        SELECT
+            l.id             AS line_id,
+            t.id             AS txn_id,
+            t.entry_date     AS txn_date,
+            t.description    AS narration,
+            t.reference_type,
+            t.reference_id,
+            t.status         AS txn_status,
+            v.voucher_number AS voucher_no,
+            a.id             AS account_id,
+            a.code           AS account_code,
+            a.name           AS account_name,
+            l.debit,
+            l.credit,
+            l.memo
+        FROM gl_journal_lines l
+        JOIN gl_transactions t ON t.id = l.transaction_id
+        JOIN gl_accounts     a ON a.id = l.account_id
+        LEFT JOIN vouchers   v ON v.id = t.reference_id
+                              AND t.reference_type = 'VOUCHER'
+        WHERE l.party_id = ?
+    ";
+    $params = [$party_id];
+    $types  = "i";
+
+    if ($from) { $sql .= " AND t.entry_date >= ?"; $params[] = $from; $types .= "s"; }
+    if ($to)   { $sql .= " AND t.entry_date <= ?"; $params[] = $to;   $types .= "s"; }
+
+    $sql .= " ORDER BY t.entry_date ASC, t.id ASC, l.id ASC";
+
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param($types, ...$params);
+    $stmt->execute();
+    $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $stmt->close();
+    return $rows;
+}
+
+/**
+ * Opening AP balance for a supplier, from all lines strictly before $fromDate.
+ */
+function gl_supplier_opening_ap(mysqli $conn, int $party_id, string $fromDate): float {
+    if ($party_id <= 0) return 0.0;
+    $stmt = $conn->prepare("
+        SELECT COALESCE(SUM(l.credit - l.debit), 0) AS bal
+        FROM gl_journal_lines l
+        JOIN gl_accounts a ON a.id = l.account_id
+        JOIN gl_transactions t ON t.id = l.transaction_id
+        WHERE l.party_id = ?
+          AND a.code = '2010'
+          AND t.entry_date < ?
+    ");
+    $stmt->bind_param("is", $party_id, $fromDate);
+    $stmt->execute();
+    $bal = (float)$stmt->get_result()->fetch_assoc()['bal'];
+    $stmt->close();
+    return $bal;
+}

@@ -72,7 +72,6 @@ if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
         $conn->begin_transaction();
         $transaction_started = true;
 
-        // Validate: expense exists and is active
         $check_expense = $conn->prepare("SELECT * FROM expenses WHERE id = ? AND status = 1");
         $check_expense->bind_param("i", $delete_id);
         $check_expense->execute();
@@ -111,7 +110,6 @@ if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
             }
         }
 
-        // Soft delete - update expense status to 0
         $soft_delete = $conn->prepare("UPDATE expenses SET status = 0 WHERE id = ?");
         $soft_delete->bind_param("i", $delete_id);
         if (!$soft_delete->execute()) {
@@ -119,7 +117,6 @@ if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
         }
         $soft_delete->close();
 
-        // Remove inventory details
         $delete_inv = $conn->prepare("DELETE FROM expanse_inventory_details WHERE expense_id = ?");
         $delete_inv->bind_param("i", $delete_id);
         $delete_inv->execute();
@@ -142,7 +139,7 @@ if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
 }
 
 // ============================================================================
-// HANDLER: AJAX product/inventory operations (unchanged)
+// HANDLER: AJAX product/inventory operations (unchanged) + quick add supplier
 // ============================================================================
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest') {
     $conn->query("SET time_zone = '+05:00'");
@@ -158,7 +155,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WIT
         }
         $response['success'] = true;
         $response['products'] = $products;
-    } 
+    }
     elseif ($action == 'add_product') {
         $product_name = trim($_POST['product_name']);
         $category = trim($_POST['category']);
@@ -245,6 +242,29 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WIT
         }
         $stmt->close();
     }
+    elseif ($action == 'quick_add_supplier') {
+        $name  = trim($_POST['name'] ?? '');
+        $phone = trim($_POST['phone'] ?? '');
+        $email = trim($_POST['email'] ?? '');
+
+        if ($name === '') {
+            $response['message'] = 'Supplier name is required.';
+        } else {
+            $stmt = $conn->prepare("
+                INSERT INTO gl_parties (party_type, name, phone, email, status)
+                VALUES ('SUPPLIER', ?, ?, ?, 1)
+            ");
+            $stmt->bind_param("sss", $name, $phone, $email);
+            if ($stmt->execute()) {
+                $response['success'] = true;
+                $response['id'] = $conn->insert_id;
+                $response['name'] = $name;
+            } else {
+                $response['message'] = 'Insert failed: ' . $stmt->error;
+            }
+            $stmt->close();
+        }
+    }
 
     header('Content-Type: application/json');
     echo json_encode($response);
@@ -252,13 +272,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WIT
 }
 
 // ============================================================================
-// HANDLER: Add/Edit expense with GL integration
+// HANDLER: Add/Edit expense with GL integration (AP-aware)
 // ============================================================================
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_expense'])) {
     $expense_categories_id = isset($_POST['expense_categories_id']) ? intval($_POST['expense_categories_id']) : 0;
     $payment_type = isset($_POST['payment_type']) ? trim($_POST['payment_type']) : '';
     $invoice_date = !empty($_POST['invoice_date']) ? trim($_POST['invoice_date']) : date('Y-m-d');
     $description = isset($_POST['description']) ? trim($_POST['description']) : '';
+    $supplier_id = isset($_POST['supplier_id']) ? intval($_POST['supplier_id']) : 0;
 
     $raw_amount = isset($_POST['total_amount']) ? floatval($_POST['total_amount']) : 0;
     $total_amount = abs($raw_amount);
@@ -273,8 +294,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_expense'])) {
         exit();
     }
 
-    if (empty($payment_type)) {
-        $_SESSION['message'] = "Error: Payment type is required!";
+    // Payment type is required ONLY if no supplier (i.e., immediate payment)
+    if ($supplier_id === 0 && empty($payment_type)) {
+        $_SESSION['message'] = "Error: Payment type is required when not using a supplier!";
         $_SESSION['message_type'] = "danger";
         header("Location: " . $_SERVER['PHP_SELF']);
         exit();
@@ -287,7 +309,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_expense'])) {
         exit();
     }
 
-    // Validate category
     $check_cat = $conn->prepare("SELECT id FROM expense_categories WHERE id = ? AND status = 1");
     $check_cat->bind_param("i", $expense_categories_id);
     $check_cat->execute();
@@ -310,12 +331,25 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_expense'])) {
         exit();
     }
 
-    $paymentAcc = gl_payment_account_for_expense($conn, $payment_type);
-    if ($paymentAcc <= 0) {
-        $_SESSION['message'] = "Error: GL account not found for payment type: $payment_type";
-        $_SESSION['message_type'] = "danger";
-        header("Location: " . $_SERVER['PHP_SELF']);
-        exit();
+    // Resolve supplier (if chosen)
+    $supplierRow = null;
+    if ($supplier_id > 0) {
+        $supplierRow = gl_get_supplier($conn, $supplier_id);
+        if (!$supplierRow) {
+            $_SESSION['message'] = "Error: Supplier #$supplier_id not found.";
+            $_SESSION['message_type'] = "danger";
+            header("Location: " . $_SERVER['PHP_SELF']);
+            exit();
+        }
+    } else {
+        // No supplier → resolve payment account for immediate cash/bank payment
+        $paymentAcc = gl_payment_account_for_expense($conn, $payment_type);
+        if ($paymentAcc <= 0) {
+            $_SESSION['message'] = "Error: GL account not found for payment type: $payment_type";
+            $_SESSION['message_type'] = "danger";
+            header("Location: " . $_SERVER['PHP_SELF']);
+            exit();
+        }
     }
 
     // Session for GL posting
@@ -369,15 +403,16 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_expense'])) {
                 }
             }
 
-            // Update expense row
+            // Update expense row (now includes supplier_id)
             $update_expense = $conn->prepare("
                 UPDATE expenses SET 
-                expense_categories_id = ?, payment_type = ?, total_amount = ?, 
+                expense_categories_id = ?, supplier_id = ?, payment_type = ?, total_amount = ?, 
                 description = ?, invoice_date = ?, status = ? 
                 WHERE id = ?
             ");
-            $update_expense->bind_param("isdssii", 
-                $expense_categories_id, $payment_type, $total_amount, 
+            $supplierIdOrNull = $supplier_id > 0 ? $supplier_id : null;
+            $update_expense->bind_param("iisdssii", 
+                $expense_categories_id, $supplierIdOrNull, $payment_type, $total_amount, 
                 $description, $invoice_date, $status, $expense_id
             );
 
@@ -387,44 +422,69 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_expense'])) {
             $update_expense->close();
 
             // Post new GL entry
-            $glErr = null;
-            $txnId = post_journal_entry($conn, [
-                'entry_date'  => $invoice_date,
-                'session_id'  => $sessionId,
-                'description' => "Expense #$expense_id edited: $description",
-                'ref_type'    => 'expense',
-                'ref_id'      => $expense_id,
-                'posted_by'   => $postedBy,
-                'idempotency' => 'expense_edit-' . $expense_id . '-' . time(),
-                'lines'       => [
-                    ['account_id' => $expenseAcc,  'debit'  => $total_amount, 'credit' => 0,
-                     'memo'       => "Expense (edited) — $description"],
-                    ['account_id' => $paymentAcc,  'debit'  => 0, 'credit' => $total_amount,
-                     'memo'       => "Paid via $payment_type"],
-                ],
-            ], $glErr);
+            if ($supplier_id > 0) {
+                $apAccRow = gl_get_account_by_code($conn, '2010');
+                if (!$apAccRow) throw new Exception("AP account 2010 not found.");
+                $apAccId = (int)$apAccRow['id'];
+
+                $glErr = null;
+                $txnId = post_journal_entry($conn, [
+                    'entry_date'  => $invoice_date,
+                    'session_id'  => $sessionId,
+                    'description' => "Expense #$expense_id (edited, credit from {$supplierRow['name']}): $description",
+                    'ref_type'    => 'expense',
+                    'ref_id'      => $expense_id,
+                    'posted_by'   => $postedBy,
+                    'idempotency' => 'expense_edit-' . $expense_id . '-' . time(),
+                    'lines'       => [
+                        ['account_id' => $expenseAcc, 'debit' => $total_amount, 'credit' => 0,
+                         'memo' => "Expense (edited) — $description"],
+                        ['account_id' => $apAccId,   'debit' => 0, 'credit' => $total_amount,
+                         'memo' => "Owed to {$supplierRow['name']}",
+                         'party_id' => $supplier_id],
+                    ],
+                ], $glErr);
+            } else {
+                $glErr = null;
+                $txnId = post_journal_entry($conn, [
+                    'entry_date'  => $invoice_date,
+                    'session_id'  => $sessionId,
+                    'description' => "Expense #$expense_id edited: $description",
+                    'ref_type'    => 'expense',
+                    'ref_id'      => $expense_id,
+                    'posted_by'   => $postedBy,
+                    'idempotency' => 'expense_edit-' . $expense_id . '-' . time(),
+                    'lines'       => [
+                        ['account_id' => $expenseAcc, 'debit'  => $total_amount, 'credit' => 0,
+                         'memo'       => "Expense (edited) — $description"],
+                        ['account_id' => $paymentAcc, 'debit'  => 0, 'credit' => $total_amount,
+                         'memo'       => "Paid via $payment_type"],
+                    ],
+                ], $glErr);
+            }
 
             if ($txnId <= 0) {
                 throw new Exception("GL post failed: " . ($glErr ?? 'unknown'));
             }
 
-            $_SESSION['message'] = "<div style='color: #3c763d; background-color: #dff0d8; border: 1px solid #d6e9c6; padding: 15px; border-radius: 4px;'><strong>✓ Expense Updated Successfully!</strong></div>";
+            $_SESSION['message'] = "<div style='color: #3c763d; background-color: #dff0d8; border: 1px solid #d6e9c6; padding: 15px; border-radius: 4px;'><strong>✓ Expense Updated Successfully!</strong>" . ($supplier_id > 0 ? " <em>(posted to AP — owed to {$supplierRow['name']})</em>" : "") . "</div>";
             $_SESSION['message_type'] = "success";
 
         } else {
             // === ADD MODE ===
             $expense_stmt = $conn->prepare("
                 INSERT INTO expenses 
-                (expense_categories_id, payment_type, total_amount, description, invoice_date, status) 
-                VALUES (?, ?, ?, ?, ?, ?)
+                (expense_categories_id, supplier_id, payment_type, total_amount, description, invoice_date, status) 
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             ");
 
             if (!$expense_stmt) {
                 throw new Exception("Prepare expenses failed: " . $conn->error);
             }
 
-            $expense_stmt->bind_param("isdssi", 
-                $expense_categories_id, $payment_type, $total_amount, 
+            $supplierIdOrNull = $supplier_id > 0 ? $supplier_id : null;
+            $expense_stmt->bind_param("iisdssi", 
+                $expense_categories_id, $supplierIdOrNull, $payment_type, $total_amount, 
                 $description, $invoice_date, $status
             );
 
@@ -439,29 +499,55 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_expense'])) {
                 throw new Exception("Failed to obtain new expense id after insert.");
             }
 
-            // GL: Post the expense
-            $glErr = null;
-            $txnId = post_journal_entry($conn, [
-                'entry_date'  => $invoice_date,
-                'session_id'  => $sessionId,
-                'description' => "Expense #$new_expense_id: $description",
-                'ref_type'    => 'expense',
-                'ref_id'      => $new_expense_id,
-                'posted_by'   => $postedBy,
-                'idempotency' => 'expense-' . $new_expense_id,
-                'lines'       => [
-                    ['account_id' => $expenseAcc, 'debit'  => $total_amount, 'credit' => 0,
-                     'memo'       => "Expense — $description"],
-                    ['account_id' => $paymentAcc, 'debit'  => 0, 'credit' => $total_amount,
-                     'memo'       => "Paid via $payment_type"],
-                ],
-            ], $glErr);
+            // GL: Post the expense — AP-aware
+            if ($supplier_id > 0) {
+                // Credit purchase → Dr Expense, Cr 2010 AP with party_id
+                $apAccRow = gl_get_account_by_code($conn, '2010');
+                if (!$apAccRow) throw new Exception("AP account 2010 not found.");
+                $apAccId = (int)$apAccRow['id'];
+
+                $glErr = null;
+                $txnId = post_journal_entry($conn, [
+                    'entry_date'  => $invoice_date,
+                    'session_id'  => $sessionId,
+                    'description' => "Expense #$new_expense_id (credit from {$supplierRow['name']}): $description",
+                    'ref_type'    => 'expense',
+                    'ref_id'      => $new_expense_id,
+                    'posted_by'   => $postedBy,
+                    'idempotency' => 'expense-' . $new_expense_id,
+                    'lines'       => [
+                        ['account_id' => $expenseAcc, 'debit' => $total_amount, 'credit' => 0,
+                         'memo' => "Expense — $description"],
+                        ['account_id' => $apAccId,   'debit' => 0, 'credit' => $total_amount,
+                         'memo' => "Owed to {$supplierRow['name']}",
+                         'party_id' => $supplier_id],
+                    ],
+                ], $glErr);
+            } else {
+                // Immediate payment → Dr Expense, Cr cash/bank
+                $glErr = null;
+                $txnId = post_journal_entry($conn, [
+                    'entry_date'  => $invoice_date,
+                    'session_id'  => $sessionId,
+                    'description' => "Expense #$new_expense_id: $description",
+                    'ref_type'    => 'expense',
+                    'ref_id'      => $new_expense_id,
+                    'posted_by'   => $postedBy,
+                    'idempotency' => 'expense-' . $new_expense_id,
+                    'lines'       => [
+                        ['account_id' => $expenseAcc, 'debit'  => $total_amount, 'credit' => 0,
+                         'memo'       => "Expense — $description"],
+                        ['account_id' => $paymentAcc, 'debit'  => 0, 'credit' => $total_amount,
+                         'memo'       => "Paid via $payment_type"],
+                    ],
+                ], $glErr);
+            }
 
             if ($txnId <= 0) {
                 throw new Exception("GL post failed: " . ($glErr ?? 'unknown'));
             }
 
-            $_SESSION['message'] = "<div style='color: #3c763d; background-color: #dff0d8; border: 1px solid #d6e9c6; padding: 15px; border-radius: 4px;'><strong>✓ Expense Saved Successfully!</strong></div>";
+            $_SESSION['message'] = "<div style='color: #3c763d; background-color: #dff0d8; border: 1px solid #d6e9c6; padding: 15px; border-radius: 4px;'><strong>✓ Expense Saved Successfully!</strong>" . ($supplier_id > 0 ? " <em>(posted to AP — owed to {$supplierRow['name']})</em>" : "") . "</div>";
             $_SESSION['message_type'] = "success";
         }
 
@@ -483,6 +569,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_expense'])) {
 <html lang="en">
 <head>
     <?php require_once('meta_inc.php'); ?>
+    <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
     <style>
         .amount-input { text-align: left; }
         .table-responsive { overflow-x: auto; }
@@ -549,6 +636,30 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_expense'])) {
         .modal {
             overflow-y: auto;
         }
+        /* Select2 theme match */
+        .select2-container .select2-selection--single {
+            height: 34px !important;
+            border: 1px solid #ccc !important;
+            border-radius: 4px !important;
+            padding: 2px 8px;
+        }
+        .select2-container--default .select2-selection--single .select2-selection__rendered {
+            line-height: 28px !important;
+            color: #333 !important;
+            font-size: 14px;
+        }
+        .select2-container--default .select2-selection--single .select2-selection__arrow {
+            height: 32px !important;
+        }
+        .supplier-hint {
+            background: #e8f4fd;
+            border-left: 3px solid #1e40af;
+            padding: 8px 12px;
+            font-size: 12px;
+            color: #1e40af;
+            margin-top: 6px;
+            border-radius: 4px;
+        }
     </style>
 </head>
 <body>
@@ -601,6 +712,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_expense'])) {
                         $expense_data = [
                             'id' => '',
                             'expense_categories_id' => '',
+                            'supplier_id' => '',
                             'payment_type' => 'Cash',
                             'total_amount' => '',
                             'description' => '',
@@ -648,18 +760,40 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_expense'])) {
                                     </select>
                                 </div>
                             </div>
-                            
+
+                            <!-- NEW: Supplier dropdown -->
                             <div class="col-md-4">
                                 <div class="form-group">
-                                    <label for="payment_type"><?php echo $translations[$lang]['payment_type']; ?> *</label>
-                                    <select class="form-control" id="payment_type" name="payment_type" required>
-                                        <option value="Cash" <?php echo ($expense_data['payment_type'] == 'Cash') ? 'selected' : ''; ?>>Cash</option>
-                                        <option value="Bank" <?php echo ($expense_data['payment_type'] == 'Bank') ? 'selected' : ''; ?>>Bank</option>
-                                        <option value="Cheque" <?php echo ($expense_data['payment_type'] == 'Cheque') ? 'selected' : ''; ?>>Cheque</option>
-                                    </select>
+                                    <label for="supplier_id">Supplier
+                                        <small class="text-muted">(optional)</small>
+                                    </label>
+                                    <div style="display:flex; gap:6px;">
+                                        <select class="form-control" id="supplier_id" name="supplier_id" style="flex:1;">
+                                            <option value="">— None / cash-bank payment —</option>
+                                            <?php
+                                            $supList = gl_list_suppliers($conn, false);
+                                            foreach ($supList as $sp):
+                                                $selected = (isset($expense_data['supplier_id']) && (int)$expense_data['supplier_id'] === (int)$sp['id']) ? 'selected' : '';
+                                            ?>
+                                                <option value="<?= (int)$sp['id'] ?>" <?= $selected ?>>
+                                                    <?= htmlspecialchars($sp['name']) ?>
+                                                    <?php if (abs((float)$sp['ap_balance']) > 0.01): ?>
+                                                        (Owed: <?= number_format((float)$sp['ap_balance'], 2) ?>)
+                                                    <?php endif; ?>
+                                                </option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                        <button type="button" class="btn btn-success btn-sm" id="btnQuickAddSupplier" title="Add new supplier">
+                                            <span class="glyphicon glyphicon-plus"></span>
+                                        </button>
+                                    </div>
+                                    <div class="supplier-hint" id="supplier_hint" style="display:none;">
+                                        <strong>Credit purchase:</strong> will post to <code>2010 Accounts Payable</code> tagged to this supplier.
+                                        <a href="gl_parties.php" target="_blank">Manage suppliers</a>
+                                    </div>
                                 </div>
                             </div>
-                            
+
                             <div class="col-md-4">
                                 <div class="form-group">
                                     <label for="invoice_date"><?php echo $translations[$lang]['invoice_date']; ?></label>
@@ -668,12 +802,23 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_expense'])) {
                                 </div>
                             </div>
                         </div>
-                        
+
                         <div class="row">
-                            <div class="col-md-12">
+                            <div class="col-md-4">
+                                <div class="form-group">
+                                    <label for="payment_type"><?php echo $translations[$lang]['payment_type']; ?> <span id="payment_required">*</span></label>
+                                    <select class="form-control" id="payment_type" name="payment_type">
+                                        <option value="Cash" <?php echo ($expense_data['payment_type'] == 'Cash') ? 'selected' : ''; ?>>Cash</option>
+                                        <option value="Bank" <?php echo ($expense_data['payment_type'] == 'Bank') ? 'selected' : ''; ?>>Bank</option>
+                                        <option value="Cheque" <?php echo ($expense_data['payment_type'] == 'Cheque') ? 'selected' : ''; ?>>Cheque</option>
+                                    </select>
+                                    <small class="text-muted" id="payment_hint">Ignored if a supplier is chosen</small>
+                                </div>
+                            </div>
+                            <div class="col-md-8">
                                 <div class="form-group">
                                     <label for="description"><?php echo $translations[$lang]['description']; ?></label>
-                                    <textarea class="form-control" id="description" name="description" rows="2"><?php 
+                                    <textarea class="form-control" id="description" name="description" rows="1"><?php 
                                         echo htmlspecialchars($expense_data['description']); 
                                     ?></textarea>
                                 </div>
@@ -736,9 +881,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_expense'])) {
                 <div class="panel-body">
 
                     <?php
-                    $query = "SELECT e.*, ec.title as expense_category_title 
+                    $query = "SELECT e.*, ec.title as expense_category_title,
+                                     p.name as supplier_name
                               FROM expenses e
                               LEFT JOIN expense_categories ec ON e.expense_categories_id = ec.id
+                              LEFT JOIN gl_parties p ON p.id = e.supplier_id
                               ORDER BY e.status DESC, e.invoice_date DESC, e.id DESC";
                     
                     $result = $conn->query($query);
@@ -752,6 +899,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_expense'])) {
                                         <th><?php echo $translations[$lang]['sr_no']; ?></th>
                                         <th><?php echo $translations[$lang]['invoice_date']; ?></th>
                                         <th><?php echo $translations[$lang]['expense_head']; ?></th>
+                                        <th>Supplier</th>
                                         <th><?php echo $translations[$lang]['payment_type']; ?></th>
                                         <th><?php echo $translations[$lang]['description']; ?></th>
                                         <th><?php echo $translations[$lang]['total_amount']; ?></th>
@@ -770,6 +918,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_expense'])) {
                                                 <?php echo htmlspecialchars(date('Y-m-d', strtotime($row['invoice_date']))); ?>
                                             </td>
                                             <td><?php echo htmlspecialchars($row['expense_category_title'] ? $row['expense_category_title'] : 'N/A'); ?></td>
+                                            <td>
+                                                <?php if (!empty($row['supplier_name'])): ?>
+                                                    <span style="color:#9d174d; font-weight:600;"><?= htmlspecialchars($row['supplier_name']) ?></span>
+                                                <?php else: ?>
+                                                    <span class="text-muted">—</span>
+                                                <?php endif; ?>
+                                            </td>
                                             <td><?php echo htmlspecialchars($row['payment_type']); ?></td>
                                             <td class="description-column" title="<?php echo htmlspecialchars($row['description']); ?>">
                                                 <?php echo htmlspecialchars($row['description'] ? $row['description'] : '-'); ?>
@@ -805,7 +960,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_expense'])) {
                                 </tbody>
                                 <tfoot>
                                     <tr class="active">
-                                        <th colspan="5" class="text-right">Total Active Expenses:</th>
+                                        <th colspan="6" class="text-right">Total Active Expenses:</th>
                                         <th class="amount-column">
                                             <?php
                                             $total_query = $conn->query("SELECT SUM(total_amount) as grand_total FROM expenses WHERE status = 1");
@@ -832,7 +987,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_expense'])) {
     </div>
 </div>
 
-<!-- Product Details Modal (unchanged from original) -->
+<!-- Product Details Modal (unchanged) -->
 <div class="modal fade" id="productDetailsModal" tabindex="-1" role="dialog" aria-labelledby="productDetailsModalLabel">
     <div class="modal-dialog modal-lg" role="document">
         <div class="modal-content">
@@ -974,21 +1129,112 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_expense'])) {
     </div>
 </div>
 
+<!-- NEW: Quick Add Supplier modal -->
+<div class="modal fade" id="quickSupplierModal" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header" style="background:#1e40af; color:#fff;">
+                <button type="button" class="close" data-dismiss="modal" style="color:#fff; opacity:0.8;"><span>&times;</span></button>
+                <h4 class="modal-title"><span class="glyphicon glyphicon-plus"></span> Quick Add Supplier</h4>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Name *</label>
+                    <input type="text" class="form-control" id="qs_name" placeholder="e.g. Ahmed Traders">
+                </div>
+                <div class="form-group">
+                    <label>Phone</label>
+                    <input type="text" class="form-control" id="qs_phone" placeholder="0300-1234567">
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="text" class="form-control" id="qs_email" placeholder="sales@supplier.com">
+                </div>
+                <div class="alert alert-info" style="margin-bottom:0; font-size:12px;">
+                    <strong>Tip:</strong> Add full details (address, NTN) later from the
+                    <a href="gl_parties.php" target="_blank">Suppliers page</a>.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="qs_save">Save Supplier</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 <script>
 $(document).ready(function() {
-    function updateAddDetailsButton() {
-        var expenseId = $('#expense_id').val();
-        if (expenseId && expenseId !== '') {
-            $('.btn-add-details').prop('disabled', false);
+    // === Select2 for supplier & category ===
+    if ($.fn.select2) {
+        $('#supplier_id').select2({ width: '100%', placeholder: '— None / cash-bank payment —' });
+        $('#expense_categories_id').select2({ width: '100%', placeholder: '— Select Expense Category —' });
+    }
+
+    // === Show/hide supplier hint based on supplier selection ===
+    function syncSupplierUI() {
+        var sel = $('#supplier_id').val();
+        var hasSupplier = sel && sel !== '';
+
+        if (hasSupplier) {
+            $('#supplier_hint').show();
+            $('#payment_type').prop('disabled', false).css('opacity', 0.5);
+            $('#payment_required').hide();
+            $('#payment_hint').text('Not used — credit purchase');
         } else {
-            $('.btn-add-details').prop('disabled', true);
+            $('#supplier_hint').hide();
+            $('#payment_type').prop('disabled', false).css('opacity', 1);
+            $('#payment_required').show();
+            $('#payment_hint').text('Required for immediate payment');
         }
     }
-    
+    $('#supplier_id').on('change', syncSupplierUI);
+    syncSupplierUI();
+
+    // === Quick add supplier ===
+    $('#btnQuickAddSupplier').on('click', function() {
+        $('#qs_name').val('');
+        $('#qs_phone').val('');
+        $('#qs_email').val('');
+        $('#quickSupplierModal').modal('show');
+    });
+    $('#qs_save').on('click', function() {
+        var name = $('#qs_name').val().trim();
+        if (!name) { alert('Name is required.'); return; }
+
+        $.ajax({
+            url: window.location.href,
+            type: 'POST',
+            data: {
+                action: 'quick_add_supplier',
+                name: name,
+                phone: $('#qs_phone').val().trim(),
+                email: $('#qs_email').val().trim()
+            },
+            dataType: 'json',
+            success: function(resp) {
+                if (resp.success) {
+                    // Add to the dropdown and select it
+                    var newOpt = new Option(resp.name + ' (Owed: 0.00)', resp.id, true, true);
+                    $('#supplier_id').append(newOpt).trigger('change');
+                    $('#quickSupplierModal').modal('hide');
+                } else {
+                    alert('Error: ' + (resp.message || 'unknown'));
+                }
+            }
+        });
+    });
+
+    // === Existing product details logic (unchanged) ===
+    function updateAddDetailsButton() {
+        var expenseId = $('#expense_id').val();
+        $('.btn-add-details').prop('disabled', !(expenseId && expenseId !== ''));
+    }
     updateAddDetailsButton();
-    
+
     $('#productDetailsModal').on('show.bs.modal', function(e) {
         var expenseId = $('#expense_id').val();
         var expenseCategory = $('#expense_categories_id option:selected').text();
@@ -1026,9 +1272,7 @@ $(document).ready(function() {
         $('#addProductModal').data('parentCategory', currentCategory);
         $('#addProductModal').data('sourceModal', 'productDetailsModal');
         
-        setTimeout(function() {
-            $('#addProductModal').modal('show');
-        }, 300);
+        setTimeout(function() { $('#addProductModal').modal('show'); }, 300);
     });
     
     $('#addProductModal').on('hidden.bs.modal', function() {
@@ -1061,8 +1305,7 @@ $(document).ready(function() {
                 if (response.success && response.products) {
                     var $productSelect = $('#product_id');
                     var currentVal = $productSelect.val();
-                    $productSelect.empty();
-                    $productSelect.append('<option value="">-- Select Product --</option>');
+                    $productSelect.empty().append('<option value="">-- Select Product --</option>');
                     
                     $.each(response.products, function(i, product) {
                         $productSelect.append('<option value="' + product.id + '">' + escapeHtml(product.product_name) + ' (' + escapeHtml(product.category) + ' - ' + escapeHtml(product.unit) + ')</option>');
@@ -1128,7 +1371,7 @@ $(document).ready(function() {
         var unitPrice = $('#unit_price').val();
         var description = $('#detail_description').val();
         
-        if (!expenseId) { alert('Expense ID not found. Please save the expense first.'); return; }
+        if (!expenseId) { alert('Expense ID not found.'); return; }
         if (!productId) { alert('Please select a product.'); return; }
         if (!quantity || parseFloat(quantity) <= 0) { alert('Please enter a valid quantity.'); return; }
         if (!unitPrice || parseFloat(unitPrice) <= 0) { alert('Please enter a valid unit price.'); return; }
@@ -1230,6 +1473,8 @@ $(document).ready(function() {
     $('#expenseForm').on('submit', function(e) {
         var totalAmount = parseFloat($('#total_amount').val()) || 0;
         var category = $('#expense_categories_id').val();
+        var supplier = $('#supplier_id').val();
+        var paymentType = $('#payment_type').val();
         
         if (!category || category === "") {
             e.preventDefault();
@@ -1240,6 +1485,13 @@ $(document).ready(function() {
         if (totalAmount == 0) {
             e.preventDefault();
             alert('Amount cannot be zero');
+            return false;
+        }
+
+        // If no supplier, payment type required
+        if ((!supplier || supplier === '') && (!paymentType || paymentType === '')) {
+            e.preventDefault();
+            alert('Payment type is required when not using a supplier');
             return false;
         }
         
