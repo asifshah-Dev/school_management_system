@@ -130,7 +130,6 @@ try {
 
     /* ============================================================
        OPERATIONAL TABLES (full-reset scope only)
-       Children before parents. Fees, salaries, expenses, inventory.
        ============================================================ */
     if ($scope === 'ledger_and_operational') {
         wipe_table($conn, 'fee_payments',              $report);
@@ -142,8 +141,12 @@ try {
     }
 
     /* ============================================================
-       BANK RECONCILIATION TABLES
-       Children first (FK cascade order).
+       PETTY CASH
+       ============================================================ */
+    wipe_table($conn, 'petty_cash_counts', $report);
+
+    /* ============================================================
+       BANK RECONCILIATION TABLES (children first)
        ============================================================ */
     wipe_table($conn, 'bank_recon_ledger_marks', $report);
     wipe_table($conn, 'bank_statement_lines',    $report);
@@ -168,7 +171,6 @@ try {
 
     /* ============================================================
        GL TRANSACTIONS (child of itself via fk_gl_txn_reversal)
-       Break the self-FK first, then delete.
        ============================================================ */
     $tblExists = $conn->query("SHOW TABLES LIKE 'gl_transactions'");
     if ($tblExists && $tblExists->num_rows > 0) {
@@ -185,7 +187,6 @@ try {
     /* ============================================================
        SETTINGS
        Reset the lock_date back to empty (no lock).
-       Preserves the gl_settings table itself.
        ============================================================ */
     $settingsExists = $conn->query("SHOW TABLES LIKE 'gl_settings'");
     if ($settingsExists && $settingsExists->num_rows > 0) {

@@ -85,6 +85,30 @@ if ($chkYec && $chkYec->num_rows > 0) {
     $yecCount = (int)$conn->query("SELECT COUNT(*) AS c FROM gl_year_end_closures")->fetch_assoc()['c'];
 }
 
+// ---------- PETTY CASH HEALTH ----------
+$pcTableExists = false;
+$pcCount = 0;
+$pcLastDate = null;
+$pcShortTotal = 0.0;
+$pcOverTotal = 0.0;
+$chkPC = $conn->query("SHOW TABLES LIKE 'petty_cash_counts'");
+if ($chkPC && $chkPC->num_rows > 0) {
+    $pcTableExists = true;
+    $pcCount = (int)$conn->query("SELECT COUNT(*) AS c FROM petty_cash_counts")->fetch_assoc()['c'];
+
+    $pcLast = $conn->query("SELECT count_date FROM petty_cash_counts ORDER BY count_date DESC, id DESC LIMIT 1")->fetch_assoc();
+    if ($pcLast) $pcLastDate = $pcLast['count_date'];
+
+    $pcSum = $conn->query("
+        SELECT
+            COALESCE(SUM(CASE WHEN difference < -0.005 THEN ABS(difference) ELSE 0 END), 0) AS short_total,
+            COALESCE(SUM(CASE WHEN difference > 0.005 THEN difference ELSE 0 END), 0) AS over_total
+        FROM petty_cash_counts
+    ")->fetch_assoc();
+    $pcShortTotal = (float)$pcSum['short_total'];
+    $pcOverTotal  = (float)$pcSum['over_total'];
+}
+
 // Diagnostic flags
 $ledgerEmpty = ($ledgerCount === 0 && $lineCount === 0);
 $coaSeeded   = ($accountCount >= 40);
@@ -256,6 +280,7 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
         .link-card.bank .icon        { background: #e0e7ff; color: #4338ca; }
         .link-card.settings .icon    { background: #f1f5f9; color: #334155; }
         .link-card.yec .icon         { background: #ede9fe; color: #5b21b6; }
+        .link-card.cash .icon        { background: #d1fae5; color: #047857; }
 
         .link-card .body { flex: 1; min-width: 0; }
         .link-card .title { font-size: 15px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
@@ -597,6 +622,26 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
                 <?php endif; ?>
             </div>
         </div>
+
+        <!-- Petty Cash tile -->
+        <div class="status-tile <?php
+            if (!$pcTableExists)        echo 'err';
+            elseif ($pcCount > 0)       echo 'ok';
+            else                        echo 'warn';
+        ?>">
+            <div class="label">Petty Cash Counts</div>
+            <div class="value"><?php echo $pcCount; ?> count<?php echo $pcCount === 1 ? '' : 's'; ?></div>
+            <div class="sub">
+                <?php if (!$pcTableExists): ?>
+                    <span class="status-pill bad">Table missing</span>
+                <?php elseif ($pcCount > 0): ?>
+                    <span class="status-pill ok">Last: <?php echo htmlspecialchars($pcLastDate ?: '—'); ?></span>
+                    &middot; Short <?php echo number_format($pcShortTotal, 0); ?> / Over <?php echo number_format($pcOverTotal, 0); ?>
+                <?php else: ?>
+                    <span class="status-pill warn">None yet</span>
+                <?php endif; ?>
+            </div>
+        </div>
     </div>
 
     <!-- ===== System Settings ===== -->
@@ -609,6 +654,21 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
                 <div class="title">Settings &amp; Period Lock</div>
                 <div class="desc">Set the period lock date to prevent backdated entries. Every write to the ledger is protected. Also home for other global settings.</div>
                 <div class="url">gl_settings.php<?php echo $lockDate !== null ? ' &middot; Locked through ' . htmlspecialchars($lockDate) : ' &middot; No lock'; ?></div>
+            </div>
+        </a>
+
+    </div>
+
+    <!-- ===== Petty Cash ===== -->
+    <div class="section-title">Petty Cash</div>
+    <div class="link-grid">
+
+        <a href="gl_petty_cash.php" class="link-card cash">
+            <div class="icon"><span class="glyphicon glyphicon-piggy-bank"></span></div>
+            <div class="body">
+                <div class="title">Petty Cash / Daily Count</div>
+                <div class="desc">Record the physical cash count against the ledger. Any difference is auto-posted to Cash Short/Over (5940). <?php echo $pcCount > 0 ? 'Last count: ' . htmlspecialchars($pcLastDate) : 'No counts yet.'; ?></div>
+                <div class="url">gl_petty_cash.php &middot; <?php echo $pcCount; ?> count<?php echo $pcCount === 1 ? '' : 's'; ?></div>
             </div>
         </a>
 
@@ -655,7 +715,7 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
             <div class="icon"><span class="glyphicon glyphicon-shopping-cart"></span></div>
             <div class="body">
                 <div class="title">New Credit Purchase</div>
-                <div class="desc">Record goods/services received on credit. Posts Dr Expense, Cr 2010 AP tagged to the supplier. <strong>Increases what the school owes.</strong></div>
+                <div class="desc">Record goods/services received on credit. Posts Dr Expense, Cr 2010 AP tagged to the supplier.</div>
                 <div class="url">gl_purchase_add.php</div>
             </div>
         </a>
@@ -664,7 +724,7 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
             <div class="icon"><span class="glyphicon glyphicon-duplicate"></span></div>
             <div class="body">
                 <div class="title">Pay a Supplier</div>
-                <div class="desc">Post a CPV/BPV against <code>2010 Accounts Payable</code>. A supplier dropdown appears. <strong>Decreases what the school owes.</strong></div>
+                <div class="desc">Post a CPV/BPV against <code>2010 Accounts Payable</code>. A supplier dropdown appears.</div>
                 <div class="url">gl_voucher_add.php &rarr; account 2010</div>
             </div>
         </a>
@@ -756,6 +816,15 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
             </div>
         </a>
 
+        <a href="gl_fee_defaulters.php" class="link-card report">
+            <div class="icon"><span class="glyphicon glyphicon-warning-sign"></span></div>
+            <div class="body">
+                <div class="title">Fee Defaulters</div>
+                <div class="desc">Students with unpaid fee cards, grouped by student, aged by how long overdue. Click any row to expand the cards.</div>
+                <div class="url">gl_fee_defaulters.php</div>
+            </div>
+        </a>
+
         <a href="gl_opening_balance.php" class="link-card report">
             <div class="icon"><span class="glyphicon glyphicon-cog"></span></div>
             <div class="body">
@@ -764,23 +833,6 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
                 <div class="url">gl_opening_balance.php</div>
             </div>
         </a>
-        <a href="gl_fee_defaulters.php" class="link-card danger">
-    <div class="icon"><span class="glyphicon glyphicon-warning-sign"></span></div>
-    <div class="body">
-        <div class="title">Fee Defaulters</div>
-        <div class="desc">Students with unpaid fee cards, aged by how long overdue. 0–30 / 31–60 / 61–90 / 90+ buckets.</div>
-        <div class="url">gl_fee_defaulters.php</div>
-    </div>
-</a>
-
-<a href="gl_fee_defaulters.php" class="link-card report">
-    <div class="icon"><span class="glyphicon glyphicon-list-alt"></span></div>
-    <div class="body">
-        <div class="title">Student Ledger</div>
-        <div class="desc">Full financial history of one student. Click "Ledger" on any defaulter row.</div>
-        <div class="url">gl_student_ledger.php?id=N</div>
-    </div>
-</a>
 
     </div>
 
@@ -792,7 +844,7 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
             <div class="icon"><span class="glyphicon glyphicon-book"></span></div>
             <div class="body">
                 <div class="title">Journal Entries</div>
-                <div class="desc">Every posted transaction. Filter by date, session, reference type, status. Search descriptions and memos.</div>
+                <div class="desc">Every posted transaction. Filter by date, session, reference type, status.</div>
                 <div class="url">gl_transactions.php</div>
             </div>
         </a>
@@ -801,7 +853,7 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
             <div class="icon"><span class="glyphicon glyphicon-plus"></span></div>
             <div class="body">
                 <div class="title">Post Manual Entry</div>
-                <div class="desc">Post a balanced journal entry directly. Use this for opening balances, corrections, and adjustments.</div>
+                <div class="desc">Post a balanced journal entry directly. Use for opening balances, corrections, adjustments.</div>
                 <div class="url">gl_journal_add.php</div>
             </div>
         </a>
@@ -821,6 +873,15 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
                 <div class="title">Bank Recon Adjustments</div>
                 <div class="desc">Filtered view of journal entries posted from bank reconciliations.</div>
                 <div class="url">gl_transactions.php?ref_type=bank_recon</div>
+            </div>
+        </a>
+
+        <a href="gl_transactions.php?ref_type=petty_cash" class="link-card admin">
+            <div class="icon"><span class="glyphicon glyphicon-piggy-bank"></span></div>
+            <div class="body">
+                <div class="title">Petty Cash Adjustments</div>
+                <div class="desc">Filtered view of journal entries posted from petty cash counts.</div>
+                <div class="url">gl_transactions.php?ref_type=petty_cash</div>
             </div>
         </a>
 
@@ -852,7 +913,7 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
             <div class="icon"><span class="glyphicon glyphicon-lock"></span></div>
             <div class="body">
                 <div class="title">Year-End Close</div>
-                <div class="desc">Post the closing journal entry. Zeroes out Revenue and Expense accounts and transfers the net result to Retained Earnings. Marks session inactive.</div>
+                <div class="desc">Post the closing journal entry. Zeroes out Revenue and Expense accounts and transfers the net result to Retained Earnings.</div>
                 <div class="url">gl_year_end_close.php &middot; <?php echo $yecCount; ?> close<?php echo $yecCount === 1 ? '' : 's'; ?></div>
             </div>
         </a>
@@ -861,7 +922,7 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
             <div class="icon"><span class="glyphicon glyphicon-eye-open"></span></div>
             <div class="body">
                 <div class="title">User Activity</div>
-                <div class="desc">Pick a user and a date range — see every journal entry they posted, every voucher they created, and every reversal they performed.</div>
+                <div class="desc">Pick a user and a date range — see every journal entry they posted, every voucher they created, every reversal they performed.</div>
                 <div class="url">gl_user_activity.php</div>
             </div>
         </a>
@@ -927,7 +988,7 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
             <div class="icon"><span class="glyphicon glyphicon-tags"></span></div>
             <div class="body">
                 <div class="title">Fee Type → Revenue Account</div>
-                <div class="desc">Which revenue account each fee type posts to. <strong>Must be complete before generating fee cards.</strong></div>
+                <div class="desc">Which revenue account each fee type posts to. Must be complete before generating fee cards.</div>
                 <div class="url">gl_fee_type_map.php &middot; <?php echo $feeMapCount; ?> mapped</div>
             </div>
         </a>
@@ -936,7 +997,7 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
             <div class="icon"><span class="glyphicon glyphicon-list"></span></div>
             <div class="body">
                 <div class="title">Expense Category → Expense Account</div>
-                <div class="desc">Which expense account each category posts to. <strong>Required before saving any expense.</strong></div>
+                <div class="desc">Which expense account each category posts to. Required before saving any expense.</div>
                 <div class="url">gl_expense_category_map.php &middot; <?php echo $expenseMapCount; ?> mapped</div>
             </div>
         </a>
@@ -945,7 +1006,7 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
             <div class="icon"><span class="glyphicon glyphicon-user"></span></div>
             <div class="body">
                 <div class="title">Role → Salary Account</div>
-                <div class="desc">Which expense account each role's salary posts to. <strong>Required before saving any salary.</strong></div>
+                <div class="desc">Which expense account each role's salary posts to. Required before saving any salary.</div>
                 <div class="url">gl_role_map.php &middot; <?php echo $roleMapCount; ?> mapped</div>
             </div>
         </a>
@@ -1074,12 +1135,11 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
         <ul style="margin: 8px 0 0 20px; padding: 0;">
             <li>Bookmark this page as your home for the ledger system.</li>
             <li>The status board at the top shows the health of the entire engine at a glance.</li>
-            <li>Reports read the ledger. Admin pages define the Chart of Accounts. Mappings connect operational data to GL accounts.</li>
-            <li><strong>Settings:</strong> use <code>gl_settings.php</code> to set a lock date — any entry before that date is refused.</li>
-            <li><strong>Bank Reconciliation:</strong> use <code>gl_bank_recon.php</code> to match your bank statement against the ledger.</li>
-            <li><strong>Session Close:</strong> use <code>gl_session_close.php</code> to freeze a session at year end and record a snapshot.</li>
-            <li><strong>Year-End Close:</strong> use <code>gl_year_end_close.php</code> to post the closing journal entry, zero out Revenue/Expenses, transfer the net result to Retained Earnings, and lock the session.</li>
-            <li><strong>Audit:</strong> use <code>gl_user_activity.php</code> to review user postings.</li>
+            <li><strong>Petty Cash:</strong> daily cash counts, auto-posted differences to Cash Short/Over (5940).</li>
+            <li><strong>Settings:</strong> set the period lock date to prevent backdated entries.</li>
+            <li><strong>Bank Reconciliation:</strong> match your bank statement against the ledger.</li>
+            <li><strong>Session Close / Year-End Close:</strong> freeze or close a fiscal session.</li>
+            <li><strong>Fee Defaulters:</strong> unpaid fee cards grouped by student, expandable to see individual cards.</li>
             <li><strong>Reset Ledger:</strong> top-right button wipes test data. <strong>Remove this page and <code>gl_test_hub_reset.php</code> before handing over to a real client.</strong></li>
         </ul>
     </div>
@@ -1109,7 +1169,7 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
                     <span class="scope-desc">
                         Wipes <code>gl_transactions</code>, <code>gl_journal_lines</code>, <code>vouchers</code>,
                         <code>voucher_counters</code>, <code>gl_session_closures</code>, <code>gl_year_end_closures</code>,
-                        and all three <code>bank_*</code> reconciliation tables.
+                        <code>petty_cash_counts</code>, and all three <code>bank_*</code> reconciliation tables.
                         Leaves operational data untouched.
                     </span>
                 </label>
