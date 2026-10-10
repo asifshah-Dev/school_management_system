@@ -8,15 +8,13 @@ $conn->query("SET time_zone = '+05:00'");
 $conn->query("SET collation_connection = 'utf8mb4_general_ci'");
 
 $userId = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : 0;
-$isAdmin = ($userId === 1);
 
 $msg = ''; $msg_type = '';
 
 /* ---------- Handle POST ---------- */
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isAdmin) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $lockDate = trim($_POST['lock_date'] ?? '');
 
-    // Empty is allowed = remove the lock
     if ($lockDate !== '' && !strtotime($lockDate)) {
         $msg = 'Invalid date. Use YYYY-MM-DD format or leave empty to remove the lock.';
         $msg_type = 'danger';
@@ -145,12 +143,6 @@ if ($currentLock) {
     }
     .action-btn-primary:hover { background: #1e3a8a; border-color: #1e3a8a; }
     .action-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-
-    .readonly-note {
-        padding: 20px 24px; background: #f8fafc; border: 1px solid #e2e8f0;
-        border-radius: 10px; font-size: 14px; color: #64748b;
-        text-align: center;
-    }
 </style>
 </head>
 <body>
@@ -212,41 +204,33 @@ if ($currentLock) {
             To open a period back up, clear the lock date (leave the field empty and click Save).
         </div>
 
-        <?php if ($isAdmin): ?>
-            <form method="post" style="margin-top:24px;">
-                <div class="field">
-                    <label>Lock Date (YYYY-MM-DD)</label>
-                    <input type="date" name="lock_date" value="<?= htmlspecialchars($currentLock) ?>">
-                    <div class="help">
-                        No transactions allowed <strong>before</strong> this date.
-                        Leave empty to remove the lock.
-                        <br>Example: after closing March, set this to <code>2026-04-01</code>.
-                    </div>
+        <form method="post" style="margin-top:24px;">
+            <div class="field">
+                <label>Lock Date (YYYY-MM-DD)</label>
+                <input type="date" name="lock_date" value="<?= htmlspecialchars($currentLock) ?>">
+                <div class="help">
+                    No transactions allowed <strong>before</strong> this date.
+                    Leave empty to remove the lock.
+                    <br>Example: after closing March, set this to <code>2026-04-01</code>.
                 </div>
-
-                <div class="warn-box">
-                    <strong>⚠ Note:</strong>
-                    Setting a lock date does NOT modify any existing transactions — it only prevents
-                    <em>future</em> postings with dates before the lock. If you later need to post to a
-                    locked period, temporarily clear the lock, post the entry, then set the lock again.
-                </div>
-
-                <div class="form-actions">
-                    <a href="gl_settings.php" class="action-btn-primary" style="background:#f1f5f9; color:#334155; border-color:#cbd5e1; min-width:150px;">
-                        Reset
-                    </a>
-                    <button type="submit" class="action-btn-primary">
-                        <span class="glyphicon glyphicon-floppy-disk"></span> Save Settings
-                    </button>
-                </div>
-            </form>
-        <?php else: ?>
-            <div class="readonly-note" style="margin-top:24px;">
-                Only user #1 (admin) can change the lock date.
-                <br>
-                Current setting is shown above.
             </div>
-        <?php endif; ?>
+
+            <div class="warn-box">
+                <strong>⚠ Note:</strong>
+                Setting a lock date does NOT modify any existing transactions — it only prevents
+                <em>future</em> postings with dates before the lock. If you later need to post to a
+                locked period, temporarily clear the lock, post the entry, then set the lock again.
+            </div>
+
+            <div class="form-actions">
+                <a href="gl_settings.php" class="action-btn-primary" style="background:#f1f5f9; color:#334155; border-color:#cbd5e1; min-width:150px;">
+                    Reset
+                </a>
+                <button type="submit" class="action-btn-primary">
+                    <span class="glyphicon glyphicon-floppy-disk"></span> Save Settings
+                </button>
+            </div>
+        </form>
 
     </div>
 </div>

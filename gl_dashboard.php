@@ -724,6 +724,10 @@ if ($sessionRow) {
             <span class="ico teal"><span class="glyphicon glyphicon-lock"></span></span>
             Session Close
         </a>
+        <a href="gl_fee_defaulters.php" class="quick">
+    <span class="ico pink"><span class="glyphicon glyphicon-warning-sign"></span></span>
+    Fee Defaulters
+</a>
     </div>
 
     <!-- Recent Activity -->

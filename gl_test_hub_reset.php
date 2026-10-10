@@ -9,14 +9,6 @@ $conn->query("SET collation_connection = 'utf8mb4_general_ci'");
 
 header('Content-Type: application/json');
 
-/* ============================================================
-   SAFETY GATE: only user #1 can run this
-   ============================================================ */
-$userId = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : 0;
-if ($userId !== 1) {
-    echo json_encode(['ok' => false, 'error' => 'Only user #1 (admin) may perform resets.']);
-    exit;
-}
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     echo json_encode(['ok' => false, 'error' => 'POST required.']);
     exit;
@@ -37,8 +29,6 @@ if ($confirm !== $expected) {
 
 /* ============================================================
    HARDCODED IMMUTABILITY TRIGGERS
-   Copied verbatim from SHOW CREATE TRIGGER (2026-10-09).
-   These are dropped before the wipe and recreated afterwards.
    ============================================================ */
 $IMMUTABILITY_TRIGGERS = [
     [
@@ -135,9 +125,13 @@ try {
     }
     $droppedAll = true;
 
-    // Step 2 — run all DELETEs inside a transaction for logical atomicity.
+    // Step 2 — run all DELETEs inside a transaction.
     $conn->begin_transaction();
 
+    /* ============================================================
+       OPERATIONAL TABLES (full-reset scope only)
+       Children before parents. Fees, salaries, expenses, inventory.
+       ============================================================ */
     if ($scope === 'ledger_and_operational') {
         wipe_table($conn, 'fee_payments',              $report);
         wipe_table($conn, 'student_fee_card',          $report);
@@ -147,26 +141,35 @@ try {
         wipe_table($conn, 'expenses',                  $report);
     }
 
-    /* ---------- BANK RECONCILIATION TABLES ---------- */
-    // Children first (FK order):
-    // bank_recon_ledger_marks references bank_reconciliations
-    // bank_statement_lines references bank_reconciliations
-    // bank_reconciliations is the parent
+    /* ============================================================
+       BANK RECONCILIATION TABLES
+       Children first (FK cascade order).
+       ============================================================ */
     wipe_table($conn, 'bank_recon_ledger_marks', $report);
     wipe_table($conn, 'bank_statement_lines',    $report);
     wipe_table($conn, 'bank_reconciliations',    $report);
 
-    /* ---------- VOUCHERS ---------- */
+    /* ============================================================
+       VOUCHERS
+       ============================================================ */
     wipe_table($conn, 'vouchers',            $report);
     wipe_table($conn, 'voucher_counters',    $report);
 
-    /* ---------- SESSION CLOSURES ---------- */
-    wipe_table($conn, 'gl_session_closures', $report);
+    /* ============================================================
+       SESSION + YEAR-END CLOSURES
+       ============================================================ */
+    wipe_table($conn, 'gl_session_closures',  $report);
+    wipe_table($conn, 'gl_year_end_closures', $report);
 
-    /* ---------- JOURNAL LINES (child of gl_transactions) ---------- */
+    /* ============================================================
+       JOURNAL LINES (child of gl_transactions)
+       ============================================================ */
     wipe_table($conn, 'gl_journal_lines', $report);
 
-    /* ---------- GL TRANSACTIONS (child of itself via fk_gl_txn_reversal) ---------- */
+    /* ============================================================
+       GL TRANSACTIONS (child of itself via fk_gl_txn_reversal)
+       Break the self-FK first, then delete.
+       ============================================================ */
     $tblExists = $conn->query("SHOW TABLES LIKE 'gl_transactions'");
     if ($tblExists && $tblExists->num_rows > 0) {
         $r = $conn->query("SELECT COUNT(*) AS c FROM gl_transactions");
@@ -177,6 +180,19 @@ try {
         // Then delete everything.
         $conn->query("DELETE FROM gl_transactions");
         $conn->query("ALTER TABLE gl_transactions AUTO_INCREMENT = 1");
+    }
+
+    /* ============================================================
+       SETTINGS
+       Reset the lock_date back to empty (no lock).
+       Preserves the gl_settings table itself.
+       ============================================================ */
+    $settingsExists = $conn->query("SHOW TABLES LIKE 'gl_settings'");
+    if ($settingsExists && $settingsExists->num_rows > 0) {
+        $conn->query("UPDATE gl_settings SET setting_value = '' WHERE setting_key = 'lock_date'");
+        $report['gl_settings'] = 'lock_date cleared';
+    } else {
+        $report['gl_settings'] = 'skipped (no such table)';
     }
 
     $conn->commit();

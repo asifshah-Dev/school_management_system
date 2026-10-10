@@ -60,17 +60,29 @@ if ($chkBR && $chkBR->num_rows > 0) $brTableExists = true;
 $brTotal = 0;
 $brDraft = 0;
 $brCompleted = 0;
-$brLatestBalanced = false;
 if ($brTableExists) {
     $brTotal     = (int)$conn->query("SELECT COUNT(*) AS c FROM bank_reconciliations")->fetch_assoc()['c'];
     $brDraft     = (int)$conn->query("SELECT COUNT(*) AS c FROM bank_reconciliations WHERE status='DRAFT'")->fetch_assoc()['c'];
     $brCompleted = (int)$conn->query("SELECT COUNT(*) AS c FROM bank_reconciliations WHERE status='COMPLETED'")->fetch_assoc()['c'];
-    $brLatest = $conn->query("
-        SELECT difference FROM bank_reconciliations
-        WHERE status='COMPLETED'
-        ORDER BY statement_date DESC, id DESC LIMIT 1
-    ")->fetch_assoc();
-    if ($brLatest) $brLatestBalanced = abs((float)$brLatest['difference']) < 0.01;
+}
+
+// ---------- SETTINGS / PERIOD LOCK ----------
+$settingsTableExists = false;
+$chkSettings = $conn->query("SHOW TABLES LIKE 'gl_settings'");
+if ($chkSettings && $chkSettings->num_rows > 0) $settingsTableExists = true;
+
+$lockDate = null;
+if ($settingsTableExists) {
+    $lockDate = gl_get_lock_date($conn);
+}
+
+// ---------- YEAR-END CLOSE HEALTH ----------
+$yecTableExists = false;
+$yecCount = 0;
+$chkYec = $conn->query("SHOW TABLES LIKE 'gl_year_end_closures'");
+if ($chkYec && $chkYec->num_rows > 0) {
+    $yecTableExists = true;
+    $yecCount = (int)$conn->query("SELECT COUNT(*) AS c FROM gl_year_end_closures")->fetch_assoc()['c'];
 }
 
 // Diagnostic flags
@@ -111,8 +123,24 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
             font-size: 14px; font-weight: 600;
             cursor: pointer; font-family: inherit;
             transition: all 0.15s;
+            line-height: 1;
+            text-decoration: none;
         }
-        .btn-danger-soft:hover { background: #fecaca; }
+        .btn-danger-soft:hover { background: #fecaca; text-decoration: none; color: #991b1b; }
+
+        .btn-settings-soft {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 10px 18px;
+            background: #f1f5f9; color: #334155;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            font-size: 14px; font-weight: 600;
+            cursor: pointer; font-family: inherit;
+            transition: all 0.15s;
+            line-height: 1;
+            text-decoration: none;
+        }
+        .btn-settings-soft:hover { background: #e2e8f0; color: #1e293b; text-decoration: none; }
 
         .status-board {
             display: grid;
@@ -226,6 +254,8 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
         .link-card.supplier .icon    { background: #fce7f3; color: #9d174d; }
         .link-card.session .icon     { background: #cffafe; color: #0e7490; }
         .link-card.bank .icon        { background: #e0e7ff; color: #4338ca; }
+        .link-card.settings .icon    { background: #f1f5f9; color: #334155; }
+        .link-card.yec .icon         { background: #ede9fe; color: #5b21b6; }
 
         .link-card .body { flex: 1; min-width: 0; }
         .link-card .title { font-size: 15px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
@@ -403,9 +433,15 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
                 Every page in one place &middot; Session: <strong><?php echo htmlspecialchars($currentSession); ?></strong> &middot; <?php echo date('l, F j, Y'); ?>
             </div>
         </div>
-        <button type="button" class="btn-danger-soft" onclick="openResetPanel()">
-            <span class="glyphicon glyphicon-refresh"></span> Reset Ledger
-        </button>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <a href="gl_settings.php" class="btn-settings-soft">
+                <span class="glyphicon glyphicon-cog"></span>
+                Settings<?php echo $lockDate !== null ? ' (🔒 ' . htmlspecialchars($lockDate) . ')' : ''; ?>
+            </a>
+            <button type="button" class="btn-danger-soft" onclick="openResetPanel()">
+                <span class="glyphicon glyphicon-refresh"></span> Reset Ledger
+            </button>
+        </div>
     </div>
 
     <!-- ===== System Status ===== -->
@@ -499,7 +535,6 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
             </div>
         </div>
 
-        <!-- Bank Reconciliation tile -->
         <div class="status-tile <?php
             if (!$brTableExists)          echo 'err';
             elseif ($brDraft > 0)         echo 'warn';
@@ -520,6 +555,63 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
                 <?php endif; ?>
             </div>
         </div>
+
+        <div class="status-tile <?php
+            if (!$settingsTableExists)  echo 'err';
+            elseif ($lockDate !== null) echo 'ok';
+            else                         echo 'warn';
+        ?>">
+            <div class="label">Period Lock</div>
+            <div class="value">
+                <?php if ($lockDate !== null): ?>
+                    🔒 <?php echo htmlspecialchars($lockDate); ?>
+                <?php else: ?>
+                    🔓 Open
+                <?php endif; ?>
+            </div>
+            <div class="sub">
+                <?php if (!$settingsTableExists): ?>
+                    <span class="status-pill bad">Settings table missing</span>
+                <?php elseif ($lockDate !== null): ?>
+                    <span class="status-pill ok">Ledger locked</span>
+                <?php else: ?>
+                    <span class="status-pill warn">No lock set</span>
+                <?php endif; ?>
+            </div>
+        </div>
+
+        <div class="status-tile <?php
+            if (!$yecTableExists)   echo 'warn';
+            elseif ($yecCount > 0)  echo 'ok';
+            else                    echo 'warn';
+        ?>">
+            <div class="label">Year-End Closes</div>
+            <div class="value"><?php echo $yecCount; ?> close<?php echo $yecCount === 1 ? '' : 's'; ?></div>
+            <div class="sub">
+                <?php if (!$yecTableExists): ?>
+                    <span class="status-pill warn">Table missing</span>
+                <?php elseif ($yecCount > 0): ?>
+                    <span class="status-pill ok">Sessions closed</span>
+                <?php else: ?>
+                    <span class="status-pill warn">None yet</span>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== System Settings ===== -->
+    <div class="section-title">System Settings</div>
+    <div class="link-grid">
+
+        <a href="gl_settings.php" class="link-card settings">
+            <div class="icon"><span class="glyphicon glyphicon-cog"></span></div>
+            <div class="body">
+                <div class="title">Settings &amp; Period Lock</div>
+                <div class="desc">Set the period lock date to prevent backdated entries. Every write to the ledger is protected. Also home for other global settings.</div>
+                <div class="url">gl_settings.php<?php echo $lockDate !== null ? ' &middot; Locked through ' . htmlspecialchars($lockDate) : ' &middot; No lock'; ?></div>
+            </div>
+        </a>
+
     </div>
 
     <!-- ===== Bank Reconciliation ===== -->
@@ -672,6 +764,23 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
                 <div class="url">gl_opening_balance.php</div>
             </div>
         </a>
+        <a href="gl_fee_defaulters.php" class="link-card danger">
+    <div class="icon"><span class="glyphicon glyphicon-warning-sign"></span></div>
+    <div class="body">
+        <div class="title">Fee Defaulters</div>
+        <div class="desc">Students with unpaid fee cards, aged by how long overdue. 0–30 / 31–60 / 61–90 / 90+ buckets.</div>
+        <div class="url">gl_fee_defaulters.php</div>
+    </div>
+</a>
+
+<a href="gl_fee_defaulters.php" class="link-card report">
+    <div class="icon"><span class="glyphicon glyphicon-list-alt"></span></div>
+    <div class="body">
+        <div class="title">Student Ledger</div>
+        <div class="desc">Full financial history of one student. Click "Ledger" on any defaulter row.</div>
+        <div class="url">gl_student_ledger.php?id=N</div>
+    </div>
+</a>
 
     </div>
 
@@ -739,6 +848,15 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
             </div>
         </a>
 
+        <a href="gl_year_end_close.php" class="link-card yec">
+            <div class="icon"><span class="glyphicon glyphicon-lock"></span></div>
+            <div class="body">
+                <div class="title">Year-End Close</div>
+                <div class="desc">Post the closing journal entry. Zeroes out Revenue and Expense accounts and transfers the net result to Retained Earnings. Marks session inactive.</div>
+                <div class="url">gl_year_end_close.php &middot; <?php echo $yecCount; ?> close<?php echo $yecCount === 1 ? '' : 's'; ?></div>
+            </div>
+        </a>
+
         <a href="gl_user_activity.php" class="link-card session">
             <div class="icon"><span class="glyphicon glyphicon-eye-open"></span></div>
             <div class="body">
@@ -747,14 +865,7 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
                 <div class="url">gl_user_activity.php</div>
             </div>
         </a>
-                    <a href="gl_year_end_close.php" class="link-card session">
-    <div class="icon"><span class="glyphicon glyphicon-lock"></span></div>
-    <div class="body">
-        <div class="title">Year-End Close</div>
-        <div class="desc">Post the closing journal entry. Zeroes out Revenue and Expense accounts and transfers the net result to Retained Earnings.</div>
-        <div class="url">gl_year_end_close.php</div>
-    </div>
-</a>
+
     </div>
 
     <!-- ===== Chart of Accounts Admin ===== -->
@@ -805,7 +916,6 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
                 <div class="url">gl_accounts.php?type=EXPENSE</div>
             </div>
         </a>
-        
 
     </div>
 
@@ -963,12 +1073,13 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
         <strong>How to use this page:</strong>
         <ul style="margin: 8px 0 0 20px; padding: 0;">
             <li>Bookmark this page as your home for the ledger system.</li>
-            <li>The status board at the top shows the health of the entire engine at a glance &mdash; including <strong>Suppliers/AP</strong>, <strong>Bank Reconciliation</strong>, and <strong>Session Closures</strong>.</li>
+            <li>The status board at the top shows the health of the entire engine at a glance.</li>
             <li>Reports read the ledger. Admin pages define the Chart of Accounts. Mappings connect operational data to GL accounts.</li>
-            <li><strong>Suppliers &amp; Payables:</strong> use <code>gl_purchase_add.php</code> to record bills (AP up), and <code>gl_voucher_add.php</code> against account 2010 to record payments (AP down).</li>
-            <li><strong>Bank Reconciliation:</strong> use <code>gl_bank_recon.php</code> to match your bank statement against the ledger, post adjustments, and lock a completed reconciliation.</li>
-            <li><strong>Session Management:</strong> use <code>gl_session_close.php</code> to freeze a session at year end and record a permanent financial snapshot.</li>
-            <li><strong>Audit:</strong> use <code>gl_user_activity.php</code> to review any user's postings, vouchers, and reversals.</li>
+            <li><strong>Settings:</strong> use <code>gl_settings.php</code> to set a lock date — any entry before that date is refused.</li>
+            <li><strong>Bank Reconciliation:</strong> use <code>gl_bank_recon.php</code> to match your bank statement against the ledger.</li>
+            <li><strong>Session Close:</strong> use <code>gl_session_close.php</code> to freeze a session at year end and record a snapshot.</li>
+            <li><strong>Year-End Close:</strong> use <code>gl_year_end_close.php</code> to post the closing journal entry, zero out Revenue/Expenses, transfer the net result to Retained Earnings, and lock the session.</li>
+            <li><strong>Audit:</strong> use <code>gl_user_activity.php</code> to review user postings.</li>
             <li><strong>Reset Ledger:</strong> top-right button wipes test data. <strong>Remove this page and <code>gl_test_hub_reset.php</code> before handing over to a real client.</strong></li>
         </ul>
     </div>
@@ -988,7 +1099,7 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
         <div class="modal-body">
 
             <p style="font-size:13px; color:#475569; margin-top:0;">
-                Choose what to wipe. In both cases, <strong>the Chart of Accounts, Suppliers, and Mapping tables are preserved.</strong>
+                Choose what to wipe. In both cases, <strong>the Chart of Accounts, Suppliers, Mapping tables, and Settings are preserved.</strong>
             </p>
 
             <div class="reset-option" data-scope="ledger_only">
@@ -997,7 +1108,8 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
                     <strong>Ledger only</strong>
                     <span class="scope-desc">
                         Wipes <code>gl_transactions</code>, <code>gl_journal_lines</code>, <code>vouchers</code>,
-                        <code>voucher_counters</code>, and <code>gl_session_closures</code>.
+                        <code>voucher_counters</code>, <code>gl_session_closures</code>, <code>gl_year_end_closures</code>,
+                        and all three <code>bank_*</code> reconciliation tables.
                         Leaves operational data untouched.
                     </span>
                 </label>
