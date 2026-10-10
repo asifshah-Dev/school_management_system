@@ -747,7 +747,14 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
                 <div class="url">gl_user_activity.php</div>
             </div>
         </a>
-
+                    <a href="gl_year_end_close.php" class="link-card session">
+    <div class="icon"><span class="glyphicon glyphicon-lock"></span></div>
+    <div class="body">
+        <div class="title">Year-End Close</div>
+        <div class="desc">Post the closing journal entry. Zeroes out Revenue and Expense accounts and transfers the net result to Retained Earnings.</div>
+        <div class="url">gl_year_end_close.php</div>
+    </div>
+</a>
     </div>
 
     <!-- ===== Chart of Accounts Admin ===== -->
@@ -798,6 +805,7 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
                 <div class="url">gl_accounts.php?type=EXPENSE</div>
             </div>
         </a>
+        
 
     </div>
 
