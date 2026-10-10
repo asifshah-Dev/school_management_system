@@ -73,6 +73,7 @@ $bankAccounts = $conn->query("
     * { box-sizing: border-box; }
     body { background: #eef1f5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; color: #1e293b; }
     .wrap { max-width: 900px; margin: 30px auto; padding: 0 20px; }
+
     .head {
         background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
         color: #fff; padding: 30px 40px 26px 40px;
@@ -82,20 +83,26 @@ $bankAccounts = $conn->query("
     }
     .head h1 { margin: 0; font-size: 30px; font-weight: 700; }
     .head .sub { font-size: 14px; opacity: 0.9; margin-top: 6px; }
+
     .btn-back {
-        display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px;
-        background: rgba(255,255,255,0.15); color: #fff;
-        border: 1px solid rgba(255,255,255,0.3); border-radius: 8px;
+        display: inline-flex; align-items: center; gap: 8px;
+        padding: 10px 20px;
+        background: #ffffff; color: #1e40af;
+        border: 1px solid #ffffff; border-radius: 8px;
         text-decoration: none; font-size: 14px; font-weight: 600;
+        line-height: 1; font-family: inherit; white-space: nowrap;
     }
-    .btn-back:hover { background: #fff; color: #1e40af; text-decoration: none; }
+    .btn-back:hover { background: #e0e7ff; border-color: #e0e7ff; color: #1e40af; text-decoration: none; }
+
     .card { background: #fff; padding: 30px 40px 40px 40px; border-radius: 0 0 12px 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+
     .section-title {
         font-size: 12px; font-weight: 800; color: #64748b; text-transform: uppercase;
         letter-spacing: 2px; margin: 24px 0 14px 0; padding-bottom: 8px;
         border-bottom: 1px solid #e2e8f0;
     }
     .section-title:first-child { margin-top: 0; }
+
     .field { margin-bottom: 18px; }
     .field label { display: block; font-size: 12px; font-weight: 700; color: #334155; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; }
     .field .required { color: #dc2626; }
@@ -109,23 +116,63 @@ $bankAccounts = $conn->query("
         outline: none; border-color: #1e40af; box-shadow: 0 0 0 3px rgba(30,64,175,0.1);
     }
     .field .help { font-size: 12px; color: #64748b; margin-top: 5px; }
+
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     @media (max-width: 700px) { .grid-2 { grid-template-columns: 1fr; } }
+
     .error-box {
         background: #fee2e2; border-left: 4px solid #dc2626;
         padding: 14px 18px; border-radius: 8px; margin-bottom: 20px;
         color: #991b1b; font-size: 14px;
     }
     .error-box ul { margin: 6px 0 0 20px; padding: 0; }
+
     .actions {
         display: flex; justify-content: flex-end; gap: 12px;
         margin-top: 30px; padding-top: 24px; border-top: 1px solid #e2e8f0;
+        flex-wrap: wrap;
     }
-    .btn { height: 48px; min-width: 150px; padding: 0 22px; border-radius: 8px; font-size: 14px; font-weight: 600; border: none; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none; }
-    .btn-ghost { background: #64748b; color: #fff !important; }
-    .btn-ghost:hover { background: #475569; text-decoration: none; color: #fff; }
-    .btn-post { background: #1e40af; color: #fff !important; }
-    .btn-post:hover { background: #1e3a8a; color: #fff; text-decoration: none; }
+
+    .action-btn-primary,
+    .action-btn-cancel {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        height: 48px;
+        min-width: 170px;
+        padding: 0 26px;
+        border-radius: 8px;
+        font-family: inherit;
+        font-size: 15px;
+        font-weight: 600;
+        line-height: 1;
+        text-decoration: none;
+        cursor: pointer;
+        border: 1px solid transparent;
+        white-space: nowrap;
+    }
+    .action-btn-primary {
+        background: #1e40af;
+        color: #ffffff;
+        border-color: #1e40af;
+    }
+    .action-btn-primary:hover {
+        background: #1e3a8a;
+        border-color: #1e3a8a;
+        color: #ffffff;
+        text-decoration: none;
+    }
+    .action-btn-cancel {
+        background: #f1f5f9;
+        color: #334155;
+        border-color: #cbd5e1;
+    }
+    .action-btn-cancel:hover {
+        background: #e2e8f0;
+        color: #1e293b;
+        text-decoration: none;
+    }
 </style>
 </head>
 <body>
@@ -208,8 +255,8 @@ $bankAccounts = $conn->query("
             </div>
 
             <div class="actions">
-                <a href="gl_bank_recon.php" class="btn btn-ghost">Cancel</a>
-                <button type="submit" class="btn btn-post">
+                <a href="gl_bank_recon.php" class="action-btn-cancel">Cancel</a>
+                <button type="submit" class="action-btn-primary">
                     <span class="glyphicon glyphicon-arrow-right"></span> Create &amp; Continue
                 </button>
             </div>

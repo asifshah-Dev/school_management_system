@@ -309,24 +309,22 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
     .head h1 { margin: 0; font-size: 24px; font-weight: 700; }
     .head .sub { font-size: 13px; opacity: 0.9; margin-top: 4px; }
     .head .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
     .btn-head {
-        display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px;
-        background: rgba(255,255,255,0.15); color: #fff;
-        border: 1px solid rgba(255,255,255,0.3); border-radius: 8px;
+        display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+        padding: 9px 16px;
+        background: #ffffff; color: #1e40af;
+        border: 1px solid #ffffff; border-radius: 8px;
         text-decoration: none; font-size: 13px; font-weight: 600;
-        cursor: pointer; font-family: inherit;
-        transition: all 0.15s;
+        cursor: pointer; font-family: inherit; line-height: 1; white-space: nowrap;
     }
-    .btn-head:hover { background: #fff; color: #1e40af; border-color: #fff; text-decoration: none; }
-    .btn-head.primary { background: #fff; color: #1e40af; }
+    .btn-head:hover { background: #e0e7ff; border-color: #e0e7ff; color: #1e40af; text-decoration: none; }
+    .btn-head.primary { background: #ffffff; color: #047857; }
+    .btn-head.primary:hover { background: #d1fae5; border-color: #d1fae5; color: #047857; }
 
     .card { background: #fff; padding: 0; border-radius: 0 0 12px 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
 
-    /* ============ TABS ============ */
-    .tabs {
-        display: flex; border-bottom: 2px solid #e2e8f0;
-        background: #f8fafc; overflow-x: auto;
-    }
+    .tabs { display: flex; border-bottom: 2px solid #e2e8f0; background: #f8fafc; overflow-x: auto; }
     .tab-btn {
         padding: 16px 26px; background: transparent; border: none;
         border-bottom: 3px solid transparent;
@@ -344,30 +342,16 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
     }
     .tab-btn.active .count { background: #dbeafe; color: #1e40af; }
 
-    /* ============ TAB CONTENT ============ */
-    .tab-content {
-        padding: 30px 40px 40px 40px;
-        display: none;
-    }
+    .tab-content { padding: 30px 40px 40px 40px; display: none; }
     .tab-content.active { display: block; }
 
-    /* ============ OVERVIEW ============ */
-    .alert-custom {
-        padding: 12px 16px; border-radius: 8px; margin-bottom: 20px;
-        font-size: 13px; border-left: 4px solid;
-    }
+    .alert-custom { padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; font-size: 13px; border-left: 4px solid; }
     .alert-custom.success { background: #d1fae5; border-color: #059669; color: #065f46; }
     .alert-custom.danger  { background: #fee2e2; border-color: #dc2626; color: #991b1b; }
 
-    .summary-bar {
-        display: grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr));
-        gap: 12px; margin-bottom: 22px;
-    }
+    .summary-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap: 12px; margin-bottom: 22px; }
     .summary-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 16px; }
-    .summary-box .lbl {
-        font-size: 10px; color: #64748b; font-weight: 700;
-        text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;
-    }
+    .summary-box .lbl { font-size: 10px; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
     .summary-box .val { font-family: 'SF Mono','Monaco',monospace; font-size: 18px; font-weight: 700; }
     .summary-box.blue { border-left: 4px solid #1e40af; }
     .summary-box.amber { border-left: 4px solid #f59e0b; }
@@ -378,14 +362,8 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
     @media (max-width: 1100px) { .recon-grid { grid-template-columns: 1fr; } }
 
     .panel { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
-    .panel-head {
-        padding: 14px 18px; background: #f8fafc; border-bottom: 1px solid #e2e8f0;
-        display: flex; justify-content: space-between; align-items: center;
-    }
-    .panel-head h3 {
-        margin: 0; font-size: 14px; font-weight: 800; color: #0f172a;
-        text-transform: uppercase; letter-spacing: 1px;
-    }
+    .panel-head { padding: 14px 18px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
+    .panel-head h3 { margin: 0; font-size: 14px; font-weight: 800; color: #0f172a; text-transform: uppercase; letter-spacing: 1px; }
     .panel-head .meta { font-size: 12px; color: #64748b; }
 
     table.mini { width: 100%; border-collapse: collapse; }
@@ -394,10 +372,7 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
         text-transform: uppercase; letter-spacing: 1px;
         padding: 8px 10px; text-align: left; border-bottom: 1px solid #e2e8f0;
     }
-    table.mini tbody td {
-        padding: 9px 10px; font-size: 12px;
-        border-bottom: 1px solid #f1f5f9; vertical-align: middle;
-    }
+    table.mini tbody td { padding: 9px 10px; font-size: 12px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
     table.mini tbody tr:hover td { background: #f8fafc; }
     .num { font-family: 'SF Mono','Monaco',monospace; text-align: right; }
 
@@ -413,11 +388,11 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
 
     .mini-btn {
         display: inline-flex; align-items: center; gap: 3px;
-        padding: 4px 9px; border-radius: 5px;
+        padding: 5px 10px; border-radius: 5px;
         font-size: 11px; font-weight: 700;
         text-decoration: none; cursor: pointer;
         border: 1px solid; font-family: inherit;
-        text-transform: uppercase; margin-right: 3px;
+        text-transform: uppercase; margin-right: 4px; line-height: 1;
     }
     .mini-btn-info { background: #eff6ff; color: #1e40af; border-color: #bfdbfe; }
     .mini-btn-info:hover { background: #dbeafe; text-decoration: none; color: #1e40af; }
@@ -428,7 +403,6 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
     .mini-btn-ok { background: #d1fae5; color: #065f46; border-color: #a7f3d0; }
     .mini-btn-ok:hover { background: #a7f3d0; text-decoration: none; color: #065f46; }
 
-    /* ============ FORM (used inside tabs) ============ */
     .form-section { margin-bottom: 24px; }
     .form-section-title {
         font-size: 12px; font-weight: 800; color: #64748b;
@@ -468,13 +442,14 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
         border-top: 1px solid #e2e8f0;
         flex-wrap: wrap;
     }
-    .action-btn {
+    .action-btn-primary,
+    .action-btn-cancel {
         display: inline-flex;
         align-items: center;
         justify-content: center;
         gap: 8px;
         height: 48px;
-        min-width: 160px;
+        min-width: 170px;
         padding: 0 26px;
         border-radius: 8px;
         font-family: inherit;
@@ -485,17 +460,6 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
         cursor: pointer;
         border: 1px solid transparent;
         white-space: nowrap;
-        transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
-    }
-    .action-btn-cancel {
-        background: #f1f5f9;
-        color: #334155;
-        border-color: #cbd5e1;
-    }
-    .action-btn-cancel:hover {
-        background: #e2e8f0;
-        color: #1e293b;
-        text-decoration: none;
     }
     .action-btn-primary {
         background: #1e40af;
@@ -507,16 +471,23 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
         border-color: #1e3a8a;
         color: #ffffff;
         text-decoration: none;
-        box-shadow: 0 4px 12px rgba(30, 64, 175, 0.3);
     }
-    .action-btn-primary:active { transform: translateY(1px); }
+    .action-btn-cancel {
+        background: #f1f5f9;
+        color: #334155;
+        border-color: #cbd5e1;
+    }
+    .action-btn-cancel:hover {
+        background: #e2e8f0;
+        color: #1e293b;
+        text-decoration: none;
+    }
 
     .info-banner {
         background: #eff6ff; border: 1px solid #bfdbfe; border-left: 4px solid #1e40af;
         padding: 14px 18px; border-radius: 10px; font-size: 13px;
         color: #1e3a8a; line-height: 1.6; margin-bottom: 24px;
     }
-    .info-banner code { background: #dbeafe; padding: 2px 6px; border-radius: 4px; font-size: 12px; }
 
     .line-preview {
         background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px;
@@ -538,10 +509,10 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
 
     <div class="head">
         <div>
-            <h1>Reconcile #<?= (int)$recon['id'] ?> — <?= htmlspecialchars($recon['account_code']) ?></h1>
+            <h1>Reconcile #<?= (int)$recon['id'] ?> —  <?= htmlspecialchars($recon['account_name']) ?></h1>
             <div class="sub">
-                <?= htmlspecialchars($recon['account_name']) ?>
-                &middot; Statement date: <strong><?= htmlspecialchars($recon['statement_date']) ?></strong>
+               
+                Statement date: <strong><?= htmlspecialchars($recon['statement_date']) ?></strong>
                 &middot;
                 <?php if ($recon['status'] === 'DRAFT'): ?>
                     <span style="background:#fef3c7; color:#92400e; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:700;">DRAFT</span>
@@ -591,9 +562,7 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
             </a>
         </div>
 
-        <!-- ============================================================
-             TAB: OVERVIEW
-             ============================================================ -->
+        <!-- TAB: OVERVIEW -->
         <div class="tab-content <?= $tab === 'overview' ? 'active' : '' ?>">
 
             <?php if ($msg && $tab === 'overview'): ?>
@@ -646,7 +615,7 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
                                         <th class="num" style="width:80px;">Debit</th>
                                         <th class="num" style="width:80px;">Credit</th>
                                         <th style="width:100px;">Status</th>
-                                        <th style="width:150px;">Action</th>
+                                        <th style="width:180px;">Action</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -706,7 +675,7 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
                                         <th class="num" style="width:80px;">Debit</th>
                                         <th class="num" style="width:80px;">Credit</th>
                                         <th style="width:100px;">Status</th>
-                                        <th style="width:110px;">Action</th>
+                                        <th style="width:130px;">Action</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -751,9 +720,7 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
             </div>
         </div>
 
-        <!-- ============================================================
-             TAB: ADD LINE
-             ============================================================ -->
+        <!-- TAB: ADD LINE -->
         <div class="tab-content <?= $tab === 'add' ? 'active' : '' ?>">
 
             <?php if ($msg && $tab === 'add'): ?>
@@ -769,7 +736,6 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
 
                 <div class="form-section">
                     <div class="form-section-title">Line Details</div>
-
                     <div class="grid-2">
                         <div class="field">
                             <label>Date <span class="required">*</span></label>
@@ -780,7 +746,6 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
                             <input type="text" name="reference" placeholder="Cheque # / ref">
                         </div>
                     </div>
-
                     <div class="field">
                         <label>Description <span class="required">*</span></label>
                         <input type="text" name="description" required placeholder="e.g. Fee deposit / Cheque payment">
@@ -807,17 +772,15 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
                 </div>
 
                 <div class="form-actions">
-                    <a href="?id=<?= (int)$reconId ?>&tab=overview" class="action-btn action-btn-cancel">Cancel</a>
-                    <button type="submit" class="action-btn action-btn-primary">
+                    <a href="?id=<?= (int)$reconId ?>&tab=overview" class="action-btn-cancel">Cancel</a>
+                    <button type="submit" class="action-btn-primary">
                         <span class="glyphicon glyphicon-plus"></span> Add Line
                     </button>
                 </div>
             </form>
         </div>
 
-        <!-- ============================================================
-             TAB: BULK PASTE
-             ============================================================ -->
+        <!-- TAB: BULK PASTE -->
         <div class="tab-content <?= $tab === 'bulk' ? 'active' : '' ?>">
 
             <?php if ($msg && $tab === 'bulk'): ?>
@@ -845,17 +808,15 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
                 </div>
 
                 <div class="form-actions">
-                    <a href="?id=<?= (int)$reconId ?>&tab=overview" class="action-btn action-btn-cancel">Cancel</a>
-                    <button type="submit" class="action-btn action-btn-primary">
+                    <a href="?id=<?= (int)$reconId ?>&tab=overview" class="action-btn-cancel">Cancel</a>
+                    <button type="submit" class="action-btn-primary">
                         <span class="glyphicon glyphicon-import"></span> Import Lines
                     </button>
                 </div>
             </form>
         </div>
 
-        <!-- ============================================================
-             TAB: MATCH
-             ============================================================ -->
+        <!-- TAB: MATCH -->
         <div class="tab-content <?= $tab === 'match' ? 'active' : '' ?>">
 
             <?php if ($msg && $tab === 'match'): ?>
@@ -922,8 +883,8 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
                     </div>
 
                     <div class="form-actions">
-                        <a href="?id=<?= (int)$reconId ?>&tab=overview" class="action-btn action-btn-cancel">Cancel</a>
-                        <button type="submit" class="action-btn action-btn-primary">
+                        <a href="?id=<?= (int)$reconId ?>&tab=overview" class="action-btn-cancel">Cancel</a>
+                        <button type="submit" class="action-btn-primary">
                             <span class="glyphicon glyphicon-link"></span> Match
                         </button>
                     </div>
@@ -931,9 +892,7 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
             <?php endif; ?>
         </div>
 
-        <!-- ============================================================
-             TAB: ADJUST
-             ============================================================ -->
+        <!-- TAB: ADJUST -->
         <div class="tab-content <?= $tab === 'adjust' ? 'active' : '' ?>">
 
             <?php if ($msg && $tab === 'adjust'): ?>
@@ -1020,8 +979,8 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
                     </div>
 
                     <div class="form-actions">
-                        <a href="?id=<?= (int)$reconId ?>&tab=overview" class="action-btn action-btn-cancel">Cancel</a>
-                        <button type="submit" class="action-btn action-btn-primary">
+                        <a href="?id=<?= (int)$reconId ?>&tab=overview" class="action-btn-cancel">Cancel</a>
+                        <button type="submit" class="action-btn-primary">
                             <span class="glyphicon glyphicon-check"></span> Post Adjustment
                         </button>
                     </div>

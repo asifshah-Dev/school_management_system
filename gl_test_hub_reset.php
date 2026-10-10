@@ -130,7 +130,6 @@ $droppedAll  = false;
 
 try {
     // Step 1 — drop immutability triggers so DELETE is allowed.
-    // DDL statements auto-commit, so this is outside the transaction.
     foreach ($IMMUTABILITY_TRIGGERS as $t) {
         drop_trigger($conn, $t['name']);
     }
@@ -148,15 +147,26 @@ try {
         wipe_table($conn, 'expenses',                  $report);
     }
 
+    /* ---------- BANK RECONCILIATION TABLES ---------- */
+    // Children first (FK order):
+    // bank_recon_ledger_marks references bank_reconciliations
+    // bank_statement_lines references bank_reconciliations
+    // bank_reconciliations is the parent
+    wipe_table($conn, 'bank_recon_ledger_marks', $report);
+    wipe_table($conn, 'bank_statement_lines',    $report);
+    wipe_table($conn, 'bank_reconciliations',    $report);
+
+    /* ---------- VOUCHERS ---------- */
     wipe_table($conn, 'vouchers',            $report);
     wipe_table($conn, 'voucher_counters',    $report);
+
+    /* ---------- SESSION CLOSURES ---------- */
     wipe_table($conn, 'gl_session_closures', $report);
 
-    // gl_journal_lines — child of gl_transactions
+    /* ---------- JOURNAL LINES (child of gl_transactions) ---------- */
     wipe_table($conn, 'gl_journal_lines', $report);
 
-    // gl_transactions — child of itself via fk_gl_txn_reversal
-    // Delete reversal rows first (they reference their originals).
+    /* ---------- GL TRANSACTIONS (child of itself via fk_gl_txn_reversal) ---------- */
     $tblExists = $conn->query("SHOW TABLES LIKE 'gl_transactions'");
     if ($tblExists && $tblExists->num_rows > 0) {
         $r = $conn->query("SELECT COUNT(*) AS c FROM gl_transactions");
@@ -171,8 +181,7 @@ try {
 
     $conn->commit();
 
-    // Step 3 — recreate the triggers. If this fails we surface the error
-    // but the wipes above already succeeded, so the data is clean.
+    // Step 3 — recreate the triggers.
     $recreateErrors = [];
     foreach ($IMMUTABILITY_TRIGGERS as $t) {
         try {
@@ -203,10 +212,8 @@ try {
     exit;
 
 } catch (Exception $e) {
-    // Roll back any half-done wipes
     try { $conn->rollback(); } catch (Exception $x) {}
 
-    // Recreate any triggers that were dropped (only if we got that far)
     if ($droppedAll) {
         $restoreErrors = [];
         foreach ($IMMUTABILITY_TRIGGERS as $t) {

@@ -49,6 +49,7 @@ $recons = $conn->query("
     * { box-sizing: border-box; }
     body { background: #eef1f5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; color: #1e293b; }
     .wrap { max-width: 1300px; margin: 30px auto; padding: 0 20px; }
+
     .head {
         background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
         color: #fff; padding: 30px 40px 26px 40px; border-radius: 12px 12px 0 0;
@@ -57,13 +58,28 @@ $recons = $conn->query("
     }
     .head h1 { margin: 0; font-size: 30px; font-weight: 700; }
     .head .sub { font-size: 14px; opacity: 0.9; margin-top: 6px; }
+
     .btn-new {
-        display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px;
-        background: rgba(255,255,255,0.15); color: #fff;
-        border: 1px solid rgba(255,255,255,0.3); border-radius: 8px;
-        text-decoration: none; font-size: 14px; font-weight: 600;
+        display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+        padding: 10px 20px;
+        background: #ffffff;
+        color: #1e40af;
+        border: 1px solid #ffffff;
+        border-radius: 8px;
+        text-decoration: none;
+        font-size: 14px;
+        font-weight: 600;
+        line-height: 1;
+        font-family: inherit;
+        white-space: nowrap;
     }
-    .btn-new:hover { background: #fff; color: #1e40af; text-decoration: none; }
+    .btn-new:hover {
+        background: #e0e7ff;
+        border-color: #e0e7ff;
+        color: #1e40af;
+        text-decoration: none;
+    }
+
     .card {
         background: #fff; padding: 30px 40px 40px 40px;
         border-radius: 0 0 12px 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06);
@@ -76,6 +92,7 @@ $recons = $conn->query("
     .alert-custom { padding: 14px 18px; border-radius: 8px; margin-bottom: 20px; font-size: 14px; border-left: 4px solid; }
     .alert-custom.success { background: #d1fae5; border-color: #059669; color: #065f46; }
     .alert-custom.danger  { background: #fee2e2; border-color: #dc2626; color: #991b1b; }
+
     table.tbl { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; border: 1px solid #e2e8f0; }
     table.tbl thead th {
         background: #f8fafc; font-size: 11px; color: #64748b; font-weight: 700;
@@ -85,18 +102,31 @@ $recons = $conn->query("
     table.tbl tbody td { padding: 12px 14px; font-size: 13px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
     table.tbl tbody tr:hover td { background: #f8fafc; }
     .num { font-family: 'SF Mono','Monaco',monospace; text-align: right; font-variant-numeric: tabular-nums; }
+
     .pill { display: inline-block; padding: 3px 10px; border-radius: 10px; font-size: 10px; font-weight: 700; text-transform: uppercase; }
     .pill.draft { background: #fef3c7; color: #92400e; }
     .pill.completed { background: #d1fae5; color: #065f46; }
+
     .row-btn {
-        display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px;
-        border-radius: 6px; font-size: 12px; font-weight: 600; text-decoration: none;
-        border: 1px solid; font-family: inherit;
+        display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+        padding: 7px 14px;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 700;
+        text-decoration: none;
+        border: 1px solid;
+        font-family: inherit;
+        line-height: 1;
+        white-space: nowrap;
+        cursor: pointer;
+        transition: all 0.15s;
     }
-    .row-btn-info { background: #eff6ff; color: #1e40af; border-color: #bfdbfe; }
-    .row-btn-info:hover { background: #dbeafe; text-decoration: none; color: #1e40af; }
-    .row-btn-danger { background: #fef2f2; color: #991b1b; border-color: #fecaca; }
-    .row-btn-danger:hover { background: #fee2e2; text-decoration: none; color: #991b1b; }
+    .row-btn-info { background: #1e40af; color: #ffffff; border-color: #1e40af; }
+    .row-btn-info:hover { background: #1e3a8a; border-color: #1e3a8a; text-decoration: none; color: #ffffff; }
+    .row-btn-danger { background: #dc2626; color: #ffffff; border-color: #dc2626; }
+    .row-btn-danger:hover { background: #b91c1c; border-color: #b91c1c; text-decoration: none; color: #ffffff; }
+    .row-btn .glyphicon { color: inherit; }
+
     .empty-state { padding: 40px; text-align: center; color: #94a3b8; font-style: italic; font-size: 14px; }
 </style>
 </head>
@@ -138,7 +168,7 @@ $recons = $conn->query("
                         <th class="num" style="width:120px;">Difference</th>
                         <th style="width:120px;">Progress</th>
                         <th style="width:110px;">Status</th>
-                        <th style="width:180px;">Actions</th>
+                        <th style="width:220px;">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -148,7 +178,7 @@ $recons = $conn->query("
                         <tr>
                             <td>#<?= (int)$r['id'] ?></td>
                             <td>
-                                <small style="color:#94a3b8; font-family:'SF Mono',monospace;"><?= htmlspecialchars($r['account_code']) ?></small>
+                                
                                 <?= htmlspecialchars($r['account_name']) ?>
                             </td>
                             <td><?= htmlspecialchars($r['statement_date']) ?></td>
@@ -172,8 +202,8 @@ $recons = $conn->query("
                                 </a>
                                 <?php if ($r['status'] === 'DRAFT'): ?>
                                     <a href="?delete=<?= (int)$r['id'] ?>" class="row-btn row-btn-danger"
-                                       onclick="return confirm('Delete this draft?');">
-                                        <span class="glyphicon glyphicon-trash"></span>
+                                       onclick="return confirm('Delete this draft reconciliation?');">
+                                        <span class="glyphicon glyphicon-trash"></span> Delete
                                     </a>
                                 <?php endif; ?>
                             </td>

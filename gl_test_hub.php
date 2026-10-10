@@ -52,6 +52,27 @@ if ($tableCheck && $tableCheck->num_rows > 0) {
     $closuresCount = (int)$conn->query("SELECT COUNT(*) AS c FROM gl_session_closures")->fetch_assoc()['c'];
 }
 
+// ---------- BANK RECON HEALTH ----------
+$brTableExists = false;
+$chkBR = $conn->query("SHOW TABLES LIKE 'bank_reconciliations'");
+if ($chkBR && $chkBR->num_rows > 0) $brTableExists = true;
+
+$brTotal = 0;
+$brDraft = 0;
+$brCompleted = 0;
+$brLatestBalanced = false;
+if ($brTableExists) {
+    $brTotal     = (int)$conn->query("SELECT COUNT(*) AS c FROM bank_reconciliations")->fetch_assoc()['c'];
+    $brDraft     = (int)$conn->query("SELECT COUNT(*) AS c FROM bank_reconciliations WHERE status='DRAFT'")->fetch_assoc()['c'];
+    $brCompleted = (int)$conn->query("SELECT COUNT(*) AS c FROM bank_reconciliations WHERE status='COMPLETED'")->fetch_assoc()['c'];
+    $brLatest = $conn->query("
+        SELECT difference FROM bank_reconciliations
+        WHERE status='COMPLETED'
+        ORDER BY statement_date DESC, id DESC LIMIT 1
+    ")->fetch_assoc();
+    if ($brLatest) $brLatestBalanced = abs((float)$brLatest['difference']) < 0.01;
+}
+
 // Diagnostic flags
 $ledgerEmpty = ($ledgerCount === 0 && $lineCount === 0);
 $coaSeeded   = ($accountCount >= 40);
@@ -204,6 +225,7 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
         .link-card.danger .icon      { background: #fee2e2; color: #b91c1c; }
         .link-card.supplier .icon    { background: #fce7f3; color: #9d174d; }
         .link-card.session .icon     { background: #cffafe; color: #0e7490; }
+        .link-card.bank .icon        { background: #e0e7ff; color: #4338ca; }
 
         .link-card .body { flex: 1; min-width: 0; }
         .link-card .title { font-size: 15px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
@@ -476,6 +498,52 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
                 <?php endif; ?>
             </div>
         </div>
+
+        <!-- Bank Reconciliation tile -->
+        <div class="status-tile <?php
+            if (!$brTableExists)          echo 'err';
+            elseif ($brDraft > 0)         echo 'warn';
+            elseif ($brCompleted > 0)     echo 'ok';
+            else                          echo 'warn';
+        ?>">
+            <div class="label">Bank Reconciliation</div>
+            <div class="value"><?php echo $brTotal; ?> total</div>
+            <div class="sub">
+                <?php if (!$brTableExists): ?>
+                    <span class="status-pill bad">Table missing</span>
+                <?php elseif ($brDraft > 0): ?>
+                    <span class="status-pill warn"><?php echo $brDraft; ?> draft</span>
+                <?php elseif ($brCompleted > 0): ?>
+                    <span class="status-pill ok"><?php echo $brCompleted; ?> done</span>
+                <?php else: ?>
+                    <span class="status-pill warn">None yet</span>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Bank Reconciliation ===== -->
+    <div class="section-title">Bank Reconciliation</div>
+    <div class="link-grid">
+
+        <a href="gl_bank_recon.php" class="link-card bank">
+            <div class="icon"><span class="glyphicon glyphicon-transfer"></span></div>
+            <div class="body">
+                <div class="title">Bank Reconciliation</div>
+                <div class="desc">Match your ledger (1020) against the bank statement. Match lines, mark outstanding items, post adjustments for bank charges/interest. Complete and print.</div>
+                <div class="url">gl_bank_recon.php &middot; <?php echo $brTotal; ?> total, <?php echo $brDraft; ?> draft</div>
+            </div>
+        </a>
+
+        <a href="gl_bank_recon_new.php" class="link-card bank">
+            <div class="icon"><span class="glyphicon glyphicon-plus"></span></div>
+            <div class="body">
+                <div class="title">New Bank Reconciliation</div>
+                <div class="desc">Start a fresh reconciliation. Enter the statement date and closing balance from the bank, then paste or add statement lines.</div>
+                <div class="url">gl_bank_recon_new.php</div>
+            </div>
+        </a>
+
     </div>
 
     <!-- ===== Suppliers & Payables ===== -->
@@ -635,6 +703,15 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
                 <div class="title">Opening Balance Entries</div>
                 <div class="desc">Filtered view of opening-balance transactions only.</div>
                 <div class="url">gl_transactions.php?ref_type=opening_balance</div>
+            </div>
+        </a>
+
+        <a href="gl_transactions.php?ref_type=bank_recon" class="link-card admin">
+            <div class="icon"><span class="glyphicon glyphicon-transfer"></span></div>
+            <div class="body">
+                <div class="title">Bank Recon Adjustments</div>
+                <div class="desc">Filtered view of journal entries posted from bank reconciliations.</div>
+                <div class="url">gl_transactions.php?ref_type=bank_recon</div>
             </div>
         </a>
 
@@ -878,9 +955,10 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
         <strong>How to use this page:</strong>
         <ul style="margin: 8px 0 0 20px; padding: 0;">
             <li>Bookmark this page as your home for the ledger system.</li>
-            <li>The status board at the top shows the health of the entire engine at a glance &mdash; including <strong>Suppliers/AP sub-ledger reconciliation</strong> and <strong>session closures</strong>.</li>
+            <li>The status board at the top shows the health of the entire engine at a glance &mdash; including <strong>Suppliers/AP</strong>, <strong>Bank Reconciliation</strong>, and <strong>Session Closures</strong>.</li>
             <li>Reports read the ledger. Admin pages define the Chart of Accounts. Mappings connect operational data to GL accounts.</li>
             <li><strong>Suppliers &amp; Payables:</strong> use <code>gl_purchase_add.php</code> to record bills (AP up), and <code>gl_voucher_add.php</code> against account 2010 to record payments (AP down).</li>
+            <li><strong>Bank Reconciliation:</strong> use <code>gl_bank_recon.php</code> to match your bank statement against the ledger, post adjustments, and lock a completed reconciliation.</li>
             <li><strong>Session Management:</strong> use <code>gl_session_close.php</code> to freeze a session at year end and record a permanent financial snapshot.</li>
             <li><strong>Audit:</strong> use <code>gl_user_activity.php</code> to review any user's postings, vouchers, and reversals.</li>
             <li><strong>Reset Ledger:</strong> top-right button wipes test data. <strong>Remove this page and <code>gl_test_hub_reset.php</code> before handing over to a real client.</strong></li>

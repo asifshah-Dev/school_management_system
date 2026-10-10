@@ -239,7 +239,7 @@ $difference   = $adjustedBank - $adjustedBook;
 
     <div class="head">
         <div>
-            <h1>Dar-e-Arqm School</h1>
+            <h1>School Management System</h1>
             <div class="doc">Bank Reconciliation Statement</div>
         </div>
         <div class="meta">

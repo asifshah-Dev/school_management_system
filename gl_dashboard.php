@@ -28,16 +28,41 @@ $receivable  = acct_balance($conn, '1030');
 $advanceLiab = -acct_balance($conn, '2020');
 
 // ============================================================
-// ACCOUNTS PAYABLE — sub-ledger (per-supplier) based
+// ACCOUNTS PAYABLE — sub-ledger based
 // ============================================================
-$apRecon     = gl_ap_reconciliation($conn);
-$payable     = $apRecon['sub'];
+$apRecon = gl_ap_reconciliation($conn);
+$payable = $apRecon['sub'];
 
-// Count active suppliers with a non-zero balance
 $suppliersWithBalance = 0;
 $supplierRows = gl_list_suppliers($conn, false);
 foreach ($supplierRows as $s) {
     if (abs((float)$s['ap_balance']) > 0.01) $suppliersWithBalance++;
+}
+
+// ============================================================
+// BANK RECONCILIATION STATUS
+// ============================================================
+$brTableExists = false;
+$chk = $conn->query("SHOW TABLES LIKE 'bank_reconciliations'");
+if ($chk && $chk->num_rows > 0) $brTableExists = true;
+
+$brDraftCount = 0;
+$brCompletedCount = 0;
+$brLatestDate = null;
+$brLatestBalanced = false;
+if ($brTableExists) {
+    $brDraftCount     = (int)$conn->query("SELECT COUNT(*) AS c FROM bank_reconciliations WHERE status='DRAFT'")->fetch_assoc()['c'];
+    $brCompletedCount = (int)$conn->query("SELECT COUNT(*) AS c FROM bank_reconciliations WHERE status='COMPLETED'")->fetch_assoc()['c'];
+
+    $brLatest = $conn->query("
+        SELECT statement_date, difference FROM bank_reconciliations
+        WHERE status='COMPLETED'
+        ORDER BY statement_date DESC, id DESC LIMIT 1
+    ")->fetch_assoc();
+    if ($brLatest) {
+        $brLatestDate = $brLatest['statement_date'];
+        $brLatestBalanced = abs((float)$brLatest['difference']) < 0.01;
+    }
 }
 
 // ============================================================
@@ -189,7 +214,6 @@ if ($sessionRow) {
         .ap-banner.bad .icon { background: #dc2626; color: #fff; }
         .ap-banner a { color: inherit; text-decoration: underline; margin-left: 6px; }
 
-        /* Session snapshot banner — shown only when current session is closed */
         .snapshot-banner {
             background: #fff;
             padding: 14px 24px;
@@ -208,6 +232,26 @@ if ($sessionRow) {
             font-size: 13px; flex-shrink: 0;
         }
         .snapshot-banner a { color: inherit; text-decoration: underline; margin-left: 6px; }
+
+        /* Bank recon banner — shown only when there are DRAFT reconciliations */
+        .br-banner {
+            background: #fff;
+            padding: 14px 24px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+            margin-bottom: 24px;
+            display: flex; align-items: center; gap: 12px;
+            font-size: 13px; font-weight: 600;
+            border-left: 5px solid #f59e0b;
+            color: #92400e;
+        }
+        .br-banner .icon {
+            width: 28px; height: 28px; border-radius: 50%;
+            background: #f59e0b; color: #fff;
+            display: inline-flex; align-items: center; justify-content: center;
+            font-size: 13px; flex-shrink: 0;
+        }
+        .br-banner a { color: inherit; text-decoration: underline; margin-left: 6px; }
 
         .section-title {
             font-size: 12px; font-weight: 800; color: #64748b;
@@ -280,6 +324,7 @@ if ($sessionRow) {
         .metric-card.red    { border-color: #dc2626; }
         .metric-card.purple { border-color: #7c3aed; }
         .metric-card.teal   { border-color: #0891b2; }
+        .metric-card.amber  { border-color: #f59e0b; }
 
         .metric-card .label {
             font-size: 11px; color: #64748b;
@@ -305,6 +350,13 @@ if ($sessionRow) {
         .metric-card .warn-badge {
             position: absolute; top: 14px; right: 14px;
             background: #fee2e2; color: #991b1b;
+            font-size: 10px; font-weight: 800;
+            padding: 3px 8px; border-radius: 10px;
+            text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .metric-card .ok-badge {
+            position: absolute; top: 14px; right: 14px;
+            background: #d1fae5; color: #065f46;
             font-size: 10px; font-weight: 800;
             padding: 3px 8px; border-radius: 10px;
             text-transform: uppercase; letter-spacing: 0.5px;
@@ -343,6 +395,7 @@ if ($sessionRow) {
         .quick .ico.amber  { background: #fef3c7; color: #b45309; }
         .quick .ico.teal   { background: #cffafe; color: #0e7490; }
         .quick .ico.slate  { background: #f1f5f9; color: #475569; }
+        .quick .ico.indigo { background: #e0e7ff; color: #4338ca; }
 
         .recent-list {
             background: #fff;
@@ -395,7 +448,7 @@ if ($sessionRow) {
         @media print {
             @page { size: A4 portrait; margin: 12mm 10mm; }
             body { background: #fff; font-size: 10pt; }
-            .quick-grid, .btn-new, .status-banner .icon, .ap-banner, .snapshot-banner { display: none !important; }
+            .quick-grid, .btn-new, .status-banner .icon, .ap-banner, .snapshot-banner, .br-banner { display: none !important; }
             .dash-head { background: #fff !important; color: #000 !important; padding: 0 0 8pt 0; border-bottom: 2pt solid #000; border-radius: 0; box-shadow: none; text-align: center; }
             .dash-head h1 { font-size: 14pt; }
             .status-banner { border-radius: 0; box-shadow: none; padding: 6pt 0; border-bottom: 1pt solid #808080; }
@@ -462,7 +515,7 @@ if ($sessionRow) {
         </div>
     <?php endif; ?>
 
-    <!-- Session snapshot banner — only when the current session has been closed -->
+    <!-- Session snapshot banner -->
     <?php if ($closedCurrentSession): ?>
         <div class="snapshot-banner">
             <span class="icon"><span class="glyphicon glyphicon-lock"></span></span>
@@ -474,6 +527,18 @@ if ($sessionRow) {
                 Expenses <?php echo number_format((float)$currentSessionClosure['total_expenses'], 2); ?>,
                 Net <?php echo number_format((float)$currentSessionClosure['net_profit'], 2); ?>.
                 <a href="gl_session_close.php">View all closures</a>
+            </div>
+        </div>
+    <?php endif; ?>
+
+    <!-- Bank reconciliation banner — only when there are DRAFT reconciliations -->
+    <?php if ($brTableExists && $brDraftCount > 0): ?>
+        <div class="br-banner">
+            <span class="icon"><span class="glyphicon glyphicon-transfer"></span></span>
+            <div>
+                <strong><?php echo $brDraftCount; ?> bank reconciliation<?php echo $brDraftCount === 1 ? '' : 's'; ?> in progress.</strong>
+                Open them and complete the matching, or delete drafts you no longer need.
+                <a href="gl_bank_recon.php">Open Bank Reconciliation</a>
             </div>
         </div>
     <?php endif; ?>
@@ -507,7 +572,12 @@ if ($sessionRow) {
         <div class="metric-card blue">
             <div class="label">Cash at Bank</div>
             <div class="value <?php echo $cashAtBank < 0 ? 'neg' : ''; ?>"><?php echo number_format($cashAtBank, 2); ?></div>
-            <div class="sub">In bank accounts</div>
+            <div class="sub">
+                In bank accounts
+                <?php if ($brTableExists): ?>
+                    &middot; <a href="gl_bank_recon.php">Reconcile</a>
+                <?php endif; ?>
+            </div>
         </div>
         <div class="metric-card orange">
             <div class="label">Owed by Students</div>
@@ -549,6 +619,52 @@ if ($sessionRow) {
         </div>
     </div>
 
+    <!-- Bank Reconciliation -->
+    <div class="section-title">Bank Reconciliation</div>
+    <div class="metric-grid">
+        <div class="metric-card amber">
+            <div class="label">In Progress (Draft)</div>
+            <div class="value"><?php echo (int)$brDraftCount; ?></div>
+            <div class="sub">
+                <?php if ($brDraftCount > 0): ?>
+                    <a href="gl_bank_recon.php">Continue reconciliation</a>
+                <?php else: ?>
+                    No drafts open
+                <?php endif; ?>
+            </div>
+        </div>
+        <div class="metric-card blue">
+            <div class="label">Completed</div>
+            <div class="value"><?php echo (int)$brCompletedCount; ?></div>
+            <div class="sub">Reconciliations locked</div>
+        </div>
+        <div class="metric-card <?php echo $brLatestBalanced ? 'green' : ($brLatestDate ? 'red' : 'amber'); ?>">
+            <?php if ($brLatestDate && $brLatestBalanced): ?>
+                <span class="ok-badge">&#10003; Balanced</span>
+            <?php elseif ($brLatestDate): ?>
+                <span class="warn-badge">&#9888; Difference</span>
+            <?php endif; ?>
+            <div class="label">Last Completed</div>
+            <div class="value" style="font-size:20px;">
+                <?php echo $brLatestDate ? htmlspecialchars($brLatestDate) : '—'; ?>
+            </div>
+            <div class="sub">
+                <?php if ($brLatestDate): ?>
+                    <?php echo $brLatestBalanced ? 'Balanced ✓' : 'Difference remains'; ?>
+                <?php else: ?>
+                    Never reconciled
+                <?php endif; ?>
+            </div>
+        </div>
+        <div class="metric-card teal">
+            <div class="label">Cash at Bank (Ledger)</div>
+            <div class="value"><?php echo number_format($cashAtBank, 2); ?></div>
+            <div class="sub">
+                <a href="gl_bank_recon_new.php">Start new reconciliation</a>
+            </div>
+        </div>
+    </div>
+
     <!-- Quick Links -->
     <div class="section-title">Reports &amp; Actions</div>
     <div class="quick-grid">
@@ -559,6 +675,10 @@ if ($sessionRow) {
         <a href="gl_ap_aging.php" class="quick">
             <span class="ico pink"><span class="glyphicon glyphicon-time"></span></span>
             AP Aging
+        </a>
+        <a href="gl_bank_recon.php" class="quick">
+            <span class="ico indigo"><span class="glyphicon glyphicon-transfer"></span></span>
+            Bank Reconciliation
         </a>
         <a href="gl_purchase_add.php" class="quick">
             <span class="ico amber"><span class="glyphicon glyphicon-shopping-cart"></span></span>
