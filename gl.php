@@ -777,3 +777,115 @@ function gl_is_date_locked(mysqli $conn, string $date): bool {
     if ($lock === null) return false;
     return strtotime($date) < strtotime($lock);
 }
+
+/* ============================================================
+   ASSET / DEPRECIATION HELPERS
+   ============================================================ */
+
+/**
+ * Fetch one asset by ID.
+ */
+function gl_get_asset(mysqli $conn, int $assetId): ?array {
+    if ($assetId <= 0) return null;
+    $stmt = $conn->prepare("SELECT * FROM gl_assets WHERE id = ? LIMIT 1");
+    $stmt->bind_param("i", $assetId);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    return $row ?: null;
+}
+
+/**
+ * List all assets (optionally filtered by status).
+ */
+function gl_list_assets(mysqli $conn, ?string $status = null): array {
+    $sql = "SELECT * FROM gl_assets WHERE 1=1";
+    $params = [];
+    $types = "";
+    if ($status !== null) {
+        $sql .= " AND status = ?";
+        $params[] = $status;
+        $types .= "s";
+    }
+    $sql .= " ORDER BY purchase_date DESC, id DESC";
+
+    $stmt = $conn->prepare($sql);
+    if (!empty($params)) $stmt->bind_param($types, ...$params);
+    $stmt->execute();
+    $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $stmt->close();
+    return $rows;
+}
+
+/**
+ * Compute the current book value of an asset.
+ *   Book value = cost - accumulated_depreciation
+ */
+function gl_asset_book_value(array $asset): float {
+    return round((float)$asset['cost'] - (float)$asset['accumulated_depreciation'], 2);
+}
+
+/**
+ * Compute how much depreciation to charge for one asset for a given period.
+ * Returns the amount to charge in this period, honoring:
+ *   - Straight-line method
+ *   - Reducing-balance method
+ *   - Salvage value floor
+ *   - Asset's last_depreciated_through (won't double-charge)
+ *   - Purchase date (won't charge before purchase)
+ *
+ * @param array  $asset       Row from gl_assets
+ * @param string $periodStart YYYY-MM-DD
+ * @param string $periodEnd   YYYY-MM-DD
+ * @return float  Amount to charge this period
+ */
+function gl_calc_depreciation(array $asset, string $periodStart, string $periodEnd): float {
+    $cost      = (float)$asset['cost'];
+    $salvage   = (float)$asset['salvage_value'];
+    $accum     = (float)$asset['accumulated_depreciation'];
+    $life      = max(1, (int)$asset['useful_life_years']);
+    $method    = $asset['depreciation_method'];
+    $rate      = (float)($asset['reducing_rate_pct'] ?? 0);
+    $purchase  = $asset['purchase_date'];
+    $lastEnd   = $asset['last_depreciated_through'];
+
+    // Don't depreciate before purchase
+    if (strtotime($periodEnd) < strtotime($purchase)) return 0.0;
+
+    // Don't charge for a period already handled
+    if ($lastEnd && strtotime($periodEnd) <= strtotime($lastEnd)) return 0.0;
+
+    // Also don't charge for the period if the start is before purchase
+    // (we'll charge partial from purchase_date). Simplify: charge from max(periodStart, purchase).
+    $effectiveStart = ($lastEnd && strtotime($lastEnd) > strtotime($periodStart))
+                    ? $lastEnd
+                    : $periodStart;
+    if (strtotime($effectiveStart) < strtotime($purchase)) {
+        $effectiveStart = $purchase;
+    }
+
+    $days = (int)((strtotime($periodEnd) - strtotime($effectiveStart)) / 86400);
+    if ($days <= 0) return 0.0;
+
+    $bookValue = round($cost - $accum, 2);
+    if ($bookValue <= $salvage + 0.005) return 0.0;
+
+    if ($method === 'straight_line') {
+        // Annual depreciation = (cost - salvage) / life
+        $annual = ($cost - $salvage) / $life;
+        $daily  = $annual / 365;
+        $charge = round($daily * $days, 2);
+    } else {
+        // Reducing balance: annual charge = book_value * rate%
+        if ($rate <= 0) return 0.0;
+        $annual = $bookValue * ($rate / 100);
+        $daily  = $annual / 365;
+        $charge = round($daily * $days, 2);
+    }
+
+    // Cap at remaining depreciable amount
+    $remaining = round($bookValue - $salvage, 2);
+    if ($charge > $remaining) $charge = $remaining;
+
+    return round($charge, 2);
+}

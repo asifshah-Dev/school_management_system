@@ -109,6 +109,27 @@ if ($chkPC && $chkPC->num_rows > 0) {
     $pcOverTotal  = (float)$pcSum['over_total'];
 }
 
+// ---------- FIXED ASSETS HEALTH ----------
+$assetTableExists = false;
+$assetActive = 0;
+$assetCost = 0.0;
+$assetNet = 0.0;
+$chkAsset = $conn->query("SHOW TABLES LIKE 'gl_assets'");
+if ($chkAsset && $chkAsset->num_rows > 0) {
+    $assetTableExists = true;
+    $assetActive = (int)$conn->query("SELECT COUNT(*) AS c FROM gl_assets WHERE status='active'")->fetch_assoc()['c'];
+
+    $assetSum = $conn->query("
+        SELECT
+            COALESCE(SUM(cost), 0) AS total_cost,
+            COALESCE(SUM(cost - accumulated_depreciation), 0) AS total_net
+        FROM gl_assets
+        WHERE status = 'active'
+    ")->fetch_assoc();
+    $assetCost = (float)$assetSum['total_cost'];
+    $assetNet  = (float)$assetSum['total_net'];
+}
+
 // Diagnostic flags
 $ledgerEmpty = ($ledgerCount === 0 && $lineCount === 0);
 $coaSeeded   = ($accountCount >= 40);
@@ -281,6 +302,7 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
         .link-card.settings .icon    { background: #f1f5f9; color: #334155; }
         .link-card.yec .icon         { background: #ede9fe; color: #5b21b6; }
         .link-card.cash .icon        { background: #d1fae5; color: #047857; }
+        .link-card.asset .icon       { background: #fef3c7; color: #b45309; }
 
         .link-card .body { flex: 1; min-width: 0; }
         .link-card .title { font-size: 15px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
@@ -642,6 +664,27 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
                 <?php endif; ?>
             </div>
         </div>
+
+        <!-- Fixed Assets tile -->
+        <div class="status-tile <?php
+            if (!$assetTableExists)     echo 'err';
+            elseif ($assetActive > 0)   echo 'ok';
+            else                        echo 'warn';
+        ?>">
+            <div class="label">Fixed Assets</div>
+            <div class="value"><?php echo $assetActive; ?> active</div>
+            <div class="sub">
+                <?php if (!$assetTableExists): ?>
+                    <span class="status-pill bad">Table missing</span>
+                <?php elseif ($assetActive > 0): ?>
+                    <span class="status-pill ok">Cost <?php echo number_format($assetCost, 0); ?></span>
+                    &middot; Net <?php echo number_format($assetNet, 0); ?>
+                <?php else: ?>
+                    <span class="status-pill warn">None yet</span>
+                <?php endif; ?>
+            </div>
+        </div>
+
     </div>
 
     <!-- ===== System Settings ===== -->
@@ -669,6 +712,39 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
                 <div class="title">Petty Cash / Daily Count</div>
                 <div class="desc">Record the physical cash count against the ledger. Any difference is auto-posted to Cash Short/Over (5940). <?php echo $pcCount > 0 ? 'Last count: ' . htmlspecialchars($pcLastDate) : 'No counts yet.'; ?></div>
                 <div class="url">gl_petty_cash.php &middot; <?php echo $pcCount; ?> count<?php echo $pcCount === 1 ? '' : 's'; ?></div>
+            </div>
+        </a>
+
+    </div>
+
+    <!-- ===== Assets & Depreciation ===== -->
+    <div class="section-title">Assets &amp; Depreciation</div>
+    <div class="link-grid">
+
+        <a href="gl_assets.php" class="link-card asset">
+            <div class="icon"><span class="glyphicon glyphicon-home"></span></div>
+            <div class="body">
+                <div class="title">Asset Register</div>
+                <div class="desc">Register fixed assets, set useful life and depreciation method. Shows cost, accumulated depreciation, and net book value.</div>
+                <div class="url">gl_assets.php &middot; <?php echo $assetActive; ?> active</div>
+            </div>
+        </a>
+
+        <a href="gl_asset_add.php" class="link-card asset">
+            <div class="icon"><span class="glyphicon glyphicon-plus"></span></div>
+            <div class="body">
+                <div class="title">Add Asset</div>
+                <div class="desc">Register a new fixed asset with cost, useful life, and depreciation method. No journal entry posted here.</div>
+                <div class="url">gl_asset_add.php</div>
+            </div>
+        </a>
+
+        <a href="gl_depreciation_run.php" class="link-card admin">
+            <div class="icon"><span class="glyphicon glyphicon-cog"></span></div>
+            <div class="body">
+                <div class="title">Run Depreciation</div>
+                <div class="desc">Compute and post depreciation for a period. Preview shows per-asset charge before posting.</div>
+                <div class="url">gl_depreciation_run.php</div>
             </div>
         </a>
 
@@ -882,6 +958,15 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
                 <div class="title">Petty Cash Adjustments</div>
                 <div class="desc">Filtered view of journal entries posted from petty cash counts.</div>
                 <div class="url">gl_transactions.php?ref_type=petty_cash</div>
+            </div>
+        </a>
+
+        <a href="gl_transactions.php?ref_type=depreciation" class="link-card admin">
+            <div class="icon"><span class="glyphicon glyphicon-cog"></span></div>
+            <div class="body">
+                <div class="title">Depreciation Entries</div>
+                <div class="desc">Filtered view of journal entries posted from depreciation runs.</div>
+                <div class="url">gl_transactions.php?ref_type=depreciation</div>
             </div>
         </a>
 
@@ -1136,6 +1221,7 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
             <li>Bookmark this page as your home for the ledger system.</li>
             <li>The status board at the top shows the health of the entire engine at a glance.</li>
             <li><strong>Petty Cash:</strong> daily cash counts, auto-posted differences to Cash Short/Over (5940).</li>
+            <li><strong>Assets &amp; Depreciation:</strong> register fixed assets, run monthly or yearly depreciation.</li>
             <li><strong>Settings:</strong> set the period lock date to prevent backdated entries.</li>
             <li><strong>Bank Reconciliation:</strong> match your bank statement against the ledger.</li>
             <li><strong>Session Close / Year-End Close:</strong> freeze or close a fiscal session.</li>
@@ -1159,7 +1245,7 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
         <div class="modal-body">
 
             <p style="font-size:13px; color:#475569; margin-top:0;">
-                Choose what to wipe. In both cases, <strong>the Chart of Accounts, Suppliers, Mapping tables, and Settings are preserved.</strong>
+                Choose what to wipe. In both cases, <strong>the Chart of Accounts, Suppliers, Mapping tables, Settings, and the Asset Register are preserved.</strong>
             </p>
 
             <div class="reset-option" data-scope="ledger_only">
@@ -1169,7 +1255,9 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
                     <span class="scope-desc">
                         Wipes <code>gl_transactions</code>, <code>gl_journal_lines</code>, <code>vouchers</code>,
                         <code>voucher_counters</code>, <code>gl_session_closures</code>, <code>gl_year_end_closures</code>,
-                        <code>petty_cash_counts</code>, and all three <code>bank_*</code> reconciliation tables.
+                        <code>petty_cash_counts</code>, <code>gl_depreciation_runs</code>, <code>gl_depreciation_entries</code>,
+                        and all three <code>bank_*</code> reconciliation tables.
+                        Asset register rows are preserved but their depreciation counters are reset.
                         Leaves operational data untouched.
                     </span>
                 </label>
@@ -1181,7 +1269,7 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
                     <strong>Ledger + Operational (full clean slate)</strong>
                     <span class="scope-desc">
                         Everything above, <em>plus</em> <code>expenses</code>, <code>expanse_inventory_details</code>,
-                        <code>student_fee_card</code>, <code>fee_payments</code>, <code>advance_fees</code>, and <code>user_salary</code>.
+                        <code>student_fee_card</code>, <code>student_fee_payments</code>, <code>advance_payments</code>, and <code>user_salary</code>.
                         <strong style="color:#991b1b;">Use this only while testing — real fee/salary history will be destroyed.</strong>
                     </span>
                 </label>

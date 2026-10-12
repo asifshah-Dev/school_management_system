@@ -130,20 +130,39 @@ try {
 
     /* ============================================================
        OPERATIONAL TABLES (full-reset scope only)
+       Order matters — children before parents.
        ============================================================ */
     if ($scope === 'ledger_and_operational') {
-        wipe_table($conn, 'fee_payments',              $report);
-        wipe_table($conn, 'student_fee_card',          $report);
-        wipe_table($conn, 'advance_fees',              $report);
-        wipe_table($conn, 'user_salary',               $report);
-        wipe_table($conn, 'expanse_inventory_details', $report);
-        wipe_table($conn, 'expenses',                  $report);
+        wipe_table($conn, 'student_fee_payments',      $report);  // child of student_fee_card
+        wipe_table($conn, 'student_fee_card',          $report);  // parent
+        wipe_table($conn, 'advance_payments',          $report);  // advance fees
+        wipe_table($conn, 'user_salary',               $report);  // salaries
+        wipe_table($conn, 'expanse_inventory_details', $report);  // child of expenses
+        wipe_table($conn, 'expenses',                  $report);  // parent
     }
 
     /* ============================================================
        PETTY CASH
        ============================================================ */
     wipe_table($conn, 'petty_cash_counts', $report);
+
+    /* ============================================================
+       DEPRECIATION
+       Children first (depreciation_entries references runs).
+       gl_assets itself is master data — counters are reset but
+       rows are preserved.
+       ============================================================ */
+    wipe_table($conn, 'gl_depreciation_entries', $report);
+    wipe_table($conn, 'gl_depreciation_runs',    $report);
+
+    // Reset depreciation counters on assets (preserve the asset register itself)
+    $assetTbl = $conn->query("SHOW TABLES LIKE 'gl_assets'");
+    if ($assetTbl && $assetTbl->num_rows > 0) {
+        $conn->query("UPDATE gl_assets SET accumulated_depreciation = 0, last_depreciated_through = NULL");
+        $report['gl_assets'] = 'depreciation counters reset';
+    } else {
+        $report['gl_assets'] = 'skipped (no such table)';
+    }
 
     /* ============================================================
        BANK RECONCILIATION TABLES (children first)
@@ -171,6 +190,7 @@ try {
 
     /* ============================================================
        GL TRANSACTIONS (child of itself via fk_gl_txn_reversal)
+       Break the self-FK first, then delete.
        ============================================================ */
     $tblExists = $conn->query("SHOW TABLES LIKE 'gl_transactions'");
     if ($tblExists && $tblExists->num_rows > 0) {
