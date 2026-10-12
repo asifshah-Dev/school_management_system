@@ -1,5 +1,10 @@
 <?php 
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 require_once('gl.php');
 
@@ -1059,6 +1064,7 @@ foreach ($fee_cards as $card) {
           </h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
+        <?php if (!empty($perms['can_add'])): ?>
         <form method="POST" action="" id="addFeeForm">
           <div class="modal-body">
             <p class="text-muted small">Create a new fee card for <?php echo htmlspecialchars($current_class['class_name']); ?> - <?php echo htmlspecialchars($current_class['session_title']); ?></p>
@@ -1098,6 +1104,7 @@ foreach ($fee_cards as $card) {
             </button>
           </div>
         </form>
+        <?php endif; ?>
       </div>
     </div>
   </div>
@@ -1112,6 +1119,7 @@ foreach ($fee_cards as $card) {
         </h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
+      <?php if (!empty($perms['can_edit'])): ?>
       <form method="POST" action="" id="editFeeForm">
         <div class="modal-body">
           <input type="hidden" name="transaction_id" id="edit_transaction_id" value="">
@@ -1167,6 +1175,7 @@ foreach ($fee_cards as $card) {
           </button>
         </div>
       </form>
+      <?php endif; ?>
     </div>
   </div>
 </div>
@@ -1178,9 +1187,11 @@ foreach ($fee_cards as $card) {
         <div class="card mb-4">
           <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
             <h5 class="mb-0"><i class="fas fa-money-check-alt"></i> Pending Fee Cards</h5>
+            <?php if (!empty($perms['can_add'])): ?>
             <button type="button" class="btn-add-fee" data-bs-toggle="modal" data-bs-target="#addFeeModal">
               <i class="fas fa-plus"></i> ADD NEW FEES
             </button>
+            <?php endif; ?>
           </div>
           <div class="card-body p-0">
             <?php if (empty($fee_cards)): ?>
@@ -1225,11 +1236,15 @@ foreach ($fee_cards as $card) {
                     $is_overdue = (strtotime($card['due_date']) < time()) && ($due > 0);
                   ?>
                   <tr id="fee-row-<?php echo $card['id']; ?>">
-                    <td class="action-col">
-                      <a href="javascript:void(0);" onclick="confirmDelete(<?php echo $card['id']; ?>)" class="delete-btn" title="Delete Fee Card">
+                    <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<td class="action-col">
+                      <?php if (!empty($perms['can_delete'])): ?>
+<a href="javascript:void(0);" onclick="confirmDelete(<?php echo $card['id']; ?>)" class="delete-btn" title="Delete Fee Card">
                         <i class="fas fa-trash-alt"></i>
                       </a>
+<?php endif; ?>
                     </td>
+<?php endif; ?>
                     <td>
                       <strong><?php echo htmlspecialchars($card['fee_type_title']); ?></strong>
                     </td>
@@ -1325,9 +1340,11 @@ foreach ($fee_cards as $card) {
             </div>
             
             <div class="p-3">
+              <?php if (!empty($perms['can_add'])): ?>
               <button type="submit" name="process_payment" class="btn btn-success btn-process w-100">
                 <i class="fas fa-check-circle"></i> Process Payment
               </button>
+              <?php endif; ?>
             </div>
             <?php endif; ?>
           </div>
@@ -1433,7 +1450,7 @@ foreach ($fee_cards as $card) {
                   </button>
                 </td>
                 <td>
-                  <?php if ($can_edit): ?>
+                  <?php if ($can_edit && !empty($perms['can_edit'])): ?>
                   <button class="btn btn-sm btn-outline-warning" onclick="openEditModal(<?php echo $trans['id']; ?>, <?php echo $trans['paid_amount']; ?>, <?php echo $trans['discount_amount']; ?>, '<?php echo $trans['payment_method']; ?>', '<?php echo htmlspecialchars(addslashes($trans['transaction_ref'] ?? '')); ?>', '<?php echo htmlspecialchars(addslashes($trans['remarks'] ?? '')); ?>')" title="Edit Transaction">
                     <i class="fas fa-edit"></i>
                   </button>

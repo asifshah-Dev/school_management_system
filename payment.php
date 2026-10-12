@@ -1,7 +1,11 @@
 <?php
 // Include security file to enforce authentication and authorization
 require_once('security.php');
-
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 // Start session if not already active
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
@@ -733,10 +737,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                                                     <textarea class="form-control" id="description" name="description" rows="2"></textarea>
                                                 </div>
                                                 <div class="form-group col-xs-12">
+                                                    <?php if (!empty($perms['can_add'])): ?>
                                                     <button type="submit" class="btn btn-success btn-lg">
                                                         <span class="glyphicon glyphicon-minus"></span> 
                                                         <?php echo $translations[$lang]['payment_button']; ?>
                                                     </button>
+                                                    <?php endif; ?>
                                                     <button type="reset" class="btn btn-default btn-lg">
                                                         <span class="glyphicon glyphicon-refresh"></span> 
                                                         <?php echo $translations[$lang]['reset']; ?>

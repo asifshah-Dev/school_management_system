@@ -2,6 +2,11 @@
 ob_start();
 header('Content-Type: text/html; charset=utf-8');
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 
 // Function to convert number to ordinal (1st, 2nd, 3rd, etc.)
@@ -174,7 +179,9 @@ if ($class_id > 0) {
                                             <th>Name</th>
                                             <th>Father's Name</th>
                                             <th>Position</th>
-                                            <th>Actions</th>
+                                            <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<th>Actions</th>
+<?php endif; ?>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -187,16 +194,20 @@ if ($class_id > 0) {
                                                         <?php echo numberToOrdinal($student['position']); ?>
                                                     </span>
                                                 </td>
-                                                <td data-label="Actions">
+                                                <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<td data-label="Actions">
                                                     <?php if ($student['result_count'] > 0): ?>
                                                         <a href="dmc_print.php?student_id=<?php echo $student['id']; ?>&arrange_exam_id=<?php echo $selected_arrange_exam_id;?>" 
                                                            class="btn btn-success btn-sm">Print DMC</a>
-                                                        <a href="edit_dmc.php?student_id=<?php echo $student['id']; ?>&arrange_exam_id=<?php echo $selected_arrange_exam_id; ?>" 
+                                                        <?php if (!empty($perms['can_edit'])): ?>
+<a href="edit_dmc.php?student_id=<?php echo $student['id']; ?>&arrange_exam_id=<?php echo $selected_arrange_exam_id; ?>"
                                                            class="btn btn-warning btn-sm">Edit DMC</a>
+<?php endif; ?>
                                                     <?php else: ?>
                                                         <span class="label label-warning">Marks are not entered</span>
                                                     <?php endif; ?>
                                                 </td>
+<?php endif; ?>
                                             </tr>
                                         <?php endforeach; ?>
                                     </tbody>

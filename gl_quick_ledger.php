@@ -1,6 +1,11 @@
 <?php
 date_default_timezone_set('Asia/Karachi');
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 require_once('gl.php');
 
@@ -484,9 +489,11 @@ $accId = $account ? (int)$account['id'] : 0;
                         <span class="glyphicon glyphicon-folder-open big-icon"></span>
                         No child accounts yet.
                         <div style="margin-top: 12px;">
+                            <?php if (!empty($perms['can_add'])): ?>
                             <a href="gl_account_add.php?parent_id=<?php echo $accId; ?>" style="color: #1e40af; font-weight: 600;">
                                 + Add a child account
                             </a>
+                            <?php endif; ?>
                         </div>
                     </div>
                 <?php else: ?>

@@ -1,6 +1,11 @@
 <?php
 ob_start();
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 
 // Language fixed to English (based on provided code)
@@ -108,7 +113,9 @@ $translations = [
                                             <tr>
                                                 <th>#</th>
 
-                                                <th><?php echo $translations[$lang]['actions']; ?></th>
+                                                <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<th><?php echo $translations[$lang]['actions']; ?></th>
+<?php endif; ?>
                                                 <th><?php echo $translations[$lang]['student_name']; ?></th>
                                                 <th><?php echo $translations[$lang]['father_name']; ?></th>
                                             </tr>
@@ -133,8 +140,9 @@ $translations = [
                                             while ($student = $result->fetch_assoc()) {
                                                 echo "<tr>";
                                                 echo "<td>" . $i++ . "</td>";
-
-                                                echo "<td><input type='checkbox' name='students[]' value='{$student['id']}'></td>";
+                                                if (!empty($perms['can_edit']) || !empty($perms['can_delete'])) {
+                                                    echo "<td><input type='checkbox' name='students[]' value='{$student['id']}'></td>";
+                                                }
                                                 echo "<td>" . htmlspecialchars($student['name']) . "</td>";
                                                 echo "<td>" . htmlspecialchars($student['father_name']) . "</td>";
                                                 echo "</tr>";
@@ -169,9 +177,11 @@ $translations = [
                                 </div>
 
                                 <div class="text-right">
+                                    <?php if (!empty($perms['can_add'])): ?>
                                     <button type="submit" class="btn btn-success">
                                         <span class="glyphicon glyphicon-plus"></span> <?php echo $translations[$lang]['submit']; ?>
                                     </button>
+                                    <?php endif; ?>
                                 </div>
                             </form>
                         </div>

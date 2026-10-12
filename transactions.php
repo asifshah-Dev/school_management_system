@@ -1,6 +1,10 @@
 <?php 
 require_once('security.php');
-
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 // Language handling
 if (isset($_GET['lang'])) {
     $_SESSION['lang'] = $_GET['lang'];
@@ -238,10 +242,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                                     <textarea class="form-control" id="description" name="description" rows="2"></textarea>
                                 </div>
                                 <div class="form-group">
+                                    <?php if (!empty($perms['can_add'])): ?>
                                     <button type="submit" class="btn btn-success btn-lg" id="submit_button">
                                         <span class="glyphicon glyphicon-plus"></span> 
                                         <span id="submit_button_label"><?php echo $translations[$lang]['submit']; ?></span>
                                     </button>
+                                    <?php endif; ?>
                                     <button type="reset" class="btn btn-default btn-lg">
                                         <span class="glyphicon glyphicon-refresh"></span> 
                                         <?php echo $translations[$lang]['reset']; ?>

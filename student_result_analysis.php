@@ -1,5 +1,10 @@
 <?php
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 
 // Check user permissions
@@ -453,7 +458,9 @@ if (isset($_GET['export']) && $_GET['export'] == 'csv') {
                                         <th><?php echo $translations[$lang]['total_marks']; ?></th>
                                         <th><?php echo $translations[$lang]['percentage']; ?></th>
                                         <th><?php echo $translations[$lang]['status']; ?></th>
-                                        <th><?php echo $translations[$lang]['actions']; ?></th>
+                                        <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<th><?php echo $translations[$lang]['actions']; ?></th>
+<?php endif; ?>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -504,6 +511,7 @@ if (isset($_GET['export']) && $_GET['export'] == 'csv') {
                                                     <?php echo $status_text; ?>
                                                 </span>
                                             </td>
+                                            <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
                                             <td>
                                                 <button type="button" class="btn btn-xs btn-info view-details" 
                                                         data-student-id="<?php echo $student['student_id']; ?>"
@@ -513,6 +521,7 @@ if (isset($_GET['export']) && $_GET['export'] == 'csv') {
                                                     <?php echo $translations[$lang]['view_details']; ?>
                                                 </button>
                                             </td>
+                                            <?php endif; ?>
                                         </tr>
                                     <?php endforeach; ?>
                                 </tbody>

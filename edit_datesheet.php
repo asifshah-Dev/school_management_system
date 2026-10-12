@@ -15,7 +15,11 @@
  */
 
 require_once('security.php');
-
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 // Initialize session
 if (session_status() == PHP_SESSION_NONE) {
     session_start();
@@ -583,9 +587,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             </div>
 
                             <div class="text-right">
+                                <?php if (!empty($perms['can_edit'])): ?>
                                 <button type="submit" class="btn btn-success" onclick="return confirm('Are you sure you want to update the datesheet?')">
                                     <span class="glyphicon glyphicon-refresh"></span> Update Datesheet
                                 </button>
+                                <?php endif; ?>
                                 <a href="datesheet_list.php" class="btn btn-default">
                                     <span class="glyphicon glyphicon-remove"></span> Back
                                 </a>

@@ -889,3 +889,102 @@ function gl_calc_depreciation(array $asset, string $periodStart, string $periodE
 
     return round($charge, 2);
 }
+
+/* ============================================================
+   BUDGETING HELPERS
+   ============================================================ */
+
+/**
+ * Given a session's from_dated, return an array of 12 monthly
+ * boundaries: [ ['index'=>1, 'label'=>'Feb 2026', 'start'=>'2026-02-02', 'end'=>'2026-03-01'], ... ]
+ * Months are calendar months, offset by the session's start month.
+ */
+function gl_budget_month_boundaries(array $session): array {
+    $start = new DateTime($session['from_dated']);
+    $months = [];
+    for ($i = 0; $i < 12; $i++) {
+        $mStart = (clone $start)->modify("+$i months");
+        $mEnd   = (clone $mStart)->modify('+1 month -1 day');
+        $months[] = [
+            'index' => $i + 1,
+            'label' => $mStart->format('M Y'),
+            'start' => $mStart->format('Y-m-d'),
+            'end'   => $mEnd->format('Y-m-d'),
+        ];
+    }
+    return $months;
+}
+
+/**
+ * Fetch the budget for a session (or null).
+ */
+function gl_get_budget_for_session(mysqli $conn, int $sessionId): ?array {
+    $stmt = $conn->prepare("SELECT * FROM gl_budgets WHERE session_id = ? LIMIT 1");
+    $stmt->bind_param("i", $sessionId);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    return $row ?: null;
+}
+
+/**
+ * Fetch all budget lines for a budget, keyed by account_id → month_index → amount.
+ */
+function gl_budget_lines_map(mysqli $conn, int $budgetId): array {
+    $stmt = $conn->prepare("
+        SELECT account_id, month_index, amount
+        FROM gl_budget_lines
+        WHERE budget_id = ?
+    ");
+    $stmt->bind_param("i", $budgetId);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    $map = [];
+    while ($r = $res->fetch_assoc()) {
+        $map[(int)$r['account_id']][(int)$r['month_index']] = (float)$r['amount'];
+    }
+    $stmt->close();
+    return $map;
+}
+
+/**
+ * Compute actual GL movement per account for one month boundary.
+ * Returns [account_id => signed_actual] where
+ *   - Revenue: credit - debit (positive = income)
+ *   - Expense: debit - credit (positive = spend)
+ *   - Other types: 0 (budgets only track Revenue/Expense)
+ */
+function gl_budget_actuals_for_month(mysqli $conn, string $monthStart, string $monthEnd): array {
+    $stmt = $conn->prepare("
+        SELECT
+            l.account_id,
+            a.account_type,
+            a.is_contra,
+            SUM(l.debit)  AS total_debit,
+            SUM(l.credit) AS total_credit
+        FROM gl_journal_lines l
+        JOIN gl_transactions t ON t.id = l.transaction_id
+        JOIN gl_accounts a ON a.id = l.account_id
+        WHERE t.entry_date BETWEEN ? AND ?
+          AND a.is_postable = 1
+          AND a.account_type IN ('REVENUE','EXPENSE')
+        GROUP BY l.account_id, a.account_type, a.is_contra
+    ");
+    $stmt->bind_param("ss", $monthStart, $monthEnd);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    $map = [];
+    while ($r = $res->fetch_assoc()) {
+        $debit  = (float)$r['total_debit'];
+        $credit = (float)$r['total_credit'];
+        $isContra = (int)$r['is_contra'] === 1;
+
+        if ($r['account_type'] === 'REVENUE') {
+            $map[(int)$r['account_id']] = $isContra ? ($debit - $credit) : ($credit - $debit);
+        } else {
+            $map[(int)$r['account_id']] = $isContra ? ($credit - $debit) : ($debit - $credit);
+        }
+    }
+    $stmt->close();
+    return $map;
+}

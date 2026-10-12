@@ -1,6 +1,10 @@
 <?php 
 require_once('security.php');
-
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 // Language handling
 if (isset($_GET['lang'])) {
     $_SESSION['lang'] = $_GET['lang'];
@@ -513,10 +517,12 @@ if (isset($_POST['add_payment'])) {
                         </div>
                         
                         <div class="text-right" style="margin-top: 20px;">
-                            <button type="submit" class="btn btn-success">
+                            <?php if ($edit_mode ? !empty($perms['can_edit']) : !empty($perms['can_add'])): ?>
+<button type="submit" class="btn btn-success">
                                 <span class="glyphicon glyphicon-<?php echo $edit_mode ? 'refresh' : 'plus'; ?>"></span> 
                                 <?php echo $translations[$lang]['submit']; ?>
                             </button>
+<?php endif; ?>
                             
                             <?php if ($edit_mode): ?>
                                 <a href="expenses.php" class="btn btn-default">
@@ -592,9 +598,11 @@ if (isset($_POST['add_payment'])) {
                                 <div class="col-md-1">
                                     <div class="form-group">
                                         <label>&nbsp;</label>
+                                        <?php if (!empty($perms['can_add'])): ?>
                                         <button type="submit" name="add_payment" class="btn btn-primary btn-block">
                                             <span class="glyphicon glyphicon-plus"></span>
                                         </button>
+                                        <?php endif; ?>
                                     </div>
                                 </div>
                             </div>
@@ -631,7 +639,9 @@ if (isset($_POST['add_payment'])) {
                                         <th><?php echo $translations[$lang]['paid_amount']; ?></th>
                                         <th><?php echo $translations[$lang]['balance_amount']; ?></th>
                                         <th><?php echo $translations[$lang]['status']; ?></th>
-                                        <th><?php echo $translations[$lang]['actions']; ?></th>
+                                        <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<th><?php echo $translations[$lang]['actions']; ?></th>
+<?php endif; ?>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -651,12 +661,16 @@ if (isset($_POST['add_payment'])) {
                                                     <span class="label label-danger"><?php echo $translations[$lang]['status_inactive']; ?></span>
                                                 <?php endif; ?>
                                             </td>
-                                            <td>
-                                                <a href="?edit=<?php echo $row['id']; ?>" class="btn btn-xs btn-warning">
+                                            <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<td>
+                                                <?php if (!empty($perms['can_edit'])): ?>
+<a href="?edit=<?php echo $row['id']; ?>" class="btn btn-xs btn-warning">
                                                     <span class="glyphicon glyphicon-edit"></span> 
                                                     <?php echo $translations[$lang]['edit']; ?>
                                                 </a>
+<?php endif; ?>
                                             </td>
+<?php endif; ?>
                                         </tr>
                                     <?php endwhile; ?>
                                 </tbody>

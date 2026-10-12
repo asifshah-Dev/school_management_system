@@ -4,6 +4,11 @@ error_reporting(E_ALL);
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 if (session_status() == PHP_SESSION_NONE) session_start();
 
 if (!isset($_SESSION['csrf_token'])) $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
@@ -610,7 +615,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && $_POST['a
 </div>
 
 <div class="text-right">
+    <?php if (!empty($perms['can_add'])): ?>
     <button type="submit" class="btn btn-success">Generate Salaries</button>
+    <?php endif; ?>
 </div>
 </form>
 </div>
@@ -706,13 +713,16 @@ foreach ($users_data as $user) {
 </div>
 
 <div class="text-right no-print">
+    <?php if ($user['exists'] ? !empty($perms['can_edit']) : !empty($perms['can_add'])): ?>
     <button type="submit" class="btn btn-success">
         <?php echo $user['exists'] ? 'Update Salary' : 'Save Salary'; ?>
     </button>
+    <?php endif; ?>
     <?php if ($user['exists']): ?>
         <button type="button" class="btn btn-info" onclick="printSalary(<?php echo $user['id']; ?>, '<?php echo htmlspecialchars($user['username']); ?>')">
             <i class="fas fa-print"></i> Print Salary Slip
         </button>
+        <?php if (!empty($perms['can_edit'])): ?>
         <button type="button" class="btn btn-warning" onclick="openEditSalaryModal(
             <?php echo $user['salary_id']; ?>,
             <?php echo $user['id']; ?>,
@@ -724,6 +734,7 @@ foreach ($users_data as $user) {
         )">
             <i class="fas fa-edit"></i> Edit Salary
         </button>
+    <?php endif; ?>
     <?php endif; ?>
 </div>
 </form>

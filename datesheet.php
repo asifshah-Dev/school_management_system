@@ -1,6 +1,10 @@
 <?php
 require_once('security.php');
-
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 // Initialize session
 if (session_status() == PHP_SESSION_NONE) {
     session_start();
@@ -758,9 +762,11 @@ $datesheet = getDatesheet($conn, $arrange_exam_id);
                             </div>
 
                             <div class="text-right">
+                                <?php if (!empty($perms['can_add'])): ?>
                                 <button type="submit" class="btn btn-success">
                                     <span class="glyphicon glyphicon-refresh"></span> Save Datesheet
                                 </button>
+                                <?php endif; ?>
                                 <a href="arrange_exam.php" class="btn btn-default">
                                     <span class="glyphicon glyphicon-remove"></span> Back
                                 </a>
@@ -785,7 +791,9 @@ $datesheet = getDatesheet($conn, $arrange_exam_id);
                                         <th style="width: 20%;">Start Date</th>
                                         <th style="width: 20%;">Start Time</th>
                                         <th style="width: 20%;">End Time</th>
-                                        <th style="width: 5%;">Actions</th>
+                                        <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<th style="width: 5%;">Actions</th>
+<?php endif; ?>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -798,7 +806,9 @@ $datesheet = getDatesheet($conn, $arrange_exam_id);
                                                 <td><?php echo htmlspecialchars($ds['start_date'] ?? ''); ?></td>
                                                 <td><?php echo htmlspecialchars($ds['start_time'] ?? ''); ?></td>
                                                 <td><?php echo htmlspecialchars($ds['end_time'] ?? ''); ?></td>
+                                                <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
                                                 <td>
+                                                    <?php if (!empty($perms['can_delete'])): ?>
                                                     <form method="post" action="" style="display: inline;">
                                                         <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                                                         <input type="hidden" name="action" value="delete">
@@ -808,9 +818,12 @@ $datesheet = getDatesheet($conn, $arrange_exam_id);
                                                             <span class="glyphicon glyphicon-trash"></span>
                                                         </button>
                                                     </form>
+                                                    <?php endif; ?>
                                                 </td>
+                                                <?php endif; ?>
                                             <?php else: ?>
-                                                <td></td><td></td><td></td><td></td>
+                                                <td></td><td></td><td></td>
+                                                <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?><td></td><?php endif; ?>
                                             <?php endif; ?>
                                         </tr>
                                         <?php if ($ds['type'] === 'composite'): ?>
@@ -821,7 +834,9 @@ $datesheet = getDatesheet($conn, $arrange_exam_id);
                                                     <td><?php echo htmlspecialchars($sub_ds['start_date'] ?? ''); ?></td>
                                                     <td><?php echo htmlspecialchars($sub_ds['start_time'] ?? ''); ?></td>
                                                     <td><?php echo htmlspecialchars($sub_ds['end_time'] ?? ''); ?></td>
+                                                    <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
                                                     <td>
+                                                        <?php if (!empty($perms['can_delete'])): ?>
                                                         <form method="post" action="" style="display: inline;">
                                                             <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                                                             <input type="hidden" name="action" value="delete">
@@ -831,7 +846,9 @@ $datesheet = getDatesheet($conn, $arrange_exam_id);
                                                                 <span class="glyphicon glyphicon-trash"></span>
                                                             </button>
                                                         </form>
+                                                        <?php endif; ?>
                                                     </td>
+                                                    <?php endif; ?>
                                                 </tr>
                                             <?php endforeach; ?>
                                         <?php endif; ?>

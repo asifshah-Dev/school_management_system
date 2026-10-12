@@ -1,6 +1,11 @@
 <?php
 date_default_timezone_set('Asia/Karachi');
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 require_once('gl.php');
 
@@ -705,9 +710,11 @@ $refTypes = $conn->query("
                 <?php echo date('M j, Y', strtotime($filterTo)); ?>
             </div>
         </div>
+        <?php if (!empty($perms['can_add'])): ?>
         <a href="gl_journal_add.php" class="btn-new">
             <span class="glyphicon glyphicon-plus"></span> New Journal Entry
         </a>
+        <?php endif; ?>
     </div>
 
     <!-- Toolbar -->

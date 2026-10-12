@@ -13,7 +13,11 @@
  */
 
 require_once('security.php');
-
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 // Initialize session
 if (session_status() == PHP_SESSION_NONE) {
     session_start();
@@ -129,7 +133,9 @@ $message_type = isset($_GET['message_type']) ? htmlspecialchars($_GET['message_t
                                         <th style="width: 5%;">S.No</th>
                                         <th style="width: 35%;">Class</th>
                                         <th style="width: 35%;">Exam Type</th>
-                                        <th style="width: 25%;">Actions</th>
+                                        <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<th style="width: 25%;">Actions</th>
+<?php endif; ?>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -139,20 +145,24 @@ $message_type = isset($_GET['message_type']) ? htmlspecialchars($_GET['message_t
                                             <td><?php echo $counter++; ?></td>
                                             <td><?php echo htmlspecialchars($ds['class_title']); ?></td>
                                             <td><?php echo htmlspecialchars($ds['exam_type_title']); ?></td>
-                                            <td>
+                                            <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<td>
                                                 <a href="view_datesheet.php?exam_id=<?php echo $ds['arrange_exam_id']; ?>&class_id=<?php echo $ds['class_id']; ?>&exam_type=<?php echo urlencode($ds['exam_type_title']); ?>" 
                                                    class="btn btn-xs btn-info action-btn">
                                                     <span class="glyphicon glyphicon-eye-open"></span> View
                                                 </a>
-                                                <a href="edit_datesheet.php?exam_id=<?php echo $ds['arrange_exam_id']; ?>&class_id=<?php echo $ds['class_id']; ?>&exam_type=<?php echo urlencode($ds['exam_type_title']); ?>" 
+                                                <?php if (!empty($perms['can_edit'])): ?>
+<a href="edit_datesheet.php?exam_id=<?php echo $ds['arrange_exam_id']; ?>&class_id=<?php echo $ds['class_id']; ?>&exam_type=<?php echo urlencode($ds['exam_type_title']); ?>"
    class="btn btn-xs btn-primary action-btn">
     <span class="glyphicon glyphicon-edit"></span> Edit
 </a>
+<?php endif; ?>
                                                 <a href="print_datesheet.php?exam_id=<?php echo $ds['arrange_exam_id']; ?>&class_id=<?php echo $ds['class_id']; ?>&exam_type=<?php echo urlencode($ds['exam_type_title']); ?>" 
                                                    class="btn btn-xs btn-success action-btn" target="_blank">
                                                     <span class="glyphicon glyphicon-print"></span> Print
                                                 </a>
                                             </td>
+<?php endif; ?>
                                         </tr>
                                     <?php endforeach; ?>
                                 </tbody>

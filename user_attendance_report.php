@@ -2,7 +2,11 @@
 ob_start();
 require_once('conn_inc.php');
 require_once('security.php'); // Include security check
-
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 // --------------------
 // Get Parameters
 // --------------------

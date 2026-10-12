@@ -1,12 +1,18 @@
 <?php
 ob_start();
+require_once('security.php');
 require_once('conn_inc.php');
+require_once('permissions.php');
 
-// Language handling
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+
+$conn->query("SET time_zone = '+05:00'");
+$conn->query("SET collation_connection = 'utf8mb4_general_ci'");
+
 $_SESSION['lang'] = 'en';
 $lang = $_SESSION['lang'];
 
-// Language strings
 $translations = [
     'en' => [
         'title' => 'Users Management',
@@ -39,7 +45,6 @@ $translations = [
     ]
 ];
 
-// Fetch roles, village councils, class sections
 $roles = $conn->query("SELECT id, title FROM roles ORDER BY title");
 $village_councils = $conn->query("SELECT id, title FROM village_councils ORDER BY title");
 $class_sections = $conn->query("
@@ -50,7 +55,6 @@ $class_sections = $conn->query("
     ORDER BY c.title, s.title
 ");
 
-// Fetch Teacher role ID
 $teacher_role_id = 0;
 $stmt = $conn->prepare("SELECT id FROM roles WHERE UPPER(title) = 'TEACHER'");
 $stmt->execute();
@@ -58,7 +62,6 @@ $result = $stmt->get_result();
 if ($result->num_rows > 0) $teacher_role_id = $result->fetch_assoc()['id'];
 $stmt->close();
 
-// Handle add/edit POST
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $username = trim($_POST['username']);
     $password = trim($_POST['password']);
@@ -71,27 +74,24 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
     if (!empty($username) && !empty($role_id) && !empty($village_council_id)) {
         if (!empty($_POST['user_id'])) {
-            // Update user
             $user_id = intval($_POST['user_id']);
             if (!empty($password)) {
-                $stmt = $conn->prepare("UPDATE users SET username=?, password=?, mobile_no=?, email=?, role_id=?,salary=?, village_council_id=? WHERE id=?");
-                $stmt->bind_param("ssssiiii", $username, $password, $mobile_no, $email, $role_id,$salary, $village_council_id, $user_id);
+                $stmt = $conn->prepare("UPDATE users SET username=?, password=?, mobile_no=?, email=?, role_id=?, salary=?, village_council_id=? WHERE id=?");
+                $stmt->bind_param("ssssisii", $username, $password, $mobile_no, $email, $role_id, $salary, $village_council_id, $user_id);
             } else {
-                $stmt = $conn->prepare("UPDATE users SET username=?, mobile_no=?, email=?, role_id=?,salary=?, village_council_id=? WHERE id=?");
-                $stmt->bind_param("ssssiii", $username, $mobile_no, $email, $role_id,$salary, $village_council_id, $user_id);
+                $stmt = $conn->prepare("UPDATE users SET username=?, mobile_no=?, email=?, role_id=?, salary=?, village_council_id=? WHERE id=?");
+                $stmt->bind_param("sssisii", $username, $mobile_no, $email, $role_id, $salary, $village_council_id, $user_id);
             }
             $stmt->execute();
             $stmt->close();
         } else {
-            // Insert new user
-            $stmt = $conn->prepare("INSERT INTO users (username, password, mobile_no, email, role_id,salary, village_council_id) VALUES (?, ?, ?, ?, ?, ?, ?)");
-            $stmt->bind_param("sssssii", $username, $password, $mobile_no, $email, $role_id,$salary, $village_council_id);
+            $stmt = $conn->prepare("INSERT INTO users (username, password, mobile_no, email, role_id, salary, village_council_id) VALUES (?, ?, ?, ?, ?, ?, ?)");
+            $stmt->bind_param("ssssisi", $username, $password, $mobile_no, $email, $role_id, $salary, $village_council_id);
             $stmt->execute();
             $user_id = $conn->insert_id;
             $stmt->close();
         }
 
-        // Handle teacher classes - FIXED: Always delete existing assignments first
         $conn->query("DELETE FROM teacher_classes WHERE teacher_id=$user_id");
         $role_name = $conn->query("SELECT title FROM roles WHERE id=$role_id")->fetch_assoc()['title'];
         if (strcasecmp($role_name, 'Teacher') == 0 && !empty($class_section_ids)) {
@@ -116,56 +116,49 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     }
 }
 
-// Handle delete
 if (isset($_GET['delete'])) {
     $id = intval($_GET['delete']);
-    $stmt = $conn->prepare("DELETE FROM users WHERE id=?");
-    $stmt->bind_param("i", $id);
-    $stmt->execute();
-    $stmt->close();
-    $_SESSION['message'] = 'User deleted successfully!';
-    $_SESSION['message_type'] = 'success';
+    if ($id === 1 || $id === (int)$_SESSION['user_id']) {
+        $_SESSION['message'] = 'You cannot delete the root admin or yourself.';
+        $_SESSION['message_type'] = 'danger';
+    } else {
+        $stmt = $conn->prepare("DELETE FROM users WHERE id=?");
+        $stmt->bind_param("i", $id);
+        $stmt->execute();
+        $stmt->close();
+        $_SESSION['message'] = 'User deleted successfully!';
+        $_SESSION['message_type'] = 'success';
+    }
     header("Location: " . $_SERVER['PHP_SELF']);
     exit();
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Users - <?php echo $translations[$lang]['title']; ?></title>
-    <!-- Bootstrap 3.4.1 CSS & JS -->
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
     <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/js/bootstrap.min.js"></script>
-    <!-- Select2 CSS & JS -->
     <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
     <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
     <link rel="stylesheet" href="css/mystyle.css" />
-   
+
     <script>
         $(document).ready(function() {
-            // Log to console to verify jQuery is loaded
-            console.log('jQuery loaded, version:', $.fn.jquery);
-
-            // Show/hide class+section for teacher
             function toggleClassSectionField() {
                 var roleId = $('#role_id').val();
                 var teacherRoleId = '<?php echo $teacher_role_id; ?>';
-                console.log('Selected role ID:', roleId, 'Teacher role ID:', teacherRoleId);
                 if (roleId == teacherRoleId && roleId !== '') {
                     $('#class_section_field').show();
-                    console.log('Showing class+section dropdown');
                 } else {
                     $('#class_section_field').hide();
-                    console.log('Hiding class+section dropdown');
                 }
             }
             toggleClassSectionField();
             $('#role_id').change(toggleClassSectionField);
 
-            // Initialize Select2
             $('#role_id, select[name="village_council_id"], select[name="class_section_ids[]"]').select2({
                 width: '100%',
                 placeholder: 'Select an option',
@@ -176,15 +169,46 @@ if (isset($_GET['delete'])) {
 </head>
 <body>
 
-<?php require_once('navbar.php'); 
-$edit_mode = '';
-?>
+<?php require_once('navbar.php'); ?>
 
-<!-- Dashboard -->
 <div class="container">
     <div class="row">
         <div class="col-md-12 ">
-            <!-- Panel for Add/Edit User -->
+
+            <?php
+            $edit_mode = false;
+            $user_data = ['id'=>'','username'=>'','password'=>'','mobile_no'=>'','email'=>'','role_id'=>'','village_council_id'=>'','salary'=>'','class_section_ids'=>[]];
+            if (isset($_GET['edit'])) {
+                $id = intval($_GET['edit']);
+                $stmt = $conn->prepare("SELECT * FROM users WHERE id=?");
+                $stmt->bind_param("i", $id);
+                $stmt->execute();
+                $result = $stmt->get_result();
+                if ($result->num_rows > 0) {
+                    $user_data = $result->fetch_assoc();
+                    $edit_mode = true;
+                    $user_data['class_section_ids'] = [];
+                    $cs_result = $conn->query("SELECT class_section_id FROM teacher_classes WHERE teacher_id=$id");
+                    if ($cs_result && $cs_result->num_rows > 0) {
+                        while ($cs = $cs_result->fetch_assoc()) {
+                            $user_data['class_section_ids'][] = $cs['class_section_id'];
+                        }
+                    }
+                }
+                $stmt->close();
+            }
+
+            $show_form = $edit_mode ? $perms['can_edit'] : $perms['can_add'];
+            ?>
+
+            <?php if (!$show_form): ?>
+                <div class="alert alert-info">
+                    <span class="glyphicon glyphicon-lock"></span>
+                    You do not have permission to <?php echo $edit_mode ? 'edit' : 'add'; ?> users.
+                </div>
+            <?php endif; ?>
+
+            <?php if ($show_form): ?>
             <div class="panel panel-primary">
                 <div class="panel-heading">
                     <h3 class="panel-title"><?php echo $edit_mode ? 'Edit User' : $translations[$lang]['add_title']; ?></h3>
@@ -195,32 +219,6 @@ $edit_mode = '';
                             <?php echo $_SESSION['message']; unset($_SESSION['message'], $_SESSION['message_type']); ?>
                         </div>
                     <?php endif; ?>
-
-                    <?php
-                    $edit_mode = false;
-                    $user_data = ['id' => '', 'username' => '', 'password' => '', 'mobile_no' => '', 'email' => '', 'role_id' => '', 'village_council_id' => '', 'salary' => '', 'class_section_ids' => []];
-                    if (isset($_GET['edit'])) {
-                        $id = intval($_GET['edit']);
-                        $stmt = $conn->prepare("SELECT * FROM users WHERE id=?");
-                        $stmt->bind_param("i", $id);
-                        $stmt->execute();
-                        $result = $stmt->get_result();
-                        if ($result->num_rows > 0) {
-                            $user_data = $result->fetch_assoc();
-                            $edit_mode = true;
-                            
-                            // FIXED: Ensure class_section_ids is always an array
-                            $user_data['class_section_ids'] = [];
-                            $cs_result = $conn->query("SELECT class_section_id FROM teacher_classes WHERE teacher_id=$id");
-                            if ($cs_result && $cs_result->num_rows > 0) {
-                                while ($cs = $cs_result->fetch_assoc()) {
-                                    $user_data['class_section_ids'][] = $cs['class_section_id'];
-                                }
-                            }
-                        }
-                        $stmt->close();
-                    }
-                    ?>
 
                     <form method="post" class="form-horizontal">
                         <input type="hidden" name="user_id" value="<?php echo $user_data['id']; ?>">
@@ -253,10 +251,11 @@ $edit_mode = '';
                                 <input type="email" class="form-control" name="email" placeholder="<?php echo $translations[$lang]['email_placeholder']; ?>" value="<?php echo htmlspecialchars($user_data['email']); ?>">
                             </div>
                         </div>
+
                         <div class="form-group">
                             <label class="col-sm-3 control-label">Salary</label>
                             <div class="col-sm-9">
-                                <input type="text" class="form-control" name="salary" placeholder="" value="<?php echo htmlspecialchars($user_data['salary']); ?>">
+                                <input type="text" class="form-control" name="salary" value="<?php echo htmlspecialchars($user_data['salary']); ?>">
                             </div>
                         </div>
 
@@ -288,7 +287,6 @@ $edit_mode = '';
                             <label class="col-sm-3 control-label"><?php echo $translations[$lang]['class_section_label']; ?></label>
                             <div class="col-sm-9">
                                 <select name="class_section_ids[]" class="form-control" multiple>
-                                    <option value="">Select Class + Section</option>
                                     <?php while ($cs = $class_sections->fetch_assoc()): ?>
                                         <option value="<?php echo $cs['id']; ?>" <?php echo (is_array($user_data['class_section_ids']) && in_array($cs['id'], $user_data['class_section_ids'])) ? 'selected' : ''; ?>>
                                             <?php echo htmlspecialchars($cs['class_name']) . '  ' . $cs['section_name']; ?>
@@ -301,17 +299,17 @@ $edit_mode = '';
                         <div class="form-group">
                             <div class="col-sm-offset-3 col-sm-9">
                                 <button type="submit" class="btn btn-success">
-                                    <span class="glyphicon glyphicon-<?php echo $edit_mode ? 'refresh' : 'plus'; ?>"></span> 
+                                    <span class="glyphicon glyphicon-<?php echo $edit_mode ? 'refresh' : 'plus'; ?>"></span>
                                     <?php echo $translations[$lang]['submit']; ?>
                                 </button>
                                 <?php if ($edit_mode): ?>
                                     <a href="<?php echo $_SERVER['PHP_SELF']; ?>" class="btn btn-default">
-                                        <span class="glyphicon glyphicon-remove"></span> 
+                                        <span class="glyphicon glyphicon-remove"></span>
                                         <?php echo $translations[$lang]['cancel']; ?>
                                     </a>
                                 <?php else: ?>
                                     <button type="reset" class="btn btn-default">
-                                        <span class="glyphicon glyphicon-refresh"></span> 
+                                        <span class="glyphicon glyphicon-refresh"></span>
                                         <?php echo $translations[$lang]['reset']; ?>
                                     </button>
                                 <?php endif; ?>
@@ -320,16 +318,22 @@ $edit_mode = '';
                     </form>
                 </div>
             </div>
+            <?php endif; ?>
 
-            <!-- Panel for Users List -->
             <div class="panel panel-info">
                 <div class="panel-heading">
                     <h3 class="panel-title"><?php echo $translations[$lang]['list_title']; ?></h3>
                 </div>
                 <div class="panel-body">
+                    <?php if (isset($_SESSION['message']) && !$show_form): ?>
+                        <div class="alert alert-<?php echo $_SESSION['message_type']; ?>">
+                            <?php echo $_SESSION['message']; unset($_SESSION['message'], $_SESSION['message_type']); ?>
+                        </div>
+                    <?php endif; ?>
+
                     <?php
                     $result = $conn->query("
-                        SELECT u.id, u.username, u.mobile_no, u.email, r.title AS role_title, vc.title AS village_council_title,u.salary,
+                        SELECT u.id, u.username, u.mobile_no, u.email, r.title AS role_title, vc.title AS village_council_title, u.salary,
                                GROUP_CONCAT(DISTINCT CONCAT(c.title, '  ', COALESCE(s.title, '')) SEPARATOR ', ') AS class_sections
                         FROM users u
                         LEFT JOIN roles r ON u.role_id = r.id
@@ -350,34 +354,43 @@ $edit_mode = '';
                                     <tr>
                                         <th><?php echo $translations[$lang]['sr_no']; ?></th>
                                         <th><?php echo $translations[$lang]['username_label']; ?></th>
-                                       
                                         <th><?php echo $translations[$lang]['role_label']; ?></th>
                                         <th>Salary</th>
-                                        
                                         <th><?php echo $translations[$lang]['class_section_label']; ?></th>
+                                        <?php if ($perms['can_edit'] || $perms['can_delete']): ?>
                                         <th><?php echo $translations[$lang]['actions']; ?></th>
+                                        <?php endif; ?>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     <?php $counter = 1; while ($row = $result->fetch_assoc()): ?>
                                         <tr>
                                             <td><?php echo $counter++; ?></td>
-                                            <td><span style="font-size: 1rem;"><b><?php echo htmlspecialchars($row['username']); ?></b>  </span> <br>  <?php if($row['mobile_no'] != 0 && $row['mobile_no'] != ''){ echo "Mobile no: "; echo htmlspecialchars($row['mobile_no']);}else{ echo "Mobile no: N/A";}?> <br>  <?php if($row['email'] != ''){ echo "Email: "; echo htmlspecialchars($row['email']);}else{echo "Email: N/A";}?> <br> Address:  <?php echo htmlspecialchars($row['village_council_title']);?></td>
-                                            
+                                            <td>
+                                                <span style="font-size: 1rem;"><b><?php echo htmlspecialchars($row['username']); ?></b></span><br>
+                                                <?php echo ($row['mobile_no'] != 0 && $row['mobile_no'] != '') ? "Mobile no: " . htmlspecialchars($row['mobile_no']) : "Mobile no: N/A"; ?><br>
+                                                <?php echo ($row['email'] != '') ? "Email: " . htmlspecialchars($row['email']) : "Email: N/A"; ?><br>
+                                                Address: <?php echo htmlspecialchars($row['village_council_title']); ?>
+                                            </td>
                                             <td><?php echo htmlspecialchars($row['role_title']); ?></td>
                                             <td><?php echo htmlspecialchars($row['salary']); ?></td>
-                                           
                                             <td><?php echo htmlspecialchars($row['class_sections'] ?: '-'); ?></td>
+                                            <?php if ($perms['can_edit'] || $perms['can_delete']): ?>
                                             <td>
-                                                <a href="?edit=<?php echo $row['id']; ?>" class="btn btn-xs btn-warning">
-                                                    <span class="glyphicon glyphicon-edit"></span> 
-                                                    <?php echo $translations[$lang]['edit']; ?>
-                                                </a>
-                                                <a href="?delete=<?php echo $row['id']; ?>" class="btn btn-xs btn-danger" onclick="return confirm('<?php echo $translations[$lang]['delete_confirm']; ?>')">
-                                                    <span class="glyphicon glyphicon-trash"></span> 
-                                                    <?php echo $translations[$lang]['delete']; ?>
-                                                </a>
+                                                <?php if ($perms['can_edit']): ?>
+                                                    <a href="?edit=<?php echo $row['id']; ?>" class="btn btn-xs btn-warning">
+                                                        <span class="glyphicon glyphicon-edit"></span>
+                                                        <?php echo $translations[$lang]['edit']; ?>
+                                                    </a>
+                                                <?php endif; ?>
+                                                <?php if ($perms['can_delete'] && $row['id'] != 1 && $row['id'] != $_SESSION['user_id']): ?>
+                                                    <a href="?delete=<?php echo $row['id']; ?>" class="btn btn-xs btn-danger" onclick="return confirm('<?php echo $translations[$lang]['delete_confirm']; ?>')">
+                                                        <span class="glyphicon glyphicon-trash"></span>
+                                                        <?php echo $translations[$lang]['delete']; ?>
+                                                    </a>
+                                                <?php endif; ?>
                                             </td>
+                                            <?php endif; ?>
                                         </tr>
                                     <?php endwhile; ?>
                                 </tbody>

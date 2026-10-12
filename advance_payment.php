@@ -4,6 +4,11 @@ if (!isset($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 
 // Get student ID from URL
@@ -444,6 +449,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['apply_advance'])) {
                             <h4>Enter Advance Payment Details</h4>
                         </div>
                         
+                        <?php if (!empty($perms['can_add'])): ?>
                         <form method="post" class="form-horizontal" id="advanceForm">
                             <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                             <input type="hidden" name="submit_advance" value="1">
@@ -494,6 +500,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['apply_advance'])) {
                                 </div>
                             </div>
                         </form>
+                        <?php endif; ?>
                     </div>
                 </div>
 

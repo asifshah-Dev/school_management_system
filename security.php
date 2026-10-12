@@ -1,115 +1,63 @@
 <?php
-session_start();
+/**
+ * security.php — session bootstrap + automatic per-user module gate
+ * for the VIEW action only. Page-level add/edit/delete gating is
+ * handled by require_action() called explicitly on write pages.
+ */
 
-// Optional: Prevent this file from running on login.php
-if (basename($_SERVER['PHP_SELF']) === 'login.php') {
-    return; // or exit;
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
 }
 
-// Canary setup
-if (!isset($_SESSION['canary'])) {
-    session_regenerate_id(true);
-    $_SESSION['canary'] = time();
+// --- login gate ---
+if (!isset($_SESSION['user_id']) || (int)$_SESSION['user_id'] <= 0) {
+    header('Location: login.php');
+    exit;
 }
 
-// Regenerate session ID every 5 minutes for security
-if (isset($_SESSION['canary']) && $_SESSION['canary'] < time() - 300) {
-    session_regenerate_id(true);
-    $_SESSION['canary'] = time();
+// --- load connection (idempotent) ---
+if (!isset($conn) || !($conn instanceof mysqli)) {
+    require_once(__DIR__ . '/conn_inc.php');
 }
 
-// Define required session variables
-$required_vars = ['user_id', 'username', 'role_id'];
-
-// Validate session
-$session_valid = true;
-foreach ($required_vars as $var) {
-    if (!isset($_SESSION[$var]) || empty($_SESSION[$var])) {
-        $session_valid = false;
-        break;
-    }
+// --- load permission resolver (idempotent) ---
+if (!function_exists('gl_user_can')) {
+    require_once(__DIR__ . '/permissions.php');
 }
 
-// If session is invalid, destroy it and redirect to login
-if (!$session_valid) {
-    // Save error message temporarily using session
-    $_SESSION['login_error'] = 'Session expired or invalid. Please login again.';
-
-    // Clear session
-    $_SESSION = [];
-    if (ini_get("session.use_cookies")) {
-        $params = session_get_cookie_params();
-        setcookie(session_name(), '', time() - 42000,
-            $params["path"], $params["domain"],
-            $params["secure"], $params["httponly"]
-        );
-    }
-    session_destroy();
-
-    // Redirect to login
-    header("Location: login.php");
-    exit();
+// --- pages that bypass the automatic view gate ---
+$currentScript = strtolower(basename($_SERVER['SCRIPT_NAME'] ?? ''));
+$skipList = [
+    'login.php', 'logout.php', '403.php',
+    'user_permissions.php', 'permissions.php',
+    'security.php', 'conn_inc.php',
+    'gl_test_hub.php', 'gl_test_hub_reset.php',
+];
+if (in_array($currentScript, $skipList, true)) {
+    return;
 }
 
-// If everything is fine, assign session values
-$user_id = $_SESSION['user_id'];
-$username = $_SESSION['username'];
-$role_id = $_SESSION['role_id'];
-?>
-<?php
+// --- module lookup (only enforce can_view here) ---
+$userId = (int)$_SESSION['user_id'];
+$stmt = $conn->prepare("
+    SELECT id FROM modules
+    WHERE LOWER(SUBSTRING_INDEX(url, '/', -1)) = ?
+      AND status = 1
+    ORDER BY id ASC
+    LIMIT 1
+");
+$stmt->bind_param("s", $currentScript);
+$stmt->execute();
+$mod = $stmt->get_result()->fetch_assoc();
+$stmt->close();
 
-// Optional: Prevent this file from running on login.php
-if (basename($_SERVER['PHP_SELF']) === 'login.php') {
-    return; // or exit;
+// Page not registered as a module -> allow (fail-open for unlisted pages)
+if (!$mod) {
+    return;
 }
 
-// Canary setup
-if (!isset($_SESSION['canary'])) {
-    session_regenerate_id(true);
-    $_SESSION['canary'] = time();
+// Registered -> enforce can_view
+if (!current_user_can($conn, $currentScript, 'view')) {
+    header('Location: 403.php');
+    exit;
 }
-
-// Regenerate session ID every 5 minutes for security
-if (isset($_SESSION['canary']) && $_SESSION['canary'] < time() - 300) {
-    session_regenerate_id(true);
-    $_SESSION['canary'] = time();
-}
-
-// Define required session variables
-$required_vars = ['user_id', 'username', 'role_id'];
-
-// Validate session
-$session_valid = true;
-foreach ($required_vars as $var) {
-    if (!isset($_SESSION[$var]) || empty($_SESSION[$var])) {
-        $session_valid = false;
-        break;
-    }
-}
-
-// If session is invalid, destroy it and redirect to login
-if (!$session_valid) {
-    // Save error message temporarily using session
-    $_SESSION['login_error'] = 'Session expired or invalid. Please login again.';
-
-    // Clear session
-    $_SESSION = [];
-    if (ini_get("session.use_cookies")) {
-        $params = session_get_cookie_params();
-        setcookie(session_name(), '', time() - 42000,
-            $params["path"], $params["domain"],
-            $params["secure"], $params["httponly"]
-        );
-    }
-    session_destroy();
-
-    // Redirect to login
-    header("Location: login.php");
-    exit();
-}
-
-// If everything is fine, assign session values
-$user_id = $_SESSION['user_id'];
-$username = $_SESSION['username'];
-$role_id = $_SESSION['role_id'];
-?>

@@ -5,6 +5,11 @@ if (!isset($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 
 // Get student ID from URL
@@ -609,10 +614,12 @@ for ($i = 0; $i < 12; $i++) {
                         
                         <div class="form-group">
                             <div class="col-sm-offset-3 col-sm-9">
+                                <?php if (!empty($perms['can_edit'])): ?>
                                 <button type="submit" name="edit_fee_card" class="btn btn-primary">
                                     <span class="glyphicon glyphicon-save"></span> Update Fee Card
                                 </button>
-                                <a href="edit_fee_card.php?student_id=<?php echo $student_id; ?>" class="btn btn-default">Cancel</a>
+                                <?php endif; ?>
+<a href="edit_fee_card.php?student_id=<?php echo $student_id; ?>" class="btn btn-default">Cancel</a>
                             </div>
                         </div>
                     </form>
@@ -621,6 +628,7 @@ for ($i = 0; $i < 12; $i++) {
                     <!-- Create New Fee Card Form -->
                     <div class="create-new-fee-card">
                         <h4><span class="glyphicon glyphicon-plus"></span> Create New Fee Card</h4>
+                        <?php if (!empty($perms['can_add'])): ?>
                         <form method="post" class="form-horizontal">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token']); ?>">
                             
@@ -686,6 +694,7 @@ for ($i = 0; $i < 12; $i++) {
                                 </div>
                             </div>
                         </form>
+                        <?php endif; ?>
                     </div>
                     
                     <!-- Existing Fee Cards List -->
@@ -716,11 +725,13 @@ for ($i = 0; $i < 12; $i++) {
                                                     <span class="status-badge status-<?php echo $card['status']; ?>">
                                                         <?php echo strtoupper($card['status']); ?>
                                                     </span>
-                                                    <a href="edit_fee_card.php?student_id=<?php echo $student_id; ?>&edit_fee_card=<?php echo $card['id']; ?>" 
+                                                    <?php if (!empty($perms['can_edit'])): ?>
+<a href="edit_fee_card.php?student_id=<?php echo $student_id; ?>&edit_fee_card=<?php echo $card['id']; ?>"
                                                        class="btn btn-xs btn-warning">
                                                         <span class="glyphicon glyphicon-edit"></span> Edit
                                                     </a>
-                                                    <?php if ($card['paid_amount'] <= 0): ?>
+<?php endif; ?>
+                                                    <?php if ($card['paid_amount'] <= 0 && !empty($perms['can_delete'])): ?>
                                                         <form method="post" style="display: inline;">
                                                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token']); ?>">
                                                             <input type="hidden" name="delete_fee_card" value="<?php echo $card['id']; ?>">

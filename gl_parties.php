@@ -1,5 +1,10 @@
 <?php
 require_once 'security.php';
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once 'conn_inc.php';
 require_once 'gl.php';
 
@@ -413,9 +418,11 @@ $suppliers = gl_list_suppliers($conn, true);
             <a href="gl_ap_aging.php" class="btn-new outline no-print">
                 <span class="glyphicon glyphicon-time"></span> AP Aging
             </a>
+            <?php if (!empty($perms['can_add'])): ?>
             <button type="button" class="btn-new no-print" id="btnAdd">
                 <span class="glyphicon glyphicon-plus"></span> Add Supplier
             </button>
+            <?php endif; ?>
         </div>
     </div>
 
@@ -459,7 +466,9 @@ $suppliers = gl_list_suppliers($conn, true);
                     <th>Email</th>
                     <th class="num" style="width:150px;">AP Balance (PKR)</th>
                     <th style="width:110px;">Status</th>
+                    <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
                     <th class="no-print" style="width:260px;">Actions</th>
+                    <?php endif; ?>
                 </tr>
             </thead>
             <tbody>
@@ -483,6 +492,7 @@ $suppliers = gl_list_suppliers($conn, true);
                     <td><?= htmlspecialchars($emailDisplay) ?></td>
                     <td class="num <?= $balCls ?>"><?= number_format($bal, 2) ?></td>
                     <td>
+                        <?php if (!empty($perms['can_edit'])): ?>
                         <form method="post" style="display:inline;" onsubmit="return confirm('Toggle active status?');">
                             <input type="hidden" name="action" value="toggle_status">
                             <input type="hidden" name="id" value="<?= (int)$s['id'] ?>">
@@ -490,7 +500,9 @@ $suppliers = gl_list_suppliers($conn, true);
                                 <?= $isActive ? '● Active' : '○ Inactive' ?>
                             </button>
                         </form>
+                        <?php endif; ?>
                     </td>
+                    <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
                     <td class="no-print">
                         <a href="gl_party_ledger.php?id=<?= (int)$s['id'] ?>" class="row-btn row-btn-info">
                             <span class="glyphicon glyphicon-list-alt"></span> Ledger
@@ -498,6 +510,7 @@ $suppliers = gl_list_suppliers($conn, true);
                         <a href="gl_supplier_statement.php?id=<?= (int)$s['id'] ?>" class="row-btn row-btn-stmt">
                             <span class="glyphicon glyphicon-file"></span> Statement
                         </a>
+                        <?php if (!empty($perms['can_edit'])): ?>
                         <button type="button" class="row-btn row-btn-edit" onclick='openEdit(<?= json_encode([
                             "id"      => (int)$s["id"],
                             "name"    => $s["name"],
@@ -511,7 +524,9 @@ $suppliers = gl_list_suppliers($conn, true);
                         ], JSON_HEX_APOS | JSON_HEX_QUOT) ?>)'>
                             <span class="glyphicon glyphicon-pencil"></span> Edit
                         </button>
+                        <?php endif; ?>
                     </td>
+                    <?php endif; ?>
                 </tr>
             <?php endforeach; endif; ?>
             </tbody>
@@ -524,6 +539,7 @@ $suppliers = gl_list_suppliers($conn, true);
 <div class="panel-backdrop" id="panelBackdrop" onclick="closePanel()"></div>
 
 <!-- Top-drop panel -->
+<?php if (!empty($perms['can_add']) || !empty($perms['can_edit'])): ?>
 <div class="panel" id="supplierPanel" role="dialog" aria-modal="true">
     <div class="panel-head">
         <div>
@@ -584,10 +600,13 @@ $suppliers = gl_list_suppliers($conn, true);
 
         <div class="panel-foot">
             <button type="button" class="btn-ghost-custom" onclick="closePanel()">Cancel</button>
+            <?php if (!empty($perms['can_add']) || !empty($perms['can_edit'])): ?>
             <button type="submit" class="btn-primary-custom">
                 <span class="glyphicon glyphicon-ok"></span> Save Supplier
             </button>
+            <?php endif; ?>
         </div>
+        <?php endif; ?>
     </form>
 </div>
 

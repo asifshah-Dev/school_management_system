@@ -1,5 +1,10 @@
 <?php
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 
 // Language handling
@@ -323,9 +328,11 @@ try {
                             <textarea class="form-control" name="remarks" rows="2"></textarea>
                         </div>
                         
+                        <?php if (!empty($perms['can_add'])): ?>
                         <button type="submit" class="btn btn-success btn-block">
                             <?php echo $translations[$lang]['submit_payment']; ?>
                         </button>
+                        <?php endif; ?>
                     </form>
                 </div>
             </div>

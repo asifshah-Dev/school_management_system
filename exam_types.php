@@ -2,7 +2,11 @@
 ob_start();
 header('Content-Type: text/html; charset=utf-8');
 require_once('security.php');
-
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 // Language fixed to English only
 $lang = 'en';
 
@@ -135,6 +139,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && !isset($_POST['ajax'])) {
             </div>
           <?php endif; ?>
 
+          <?php if (!empty($perms['can_add'])): ?>
           <form method="post" action="" id="examTypeForm">
             <div class="form-group">
               <label for="title"><?php echo $translations[$lang]['title_label']; ?></label>
@@ -151,6 +156,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && !isset($_POST['ajax'])) {
               </button>
             </div>
           </form>
+          <?php endif; ?>
         </div>
       </div>
 
@@ -173,7 +179,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && !isset($_POST['ajax'])) {
                   <tr>
                     <th><?php echo $translations[$lang]['sr_no']; ?></th>
                     <th><?php echo $translations[$lang]['title_label']; ?></th>
-                    <th><?php echo $translations[$lang]['actions']; ?></th>
+                    <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<th><?php echo $translations[$lang]['actions']; ?></th>
+<?php endif; ?>
                   </tr>
                 </thead>
                 <tbody id="examTypesTable">
@@ -183,11 +191,17 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && !isset($_POST['ajax'])) {
                       <td class="title-cell" data-original="<?php echo htmlspecialchars($row['title']); ?>">
                         <?php echo htmlspecialchars($row['title']); ?>
                       </td>
+                      <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
                       <td>
+                        <?php if (!empty($perms['can_edit'])): ?>
                         <button class="btn btn-xs btn-warning edit-btn"><?php echo $translations[$lang]['edit']; ?></button>
+                        <?php endif; ?>
+                        <?php if (!empty($perms['can_edit'])): ?>
                         <button class="btn btn-xs btn-success save-btn d-none"><?php echo $translations[$lang]['save']; ?></button>
                         <button class="btn btn-xs btn-default cancel-btn d-none"><?php echo $translations[$lang]['cancel']; ?></button>
+                        <?php endif; ?>
                       </td>
+                      <?php endif; ?>
                     </tr>
                   <?php endwhile; ?>
                 </tbody>

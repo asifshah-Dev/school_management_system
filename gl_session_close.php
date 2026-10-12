@@ -1,6 +1,11 @@
 <?php
 date_default_timezone_set('Asia/Karachi');
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 require_once('gl.php');
 
@@ -530,7 +535,9 @@ $closures = $conn->query("
                     <th style="width:120px;">To</th>
                     <th style="width:100px;">Status</th>
                     <th style="width:140px;">Snapshot</th>
+                    <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
                     <th class="no-print" style="width:200px;">Action</th>
+                    <?php endif; ?>
                 </tr>
             </thead>
             <tbody>
@@ -557,11 +564,15 @@ $closures = $conn->query("
                             <span style="color:#94a3b8; font-size:12px;">—</span>
                         <?php endif; ?>
                     </td>
+                    <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
                     <td class="no-print">
+                        <?php if (!empty($perms['can_edit'])): ?>
                         <button type="button" class="btn-soft" onclick="openCloseForm(<?= (int)$s['id'] ?>)">
                             <span class="glyphicon glyphicon-lock"></span> Close &amp; Snapshot
                         </button>
+                        <?php endif; ?>
                     </td>
+                    <?php endif; ?>
                 </tr>
                 <?php endforeach; ?>
             </tbody>
@@ -644,9 +655,11 @@ $closures = $conn->query("
                     <textarea name="notes" id="cf_notes" placeholder="e.g. Closed at end of academic year, audited by Mr. Khan"></textarea>
 
                     <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                        <?php if (!empty($perms['can_edit'])): ?>
                         <button type="submit" class="btn-primary-custom">
                             <span class="glyphicon glyphicon-lock"></span> Confirm Close &amp; Snapshot
                         </button>
+                        <?php endif; ?>
                         <button type="button" class="btn-soft" onclick="backToPreview()">
                             <span class="glyphicon glyphicon-arrow-left"></span> Back to Preview
                         </button>

@@ -3,7 +3,11 @@
 header('Content-Type: text/html; charset=utf-8');
 require_once('conn_inc.php');
 require_once('security.php');
-
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 $lang = 'en';
 $success_message = '';
 $error_message = '';
@@ -880,10 +884,17 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['ajax_update'])) {
                                            id="room_<?php echo $day_key; ?>_<?php echo $slot['id']; ?>">
                                 </div>
                                 
-                                <button type="button" class="btn-update no-print" 
+                                <?php if ($existing && !empty($perms['can_edit'])): ?>
+                                <button type="button" class="btn-update no-print"
                                         onclick="updatePeriod(<?php echo $day_key; ?>, <?php echo $slot['id']; ?>)">
                                     <i class="fas fa-save mr-1"></i>Update
                                 </button>
+                                <?php elseif (!$existing && !empty($perms['can_add'])): ?>
+                                <button type="button" class="btn-update no-print"
+                                        onclick="updatePeriod(<?php echo $day_key; ?>, <?php echo $slot['id']; ?>)">
+                                    <i class="fas fa-save mr-1"></i>Add
+                                </button>
+                                <?php endif; ?>
                                 
                                 <div class="success-indicator no-print" id="success_<?php echo $day_key; ?>_<?php echo $slot['id']; ?>">
                                     <i class="fas fa-check-circle"></i> Saved

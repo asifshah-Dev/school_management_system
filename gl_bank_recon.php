@@ -1,6 +1,11 @@
 <?php
 date_default_timezone_set('Asia/Karachi');
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 require_once('gl.php');
 
@@ -141,9 +146,11 @@ $recons = $conn->query("
             <h1>Bank Reconciliation</h1>
             <div class="sub">Match your ledger (account 1020) against the bank's monthly statement</div>
         </div>
+        <?php if (!empty($perms['can_add'])): ?>
         <a href="gl_bank_recon_new.php" class="btn-new">
             <span class="glyphicon glyphicon-plus"></span> New Reconciliation
         </a>
+        <?php endif; ?>
     </div>
 
     <div class="card">
@@ -168,7 +175,9 @@ $recons = $conn->query("
                         <th class="num" style="width:120px;">Difference</th>
                         <th style="width:120px;">Progress</th>
                         <th style="width:110px;">Status</th>
-                        <th style="width:220px;">Actions</th>
+                        <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<th style="width:220px;">Actions</th>
+<?php endif; ?>
                     </tr>
                 </thead>
                 <tbody>
@@ -195,18 +204,22 @@ $recons = $conn->query("
                                 </div>
                             </td>
                             <td><span class="pill <?= strtolower($r['status']) ?>"><?= htmlspecialchars($r['status']) ?></span></td>
-                            <td>
+                            <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<td>
                                 <a href="gl_bank_recon_view.php?id=<?= (int)$r['id'] ?>" class="row-btn row-btn-info">
                                     <span class="glyphicon glyphicon-cog"></span>
                                     <?= $r['status'] === 'DRAFT' ? 'Open' : 'View' ?>
                                 </a>
                                 <?php if ($r['status'] === 'DRAFT'): ?>
-                                    <a href="?delete=<?= (int)$r['id'] ?>" class="row-btn row-btn-danger"
+                                    <?php if (!empty($perms['can_delete'])): ?>
+<a href="?delete=<?= (int)$r['id'] ?>" class="row-btn row-btn-danger"
                                        onclick="return confirm('Delete this draft reconciliation?');">
                                         <span class="glyphicon glyphicon-trash"></span> Delete
                                     </a>
+<?php endif; ?>
                                 <?php endif; ?>
                             </td>
+<?php endif; ?>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>

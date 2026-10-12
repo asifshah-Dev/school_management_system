@@ -1,6 +1,11 @@
 <?php
 date_default_timezone_set('Asia/Karachi');
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 require_once('gl.php');
 
@@ -334,9 +339,11 @@ foreach ($assets as $a) {
             <a href="gl_depreciation_run.php" class="btn-back">
                 <span class="glyphicon glyphicon-cog"></span> Run Depreciation
             </a>
+            <?php if (!empty($perms['can_add'])): ?>
             <a href="gl_asset_add.php" class="btn-primary-white">
                 <span class="glyphicon glyphicon-plus"></span> Add Asset
             </a>
+            <?php endif; ?>
         </div>
     </div>
 
@@ -384,7 +391,9 @@ foreach ($assets as $a) {
                         <th class="num" style="width:130px;">Accum. Dep.</th>
                         <th class="num" style="width:130px;">Net Book Value</th>
                         <th style="width:90px;">Status</th>
-                        <th class="no-print" style="width:180px;">Actions</th>
+                        <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<th class="no-print" style="width:180px;">Actions</th>
+<?php endif; ?>
                     </tr>
                 </thead>
                 <tbody>
@@ -406,18 +415,24 @@ foreach ($assets as $a) {
                             <td class="num" style="color:#b91c1c;"><?= number_format((float)$a['accumulated_depreciation'], 2) ?></td>
                             <td class="num" style="color:#047857; font-weight:700;"><?= number_format($bookValue, 2) ?></td>
                             <td><span class="badge <?= $a['status'] ?>"><?= htmlspecialchars($a['status']) ?></span></td>
-                            <td class="no-print">
+                            <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<td class="no-print">
                                 <?php if ($a['status'] === 'active'): ?>
+                                    <?php if (!empty($perms['can_edit'])): ?>
                                     <a href="gl_asset_add.php?id=<?= (int)$a['id'] ?>" class="row-btn row-btn-info">
                                         <span class="glyphicon glyphicon-pencil"></span> Edit
                                     </a>
+                                    <?php endif; ?>
+                                    <?php if (!empty($perms['can_delete'])): ?>
                                     <button type="button" class="row-btn row-btn-danger" onclick='openDispose(<?= (int)$a['id'] ?>, <?= json_encode($a["name"], JSON_HEX_APOS | JSON_HEX_QUOT) ?>)'>
                                         <span class="glyphicon glyphicon-remove"></span> Dispose
                                     </button>
+                                    <?php endif; ?>
                                 <?php else: ?>
                                     <span style="color:#94a3b8; font-size:12px;">—</span>
                                 <?php endif; ?>
                             </td>
+<?php endif; ?>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>

@@ -1,7 +1,11 @@
 <?php 
 header('Content-Type: text/html; charset=utf-8');
 require_once('security.php');
-
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 // Language handling
 $_SESSION['lang'] = 'en'; // Default to English
 $lang = $_SESSION['lang'];
@@ -505,9 +509,11 @@ $js_translations = [
             <div class="col-12">
                 <!-- Add New Student Button -->
                 <div class="mb-3 text-right">
+                    <?php if (!empty($perms['can_add'])): ?>
                     <a href="student_registration.php" class="btn btn-primary">
                         <i class="fas fa-plus"></i> <?php echo $translations[$lang]['add_new_student']; ?>
                     </a>
+                    <?php endif; ?>
                 </div>
 
                 <!-- Panel for Student List -->
@@ -682,7 +688,9 @@ $js_translations = [
                                         <th width="15%">Class/Session Info</th>
                                         <th width="10%">VC</th>
                                         <th width="10%"><?php echo $translations[$lang]['status']; ?></th>
-                                        <th width="19%" class="text-center"><?php echo $translations[$lang]['actions']; ?></th>
+                                        <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<th width="19%" class="text-center"><?php echo $translations[$lang]['actions']; ?></th>
+<?php endif; ?>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -752,14 +760,17 @@ $js_translations = [
                                                 <?php echo $status_text; ?>
                                             </span>
                                         </td>
-                                        <td class="action-buttons text-center">
+                                        <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<td class="action-buttons text-center">
                                             <div class="btn-group" role="group">
-                                                <a href="student_registration.php?edit=<?php echo $row['id']; ?>"
+                                                <?php if (!empty($perms['can_edit'])): ?>
+<a href="student_registration.php?edit=<?php echo $row['id']; ?>"
                                                     class="btn btn-primary btn-sm"
                                                     title="<?php echo $translations[$lang]['edit']; ?>"
                                                     data-toggle="tooltip">
                                                     <i class="fas fa-edit"></i>
                                                 </a>
+<?php endif; ?>
                                                 <a href="student_registration_print.php?id=<?php echo $row['id']; ?>"
                                                     class="btn btn-info btn-sm"
                                                     target="_blank"
@@ -784,6 +795,7 @@ $js_translations = [
                                                 
                                             </div>
                                         </td>
+<?php endif; ?>
                                     </tr>
                                     <?php endwhile; ?>
                                 </tbody>

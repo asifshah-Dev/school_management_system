@@ -1,6 +1,11 @@
 <?php
 date_default_timezone_set('Asia/Karachi');
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 require_once('gl.php');
 
@@ -322,10 +327,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_account'])) {
 
                         <div class="row" style="margin-top: 20px;">
                             <div class="col-md-12 text-right">
+                                <?php if (!empty($perms['can_edit'])): ?>
                                 <button type="submit" name="submit_account" class="btn btn-warning btn-lg">
                                     <span class="glyphicon glyphicon-floppy-disk"></span>
                                     <?php echo $translations[$lang]['submit']; ?>
                                 </button>
+                                <?php endif; ?>
                                 <a href="gl_accounts.php" class="btn btn-default btn-lg">
                                     <?php echo $translations[$lang]['cancel']; ?>
                                 </a>

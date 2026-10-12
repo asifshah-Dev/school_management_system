@@ -1,7 +1,11 @@
 <?php
 header('Content-Type: text/html; charset=utf-8');
 require_once('security.php');
-
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 // Start session if not already started
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
@@ -931,9 +935,11 @@ if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
                                 <div class="col-12">
                                     <div class="form-section" style="background: #f8f9fa; border: none;">
                                         <div class="form-group text-center mb-0">
-                                            <button type="submit" class="btn btn-primary btn-lg mr-2">
+                                            <?php if ($edit_mode ? !empty($perms['can_edit']) : !empty($perms['can_add'])): ?>
+<button type="submit" class="btn btn-primary btn-lg mr-2">
                                                 <?php echo $edit_mode ? htmlspecialchars($translations[$lang]['save']) : htmlspecialchars($translations[$lang]['submit']); ?>
                                             </button>
+<?php endif; ?>
                                             <button type="reset" class="btn btn-secondary btn-lg mr-2">
                                                 <?php echo htmlspecialchars($translations[$lang]['reset']); ?>
                                             </button>

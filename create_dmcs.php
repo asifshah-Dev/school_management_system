@@ -1,6 +1,11 @@
 <?php
 ob_start();
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 $edit_mode = false;
 $teacher_id = $_SESSION['user_id'];
 
@@ -670,7 +675,9 @@ $colors = [
                                         <th class="fs-6">Class Title</th>
                                         <th class="fs-6">Exam Type</th>
                                         <th class="fs-6">Start Date</th>
-                                        <th class="fs-6">Actions</th>
+                                        <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<th class="fs-6">Actions</th>
+<?php endif; ?>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -681,11 +688,15 @@ $colors = [
                                             <td class="fs-5"><?php echo htmlspecialchars($row['class_title']); ?></td>
                                             <td class="fs-5"><?php echo htmlspecialchars($row['exam_type_title']); ?></td>
                                             <td class="fs-5"><?php echo date('d M Y', strtotime($row['start_date'])); ?></td>
+                                            <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
                                             <td>
+                                                <?php if (!empty($perms['can_add'])): ?>
                                                 <a href="result_entry.php?exam_id=<?php echo $row['id']; ?>&class_id=<?php echo $row['class_id']; ?>&exam_type_id=<?php echo $row['exam_type_id']; ?>" class="btn btn-xs btn-primary">
                                                     <span class="glyphicon glyphicon-list-alt"></span> Create DMC's
                                                 </a>
+                                                <?php endif; ?>
                                             </td>
+                                            <?php endif; ?>
                                         </tr>
                                     <?php endforeach; ?>
                                 </tbody>

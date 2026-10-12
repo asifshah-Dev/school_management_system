@@ -1,5 +1,10 @@
 <?php
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 
 // Language fixed to English
@@ -121,7 +126,9 @@ $status_map = [
                                     <table class="table table-bordered table-hover">
                                         <thead>
                                             <tr>
-                                                <th><?php echo $translations[$lang]['actions']; ?></th>
+                                                <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<th><?php echo $translations[$lang]['actions']; ?></th>
+<?php endif; ?>
                                                 <th><?php echo $translations[$lang]['student_name']; ?></th>
                                                 <th><?php echo $translations[$lang]['father_name']; ?></th>
                                                 <th><?php echo $translations[$lang]['status']; ?></th>
@@ -146,7 +153,9 @@ $status_map = [
                                             while ($student = $result->fetch_assoc()) {
                                                 $status_label = isset($status_map[$student['status']]) ? $status_map[$student['status']] : 'Unknown';
                                                 echo "<tr>";
-                                                echo "<td><input type='checkbox' name='students[]' value='{$student['id']}'></td>";
+                                                if (!empty($perms['can_edit']) || !empty($perms['can_delete'])) {
+                                                    echo "<td><input type='checkbox' name='students[]' value='{$student['id']}'></td>";
+                                                }
                                                 echo "<td>" . htmlspecialchars($student['name']) . "</td>";
                                                 echo "<td>" . htmlspecialchars($student['father_name']) . "</td>";
                                                if($status_label == "Active"){
@@ -176,9 +185,11 @@ $status_map = [
                                 </div>
 
                                 <div class="text-right">
+                                    <?php if (!empty($perms['can_edit'])): ?>
                                     <button type="submit" class="btn btn-success">
                                         <span class="glyphicon glyphicon-plus"></span> <?php echo $translations[$lang]['submit']; ?>
                                     </button>
+                                    <?php endif; ?>
                                 </div>
                             </form>
                         </div>

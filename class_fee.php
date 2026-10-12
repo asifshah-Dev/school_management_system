@@ -1,7 +1,11 @@
 <?php
 ob_start();
 require_once('security.php');
-
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 // Initialize session if not started
 if (session_status() == PHP_SESSION_NONE) {
     session_start();
@@ -484,10 +488,12 @@ $result->close();
                         </div>
 
                         <div class="text-right">
-                            <button type="submit" class="btn btn-primary" id="submitBtn">
+                            <?php if ($edit_mode ? !empty($perms['can_edit']) : !empty($perms['can_add'])): ?>
+<button type="submit" class="btn btn-primary" id="submitBtn">
                                 <span class="glyphicon glyphicon-<?php echo $edit_mode ? 'refresh' : 'plus'; ?>"></span> 
                                 <?php echo $edit_mode ? $translations['save'] : $translations['submit']; ?>
                             </button>
+<?php endif; ?>
                             
                             <?php if ($edit_mode): ?>
                                 <a href="class_fee_types.php" class="btn btn-default">
@@ -522,7 +528,9 @@ $result->close();
                                         <th><?php echo $translations['fee_type_label']; ?></th>
                                         <th><?php echo $translations['amount_label']; ?></th>
                                         <th><?php echo $translations['session_label']; ?></th>
-                                        <th><?php echo $translations['actions']; ?></th>
+                                        <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<th><?php echo $translations['actions']; ?></th>
+<?php endif; ?>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -564,18 +572,24 @@ $result->close();
                                                 <td><?php echo htmlspecialchars($fee['fee_type_title']); ?></td>
                                                 <td>₹<?php echo $fee['amount']; ?></td>
                                                 <td rowspan="<?php echo $fee_count; ?>"><?php echo htmlspecialchars($data['session_title']); ?></td>
-                                                <td rowspan="<?php echo $fee_count; ?>" class="actions-column">
-                                                    <a href="?edit_class_id=<?php echo $data['class_id']; ?>&edit_session_id=<?php echo $data['session_id']; ?>" class="btn btn-xs btn-warning">
+                                                <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<td rowspan="<?php echo $fee_count; ?>" class="actions-column">
+                                                    <?php if (!empty($perms['can_edit'])): ?>
+<a href="?edit_class_id=<?php echo $data['class_id']; ?>&edit_session_id=<?php echo $data['session_id']; ?>" class="btn btn-xs btn-warning">
                                                         <span class="glyphicon glyphicon-edit"></span> 
                                                         <?php echo $translations['edit']; ?>
                                                     </a>
-                                                    <a href="?delete_class_id=<?php echo $data['class_id']; ?>&delete_session_id=<?php echo $data['session_id']; ?>" 
+<?php endif; ?>
+                                                    <?php if (!empty($perms['can_delete'])): ?>
+<a href="?delete_class_id=<?php echo $data['class_id']; ?>&delete_session_id=<?php echo $data['session_id']; ?>"
                                                        class="btn btn-xs btn-danger" 
                                                        onclick="return confirm('<?php echo $translations['delete_confirm']; ?>');">
                                                         <span class="glyphicon glyphicon-trash"></span> 
                                                         <?php echo $translations['delete']; ?>
                                                     </a>
+<?php endif; ?>
                                                 </td>
+<?php endif; ?>
                                             <?php else: ?>
                                                 <td><?php echo htmlspecialchars($fee['fee_type_title']); ?></td>
                                                 <td>₹<?php echo $fee['amount']; ?></td>

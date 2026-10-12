@@ -1,5 +1,10 @@
 <?php 
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 
 // Default language (English only now)
@@ -177,10 +182,12 @@ if (isset($_GET['delete'])) {
                         </div>
 
                         <div class="text-right">
-                            <button type="submit" class="btn btn-success">
+                            <?php if ($edit_mode ? !empty($perms['can_edit']) : !empty($perms['can_add'])): ?>
+<button type="submit" class="btn btn-success">
                                 <span class="glyphicon glyphicon-<?php echo $edit_mode ? 'refresh' : 'plus'; ?>"></span> 
                                 <?php echo $translations[$lang]['submit']; ?>
                             </button>
+<?php endif; ?>
                             
                             <?php if ($edit_mode): ?>
                                 <a href="sessions.php" class="btn btn-default">
@@ -219,7 +226,9 @@ if (isset($_GET['delete'])) {
                                         <th><?php echo $translations[$lang]['from_date_label']; ?></th>
                                         <th><?php echo $translations[$lang]['to_date_label']; ?></th>
                                         <th><?php echo $translations[$lang]['duration_label']; ?></th>
-                                        <th><?php echo $translations[$lang]['actions']; ?></th>
+                                        <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<th><?php echo $translations[$lang]['actions']; ?></th>
+<?php endif; ?>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -252,17 +261,23 @@ if (isset($_GET['delete'])) {
                                             <td><?php echo date('d M Y', strtotime($row['from_dated'])); ?></td>
                                             <td><?php echo date('d M Y', strtotime($row['to_dated'])); ?></td>
                                             <td><?php echo $duration; ?></td>
-                                            <td>
-                                                <a href="?edit=<?php echo $row['id']; ?>" class="btn btn-xs btn-warning">
+                                            <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<td>
+                                                <?php if (!empty($perms['can_edit'])): ?>
+<a href="?edit=<?php echo $row['id']; ?>" class="btn btn-xs btn-warning">
                                                     <span class="glyphicon glyphicon-edit"></span> 
                                                     <?php echo $translations[$lang]['edit']; ?>
                                                 </a>
-                                                <a href="?delete=<?php echo $row['id']; ?>" class="btn btn-xs btn-danger" 
+<?php endif; ?>
+                                                <?php if (!empty($perms['can_delete'])): ?>
+<a href="?delete=<?php echo $row['id']; ?>" class="btn btn-xs btn-danger"
                                                    onclick="return confirm('Are you sure you want to delete this session?')">
                                                     <span class="glyphicon glyphicon-trash"></span> 
                                                     Delete
                                                 </a>
+<?php endif; ?>
                                             </td>
+<?php endif; ?>
                                         </tr>
                                     <?php endwhile; ?>
                                 </tbody>

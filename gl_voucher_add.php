@@ -1,6 +1,11 @@
 <?php
 date_default_timezone_set('Asia/Karachi');
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 require_once('gl.php');
 require_once('VoucherService.php');
@@ -343,6 +348,7 @@ foreach ($allAccounts as $a) {
             </div>
         <?php endif; ?>
 
+        <?php if (!empty($perms['can_add'])): ?>
         <form method="post" action="" enctype="multipart/form-data" id="voucherForm">
 
             <div class="section-title">Voucher Type</div>
@@ -552,6 +558,7 @@ foreach ($allAccounts as $a) {
             <input type="hidden" name="save_action" id="save_action" value="draft">
 
         </form>
+        <?php endif; ?>
     </div>
 </div>
 

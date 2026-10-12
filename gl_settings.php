@@ -1,6 +1,11 @@
 <?php
 date_default_timezone_set('Asia/Karachi');
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 require_once('gl.php');
 
@@ -205,6 +210,7 @@ if ($currentLock) {
         </div>
 
         <form method="post" style="margin-top:24px;">
+            <input type="hidden" name="action" value="edit">
             <div class="field">
                 <label>Lock Date (YYYY-MM-DD)</label>
                 <input type="date" name="lock_date" value="<?= htmlspecialchars($currentLock) ?>">
@@ -226,9 +232,11 @@ if ($currentLock) {
                 <a href="gl_settings.php" class="action-btn-primary" style="background:#f1f5f9; color:#334155; border-color:#cbd5e1; min-width:150px;">
                     Reset
                 </a>
+                <?php if (!empty($perms['can_edit'])): ?>
                 <button type="submit" class="action-btn-primary">
                     <span class="glyphicon glyphicon-floppy-disk"></span> Save Settings
                 </button>
+                <?php endif; ?>
             </div>
         </form>
 

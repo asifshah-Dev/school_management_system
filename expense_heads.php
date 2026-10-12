@@ -1,5 +1,10 @@
 <?php 
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 
 // Error reporting for debugging (remove in production)
@@ -251,10 +256,12 @@ if ($debug_mode) {
                         </div>
 
                         <div class="text-right">
-                            <button type="submit" class="btn btn-success">
+                            <?php if ($edit_mode ? !empty($perms['can_edit']) : !empty($perms['can_add'])): ?>
+<button type="submit" class="btn btn-success">
                                 <i class="fa fa-<?php echo $edit_mode ? 'refresh' : 'plus'; ?>"></i> 
                                 <?php echo $edit_mode ? $translations[$lang]['save'] : $translations[$lang]['submit']; ?>
                             </button>
+<?php endif; ?>
                             
                             <?php if ($edit_mode): ?>
                                 <a href="<?php echo $_SERVER['PHP_SELF']; ?>" class="btn btn-default">
@@ -302,7 +309,9 @@ if ($debug_mode) {
                                         <th width="50"><?php echo $translations[$lang]['sr_no']; ?></th>
                                         <th><?php echo $translations[$lang]['title_label']; ?></th>
                                         <th width="200">Created At</th>
-                                        <th width="150" class="text-center"><?php echo $translations[$lang]['actions']; ?></th>
+                                        <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<th width="150" class="text-center"><?php echo $translations[$lang]['actions']; ?></th>
+<?php endif; ?>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -314,15 +323,21 @@ if ($debug_mode) {
                                             <td><?php echo $counter++; ?></td>
                                             <td><?php echo htmlspecialchars($row['title']); ?></td>
                                             <td><?php echo $row['created_at'] ? date('d-m-Y H:i', strtotime($row['created_at'])) : 'N/A'; ?></td>
-                                            <td class="text-center table-actions">
-                                                <a href="?edit=<?php echo $row['id']; ?>" class="btn btn-xs btn-warning" title="<?php echo $translations[$lang]['edit']; ?>">
+                                            <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<td class="text-center table-actions">
+                                                <?php if (!empty($perms['can_edit'])): ?>
+<a href="?edit=<?php echo $row['id']; ?>" class="btn btn-xs btn-warning" title="<?php echo $translations[$lang]['edit']; ?>">
                                                     <i class="fa fa-pencil"></i> <?php echo $translations[$lang]['edit']; ?>
                                                 </a>
-                                                <a href="?delete=<?php echo $row['id']; ?>" class="btn btn-xs btn-danger" title="<?php echo $translations[$lang]['delete']; ?>" 
+<?php endif; ?>
+                                                <?php if (!empty($perms['can_delete'])): ?>
+<a href="?delete=<?php echo $row['id']; ?>" class="btn btn-xs btn-danger" title="<?php echo $translations[$lang]['delete']; ?>"
                                                    onclick="return confirm('<?php echo $translations[$lang]['delete_confirm']; ?>');">
                                                     <i class="fa fa-trash"></i> <?php echo $translations[$lang]['delete']; ?>
                                                 </a>
+<?php endif; ?>
                                             </td>
+<?php endif; ?>
                                         </tr>
                                     <?php endwhile; ?>
                                 </tbody>

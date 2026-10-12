@@ -1,6 +1,10 @@
 <?php 
 require_once('security.php');
-
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 // Language strings (English only now)
 $translations = [
     'title' => 'Courses Management',
@@ -136,10 +140,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         </div>
 
                         <div class="text-right">
-                            <button type="submit" class="btn btn-success">
+                            <?php if ($edit_mode ? !empty($perms['can_edit']) : !empty($perms['can_add'])): ?>
+<button type="submit" class="btn btn-success">
                                 <span class="glyphicon glyphicon-<?php echo $edit_mode ? 'refresh' : 'plus'; ?>"></span> 
                                 <?php echo $translations['submit']; ?>
                             </button>
+<?php endif; ?>
                             
                             <?php if ($edit_mode): ?>
                                 <a href="courses.php" class="btn btn-default">
@@ -177,7 +183,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                                         <th><?php echo $translations['sr_no']; ?></th>
                                         <th><?php echo $translations['title_label']; ?></th>
                                         <th><?php echo $translations['duration_label']; ?></th>
-                                        <th><?php echo $translations['actions']; ?></th>
+                                        <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<th><?php echo $translations['actions']; ?></th>
+<?php endif; ?>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -186,12 +194,16 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                                             <td><?php echo $counter++; ?></td>
                                             <td><?php echo htmlspecialchars($row['title']); ?></td>
                                             <td><?php echo htmlspecialchars($row['duration']); ?></td>
-                                            <td>
-                                                <a href="?edit=<?php echo $row['id']; ?>" class="btn btn-xs btn-warning">
+                                            <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<td>
+                                                <?php if (!empty($perms['can_edit'])): ?>
+<a href="?edit=<?php echo $row['id']; ?>" class="btn btn-xs btn-warning">
                                                     <span class="glyphicon glyphicon-edit"></span> 
                                                     <?php echo $translations['edit']; ?>
                                                 </a>
+<?php endif; ?>
                                             </td>
+<?php endif; ?>
                                         </tr>
                                     <?php endwhile; ?>
                                 </tbody>

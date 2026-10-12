@@ -1,6 +1,11 @@
 <?php
 date_default_timezone_set('Asia/Karachi');
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 require_once('gl.php');
 
@@ -481,9 +486,11 @@ if ($sessionRow) {
                 <?php echo htmlspecialchars($sessionTitle); ?> &middot; <?php echo date('l, F j, Y'); ?>
             </div>
         </div>
+        <?php if (!empty($perms['can_add'])): ?>
         <a href="gl_journal_add.php" class="btn-new">
             <span class="glyphicon glyphicon-plus"></span> Post Manual Entry
         </a>
+        <?php endif; ?>
     </div>
 
     <!-- Status banner -->
@@ -660,7 +667,9 @@ if ($sessionRow) {
             <div class="label">Cash at Bank (Ledger)</div>
             <div class="value"><?php echo number_format($cashAtBank, 2); ?></div>
             <div class="sub">
+                <?php if (!empty($perms['can_add'])): ?>
                 <a href="gl_bank_recon_new.php">Start new reconciliation</a>
+                <?php endif; ?>
             </div>
         </div>
     </div>
@@ -680,14 +689,18 @@ if ($sessionRow) {
             <span class="ico indigo"><span class="glyphicon glyphicon-transfer"></span></span>
             Bank Reconciliation
         </a>
+        <?php if (!empty($perms['can_add'])): ?>
         <a href="gl_purchase_add.php" class="quick">
             <span class="ico amber"><span class="glyphicon glyphicon-shopping-cart"></span></span>
             New Credit Purchase
         </a>
+        <?php endif; ?>
+        <?php if (!empty($perms['can_add'])): ?>
         <a href="gl_voucher_add.php" class="quick">
             <span class="ico amber"><span class="glyphicon glyphicon-duplicate"></span></span>
             New Voucher
         </a>
+        <?php endif; ?>
         <a href="gl_trial_balance.php" class="quick">
             <span class="ico"><span class="glyphicon glyphicon-list-alt"></span></span>
             Trial Balance

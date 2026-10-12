@@ -2,6 +2,11 @@
 date_default_timezone_set('Asia/Karachi');
 
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 require_once('gl.php');
 
@@ -783,9 +788,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_expense'])) {
                                                 </option>
                                             <?php endforeach; ?>
                                         </select>
+                                        <?php if (!empty($perms['can_add'])): ?>
                                         <button type="button" class="btn btn-success btn-sm" id="btnQuickAddSupplier" title="Add new supplier">
                                             <span class="glyphicon glyphicon-plus"></span>
                                         </button>
+                                        <?php endif; ?>
                                     </div>
                                     <div class="supplier-hint" id="supplier_hint" style="display:none;">
                                         <strong>Credit purchase:</strong> will post to <code>2010 Accounts Payable</code> tagged to this supplier.
@@ -842,11 +849,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_expense'])) {
                                 <div class="form-group">
                                     <label>&nbsp;</label>
                                     <div>
+                                        <?php if (!empty($perms['can_add'])): ?>
                                         <button type="button" class="btn btn-info btn-lg btn-add-details" 
                                                 data-toggle="modal" data-target="#productDetailsModal"
                                                 <?php echo empty($expense_data['id']) ? 'disabled' : ''; ?>>
                                             <span class="glyphicon glyphicon-list-alt"></span> <?php echo $translations[$lang]['add_details']; ?>
                                         </button>
+                                        <?php endif; ?>
                                         <small class="text-muted" style="display: block;">Save expense first to add product details</small>
                                     </div>
                                 </div>
@@ -855,9 +864,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_expense'])) {
                         
                         <div class="row">
                             <div class="col-md-12 text-right">
-                                <button type="submit" name="submit_expense" class="btn btn-success btn-lg">
+                                <?php if ($edit_mode ? !empty($perms['can_edit']) : !empty($perms['can_add'])): ?>
+<button type="submit" name="submit_expense" class="btn btn-success btn-lg">
                                     <?php echo $edit_mode ? 'Update' : 'Save'; ?> Expense
                                 </button>
+<?php endif; ?>
                                 
                                 <?php if ($edit_mode): ?>
                                     <a href="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>" class="btn btn-default btn-lg">
@@ -904,7 +915,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_expense'])) {
                                         <th><?php echo $translations[$lang]['description']; ?></th>
                                         <th><?php echo $translations[$lang]['total_amount']; ?></th>
                                         <th><?php echo $translations[$lang]['inventory_details']; ?></th>
-                                        <th><?php echo $translations[$lang]['actions']; ?></th>
+                                        <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<th><?php echo $translations[$lang]['actions']; ?></th>
+<?php endif; ?>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -941,20 +954,26 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_expense'])) {
                                                     <span class="text-muted">-</span>
                                                 <?php endif; ?>
                                             </td>
-                                            <td>
+                                            <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<td>
                                                 <?php if (!$is_deleted): ?>
-                                                    <a href="?edit=<?php echo $row['id']; ?>" class="btn btn-xs btn-warning">
+                                                    <?php if (!empty($perms['can_edit'])): ?>
+<a href="?edit=<?php echo $row['id']; ?>" class="btn btn-xs btn-warning">
                                                         <?php echo $translations[$lang]['edit']; ?>
                                                     </a>
-                                                    <a href="?delete=<?php echo $row['id']; ?>" 
+<?php endif; ?>
+                                                    <?php if (!empty($perms['can_delete'])): ?>
+<a href="?delete=<?php echo $row['id']; ?>"
                                                        class="btn btn-xs btn-danger btn-delete" 
                                                        onclick="return confirm('<?php echo $translations[$lang]['delete_confirm']; ?>\n\nAmount: <?php echo number_format($row['total_amount'], 2); ?>\nCategory: <?php echo htmlspecialchars($row['expense_category_title'] ?? 'N/A'); ?>');">
                                                         <?php echo $translations[$lang]['delete']; ?>
                                                     </a>
+<?php endif; ?>
                                                 <?php else: ?>
                                                     <span class="text-muted">Deleted</span>
                                                 <?php endif; ?>
                                             </td>
+<?php endif; ?>
                                         </tr>
                                     <?php endwhile; ?>
                                 </tbody>
@@ -1012,9 +1031,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_expense'])) {
                                     <select class="form-control" id="product_id" required>
                                         <option value="">-- Select Product --</option>
                                     </select>
+                                    <?php if (!empty($perms['can_add'])): ?>
+                                    <?php if (!empty($perms['can_add'])): ?>
                                     <button type="button" class="btn btn-xs btn-primary" style="margin-top: 5px;" id="btnOpenAddProductModal">
                                         <span class="glyphicon glyphicon-plus"></span> <?php echo $translations[$lang]['add_new_product']; ?>
                                     </button>
+                                    <?php endif; ?>
+                                    <?php endif; ?>
                                 </div>
                             </div>
                             <div class="col-md-2">
@@ -1033,9 +1056,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_expense'])) {
                                 <div class="form-group">
                                     <label>&nbsp;</label>
                                     <div>
+                                        <?php if (!empty($perms['can_add'])): ?>
                                         <button type="button" class="btn btn-success btn-block" id="btnAddDetail">
                                             <span class="glyphicon glyphicon-plus"></span> <?php echo $translations[$lang]['save_details']; ?>
                                         </button>
+                                        <?php endif; ?>
                                     </div>
                                 </div>
                             </div>
@@ -1067,7 +1092,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_expense'])) {
                                         <th><?php echo $translations[$lang]['unit_price']; ?></th>
                                         <th><?php echo $translations[$lang]['total_price']; ?></th>
                                         <th><?php echo $translations[$lang]['description']; ?></th>
-                                        <th><?php echo $translations[$lang]['actions']; ?></th>
+                                        <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<th><?php echo $translations[$lang]['actions']; ?></th>
+<?php endif; ?>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -1123,7 +1150,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_expense'])) {
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-default" id="btnCancelProduct"><?php echo $translations[$lang]['cancel']; ?></button>
+                <?php if (!empty($perms['can_add'])): ?>
                 <button type="button" class="btn btn-primary" id="btnSaveProduct"><?php echo $translations[$lang]['save_details']; ?></button>
+                <?php endif; ?>
             </div>
         </div>
     </div>
@@ -1157,7 +1186,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['submit_expense'])) {
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                <?php if (!empty($perms['can_add'])): ?>
+                <?php if (!empty($perms['can_add'])): ?>
                 <button type="button" class="btn btn-primary" id="qs_save">Save Supplier</button>
+                <?php endif; ?>
+                <?php endif; ?>
             </div>
         </div>
     </div>
@@ -1343,7 +1376,13 @@ $(document).ready(function() {
                             row += '<td class="text-right">' + parseFloat(detail.unit_price).toFixed(2) + '</td>';
                             row += '<td class="text-right">' + parseFloat(detail.total_price).toFixed(2) + '</td>';
                             row += '<td>' + escapeHtml(detail.description || '-') + '</td>';
-                            row += '<td class="text-center"><button type="button" class="btn btn-xs btn-danger delete-detail-btn" data-detail-id="' + detail.id + '"><span class="glyphicon glyphicon-trash"></span> Delete</button></td>';
+                            <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+                            row += '<td class="text-center">';
+                            <?php if (!empty($perms['can_delete'])): ?>
+                            row += '<button type="button" class="btn btn-xs btn-danger delete-detail-btn" data-detail-id="' + detail.id + '"><span class="glyphicon glyphicon-trash"></span> Delete</button>';
+                            <?php endif; ?>
+                            row += '</td>';
+                            <?php endif; ?>
                             row += '</tr>';
                             $tbody.append(row);
                         });

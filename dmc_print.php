@@ -2,7 +2,11 @@
 ob_start();
 try {
     require_once('security.php');
-    require_once('conn_inc.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */    require_once('conn_inc.php');
 
     // Define functions outside the loop to prevent redeclaration
     function getGrade($percentage) {

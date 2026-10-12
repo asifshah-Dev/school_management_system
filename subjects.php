@@ -2,7 +2,11 @@
 ob_start();
 
 require_once('security.php');
-
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 $edit_mode = false;
 
 
@@ -719,13 +723,15 @@ if ($result) {
 
                         <div class="text-right">
 
-                            <button type="submit" class="btn btn-success">
+                            <?php if ($edit_mode ? !empty($perms['can_edit']) : !empty($perms['can_add'])): ?>
+<button type="submit" class="btn btn-success">
 
                                 <span class="glyphicon glyphicon-<?php echo $edit_mode ? 'refresh' : 'plus'; ?>"></span> 
 
                                 <?php echo $edit_mode ? 'Save' : 'Submit'; ?>
 
                             </button>
+<?php endif; ?>
 
                             <?php if ($edit_mode): ?>
 
@@ -787,7 +793,9 @@ if ($result) {
 
                                         <th>Sub-Subjects</th>
 
-                                        <th>Actions</th>
+                                        <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<th>Actions</th>
+<?php endif; ?>
 
                                     </tr>
 
@@ -861,23 +869,29 @@ if ($result) {
 
                                             </td>
 
-                                            <td>
+                                            <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<td>
 
-                                                <a href="?edit=<?php echo $subject['id']; ?>" class="btn btn-xs btn-warning">
+                                                <?php if (!empty($perms['can_edit'])): ?>
+<a href="?edit=<?php echo $subject['id']; ?>" class="btn btn-xs btn-warning">
 
                                                     <span class="glyphicon glyphicon-edit"></span> Edit
 
                                                 </a>
+<?php endif; ?>
 
-                                                <a href="?delete=<?php echo $subject['id']; ?>" class="btn btn-xs btn-danger" 
+                                                <?php if (!empty($perms['can_delete'])): ?>
+<a href="?delete=<?php echo $subject['id']; ?>" class="btn btn-xs btn-danger"
 
                                                    onclick="return confirm('Are you sure you want to delete this subject?')">
 
                                                     <span class="glyphicon glyphicon-trash"></span> Delete
 
                                                 </a>
+<?php endif; ?>
 
                                             </td>
+<?php endif; ?>
 
                                         </tr>
 

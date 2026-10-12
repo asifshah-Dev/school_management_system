@@ -1,6 +1,11 @@
 <?php
 date_default_timezone_set('Asia/Karachi');
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 require_once('gl.php');
 
@@ -496,6 +501,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_opening'])) {
             </div>
         <?php endif; ?>
 
+        <?php if (!empty($perms['can_add'])): ?>
         <form method="post" action="" id="openingForm">
 
             <div class="section-title">Entry Details</div>
@@ -693,6 +699,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_opening'])) {
             </div>
 
         </form>
+        <?php endif; ?>
     </div>
 </div>
 

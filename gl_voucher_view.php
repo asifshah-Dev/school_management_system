@@ -1,6 +1,11 @@
 <?php
 date_default_timezone_set('Asia/Karachi');
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 require_once('gl.php');
 require_once('VoucherService.php');
@@ -335,20 +340,26 @@ function amountInWords($num) {
 
     <div class="toolbar">
         <?php if ($v['status'] === 'DRAFT'): ?>
+            <?php if (!empty($perms['can_edit'])): ?>
             <form method="post" style="display: inline;">
                 <button type="submit" name="action" value="post" class="btn-tool success">
                     <span class="glyphicon glyphicon-ok"></span> Post to Ledger
                 </button>
             </form>
+            <?php endif; ?>
+            <?php if (!empty($perms['can_delete'])): ?>
             <form method="post" style="display: inline;" onsubmit="return confirm('Cancel this draft voucher?');">
                 <button type="submit" name="action" value="cancel" class="btn-tool warning">
                     <span class="glyphicon glyphicon-remove"></span> Cancel Draft
                 </button>
             </form>
+            <?php endif; ?>
         <?php elseif ($v['status'] === 'POSTED'): ?>
+         <?php if (!empty($perms['can_edit'])): ?>
          <button type="button" class="btn-tool danger" id="openReverseBtn">
     <span class="glyphicon glyphicon-refresh"></span> Reverse Voucher
 </button>
+         <?php endif; ?>
         <?php endif; ?>
 
         <span class="spacer"></span>
@@ -459,7 +470,7 @@ function amountInWords($num) {
                         </span>
                     </div>
                 </div>
-                <?php if ($v['status'] === 'POSTED'): ?>
+                <?php if ($v['status'] === 'POSTED' && !empty($perms['can_edit'])): ?>
                     <div class="field-block">
                         <div class="lbl">Posted By</div>
                         <div class="val">

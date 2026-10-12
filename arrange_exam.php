@@ -1,6 +1,11 @@
 <?php
 ob_start();
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 $edit_mode = false;
 
 // Initialize session if not started
@@ -612,10 +617,12 @@ $colors = [
                         </div>
 
                         <div class="text-right">
-                            <button type="submit" class="btn btn-danger">
+                            <?php if ($edit_mode ? !empty($perms['can_edit']) : !empty($perms['can_add'])): ?>
+<button type="submit" class="btn btn-danger">
                                 <span class="glyphicon glyphicon-<?php echo $edit_mode ? 'refresh' : 'plus'; ?>"></span> 
                                 <?php echo $edit_mode ? 'Update Exam' : 'Create Exams'; ?>
                             </button>
+<?php endif; ?>
                             <?php if ($edit_mode): ?>
                                 <a href="<?php echo $_SERVER['PHP_SELF']; ?>" class="btn btn-default">
                                     <span class="glyphicon glyphicon-remove"></span> Cancel Edit
@@ -663,7 +670,9 @@ $colors = [
                                         <th class="fs-6">Exam Type</th>
                                         <th class="fs-6">Start Date</th>
                                         <th class="fs-6">Status</th>
-                                        <th class="fs-6">Actions</th>
+                                        <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<th class="fs-6">Actions</th>
+<?php endif; ?>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -688,21 +697,31 @@ $colors = [
                                                     <span class="label label-success">Upcoming/Current</span>
                                                 <?php endif; ?>
                                             </td>
-                                            <td data-label="Actions">
-                                                <a href="datesheet.php?exam_id=<?php echo $row['id']; ?>&class_id=<?php echo $row['class_id']; ?>&exam_type=<?php echo urlencode($row['exam_type_title']); ?>" class="btn btn-xs btn-warning">
-                                                    <span class="glyphicon glyphicon-edit"></span> Create Datesheet
-                                                </a>
-                                                <a href="?edit=<?php echo $row['id']; ?>" class="btn btn-xs btn-warning">
+                                            <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<td data-label="Actions">
+    <?php if (!empty($perms['can_add'])): ?>
+    <a href="datesheet.php?exam_id=<?php echo $row['id']; ?>&class_id=<?php echo $row['class_id']; ?>&exam_type=<?php echo urlencode($row['exam_type_title']); ?>" class="btn btn-xs btn-warning">
+        <span class="glyphicon glyphicon-edit"></span> Create Datesheet
+    </a>
+    <?php endif; ?>
+                                                <?php if (!empty($perms['can_edit'])): ?>
+<a href="?edit=<?php echo $row['id']; ?>" class="btn btn-xs btn-warning">
                                                     <span class="glyphicon glyphicon-edit"></span> Edit
                                                 </a>
-                                                <a href="?delete=<?php echo $row['id']; ?>" class="btn btn-xs btn-danger" 
+<?php endif; ?>
+                                                <?php if (!empty($perms['can_delete'])): ?>
+<a href="?delete=<?php echo $row['id']; ?>" class="btn btn-xs btn-danger"
                                                    onclick="return confirm('Are you sure you want to delete this exam?')">
                                                     <span class="glyphicon glyphicon-trash"></span> Delete
                                                 </a>
-                                                <a href="result_entry.php?exam_id=<?php echo $row['id']; ?>&class_id=<?php echo $row['class_id']; ?>&exam_type_id=<?php echo $row['exam_type_id']; ?>" class="btn btn-xs btn-primary">
-                                                    <span class="glyphicon glyphicon-list-alt"></span> Create DMC's
-                                                </a>
+<?php endif; ?>
+<?php if (!empty($perms['can_add'])): ?>
+<a href="result_entry.php?exam_id=<?php echo $row['id']; ?>&class_id=<?php echo $row['class_id']; ?>&exam_type_id=<?php echo $row['exam_type_id']; ?>" class="btn btn-xs btn-primary">
+    <span class="glyphicon glyphicon-list-alt"></span> Create DMC's
+</a>
+<?php endif; ?>
                                             </td>
+<?php endif; ?>
                                         </tr>
                                     <?php endforeach; ?>
                                 </tbody>

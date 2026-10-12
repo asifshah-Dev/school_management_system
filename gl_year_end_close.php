@@ -1,6 +1,11 @@
 <?php
 date_default_timezone_set('Asia/Karachi');
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 require_once('gl.php');
 
@@ -514,7 +519,9 @@ $sessions = $conn->query("
                     <th style="width:130px;">Period</th>
                     <th style="width:130px;">Status</th>
                     <th style="width:150px;">Closed?</th>
-                    <th style="width:200px;">Actions</th>
+                    <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<th style="width:200px;">Actions</th>
+<?php endif; ?>
                 </tr>
             </thead>
             <tbody>
@@ -540,16 +547,20 @@ $sessions = $conn->query("
                             <span style="color:#94a3b8;">—</span>
                         <?php endif; ?>
                     </td>
+                    <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
                     <td>
                         <?php if ($isClosed): ?>
                             <span style="font-size:12px; color:#64748b;">Closed on <?= htmlspecialchars($s['closed_at']) ?></span>
                         <?php else: ?>
+                            <?php if (!empty($perms['can_edit'])): ?>
                             <button type="button" class="action-btn-warn" style="height:36px; min-width:0; padding:0 14px; font-size:13px;"
                                     onclick="loadPreview(<?= (int)$s['id'] ?>)">
                                 <span class="glyphicon glyphicon-lock"></span> Close
                             </button>
+                            <?php endif; ?>
                         <?php endif; ?>
                     </td>
+                    <?php endif; ?>
                 </tr>
                 <?php endforeach; ?>
             </tbody>
@@ -657,9 +668,11 @@ $sessions = $conn->query("
                     </div>
 
                     <div style="display:flex; gap:12px; flex-wrap:wrap;">
+                        <?php if (!empty($perms['can_edit'])): ?>
                         <button type="submit" class="action-btn-warn">
                             <span class="glyphicon glyphicon-lock"></span> Confirm Year-End Close
                         </button>
+                        <?php endif; ?>
                         <button type="button" class="action-btn-cancel" onclick="backToPreview()">
                             <span class="glyphicon glyphicon-arrow-left"></span> Back to Preview
                         </button>

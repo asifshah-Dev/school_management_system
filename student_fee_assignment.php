@@ -1,6 +1,11 @@
 <?php 
 header('Content-Type: text/html; charset=utf-8');
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 
 // Get student ID from URL
@@ -553,9 +558,11 @@ $has_class = isset($student['class_name']) && !empty($student['class_name']);
                         </div>
                         <div class="col-md-3 d-flex align-items-end">
                             <div class="form-group mb-0">
+                                <?php if ($edit_fee ? !empty($perms['can_edit']) : !empty($perms['can_add'])): ?>
                                 <button type="submit" name="submit_fee" class="btn btn-primary" id="submitBtn">
                                     <i class="fas fa-save mr-2"></i><?php echo $edit_fee ? 'Update Fee' : 'Add Fee'; ?>
                                 </button>
+                                <?php endif; ?>
                                 <?php if ($edit_fee): ?>
                                 <a href="student_fee_assignment.php?student_id=<?php echo $student_id; ?>&type=<?php echo $current_mode; ?>" 
                                    class="btn btn-secondary">
@@ -607,7 +614,9 @@ $has_class = isset($student['class_name']) && !empty($student['class_name']);
                                     <th>Fee Type</th>
                                     <th>Type</th>
                                     <th class="text-right">Amount (Rs.)</th>
-                                    <th width="15%" class="text-center">Actions</th>
+                                    <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<th width="15%" class="text-center">Actions</th>
+<?php endif; ?>
                                 </tr>
                             </thead>
                             <tbody>
@@ -642,18 +651,24 @@ $has_class = isset($student['class_name']) && !empty($student['class_name']);
                                             Rs. <?php echo number_format($fee['amount'], 2); ?>
                                         <?php endif; ?>
                                     </td>
-                                    <td class="text-center">
-                                        <a href="?student_id=<?php echo $student_id; ?>&type=<?php echo $current_mode; ?>&edit_fee=<?php echo $fee['id']; ?>" 
+                                    <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<td class="text-center">
+                                        <?php if (!empty($perms['can_edit'])): ?>
+<a href="?student_id=<?php echo $student_id; ?>&type=<?php echo $current_mode; ?>&edit_fee=<?php echo $fee['id']; ?>"
                                            class="btn btn-sm btn-warning btn-action" title="Edit">
                                             <i class="fas fa-edit"></i>
                                         </a>
-                                        <a href="?student_id=<?php echo $student_id; ?>&type=<?php echo $current_mode; ?>&delete_fee=<?php echo $fee['id']; ?>" 
+<?php endif; ?>
+                                        <?php if (!empty($perms['can_delete'])): ?>
+<a href="?student_id=<?php echo $student_id; ?>&type=<?php echo $current_mode; ?>&delete_fee=<?php echo $fee['id']; ?>"
                                            class="btn btn-sm btn-danger btn-action" 
                                            onclick="return confirm('Are you sure you want to permanently remove this fee?');"
                                            title="Delete">
                                             <i class="fas fa-trash"></i>
                                         </a>
+<?php endif; ?>
                                     </td>
+<?php endif; ?>
                                 </tr>
                                 <?php endforeach; ?>
                             </tbody>

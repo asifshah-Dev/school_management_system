@@ -1,6 +1,11 @@
 <?php
 date_default_timezone_set('Asia/Karachi');
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 require_once('gl.php');
 
@@ -398,9 +403,11 @@ $runs = $conn->query("
                 <button type="button" class="action-btn-primary" style="background:#f1f5f9; color:#334155; border-color:#cbd5e1;" onclick="doPreview()">
                     <span class="glyphicon glyphicon-search"></span> Preview
                 </button>
+                <?php if (!empty($perms['can_add'])): ?>
                 <button type="submit" class="action-btn-primary" id="btnRun" <?= ($accumAccount && $expAccount) ? '' : 'disabled' ?>>
                     <span class="glyphicon glyphicon-ok"></span> Post Depreciation
                 </button>
+                <?php endif; ?>
             </div>
         </form>
 

@@ -1,6 +1,11 @@
 <?php
 require_once 'conn_inc.php';
 require_once 'security.php';
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 
 // Check if user is logged in
 if (!isset($_SESSION['user_id'])) {
@@ -872,9 +877,11 @@ function updateFilterSummary() {
                         <a href="view_student_detail.php?id=${student.id}" class="btn-action btn-view">
                             <i class="fas fa-eye"></i> View Details
                         </a>
+                        <?php if (!empty($perms['can_edit'])): ?>
                         <a href="student_registration.php?user=${student.id}" class="btn-action btn-edit">
                             <i class="fas fa-edit"></i> Edit
                         </a>
+                        <?php endif; ?>
                     </div>
                 </div>
             `;

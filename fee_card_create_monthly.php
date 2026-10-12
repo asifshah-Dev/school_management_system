@@ -1,7 +1,11 @@
 <?php
 ob_start();
 require_once('security.php');
-
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 if (session_status() == PHP_SESSION_NONE) {
     session_start();
 }
@@ -1015,10 +1019,12 @@ $months = [
                                                 Update Fee Cards
                                             </button>
                                         <?php endif; ?>
+                                        <?php if (!empty($perms['can_add'])): ?>
                                         <button type="button" id="create-btn" class="btn btn-primary">
                                             <span class="glyphicon glyphicon-plus"></span> 
                                             Generate Fee Cards
                                         </button>
+                                        <?php endif; ?>
                                     </div>
                                 </div>
                             <?php else: ?>
@@ -1074,7 +1080,9 @@ $months = [
                                             <th>Amount</th>
                                             <th>Due Date</th>
                                             <th>Remarks</th>
-                                            <th class="no-print">Actions</th>
+                                            <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<th class="no-print">Actions</th>
+<?php endif; ?>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -1102,14 +1110,20 @@ $months = [
                                                     <td class="fee-amount"><?php echo 'PKR ' . number_format($fee['total_amount'], 2); ?></td>
                                                     <td><?php echo htmlspecialchars($fee['due_date']); ?></td>
                                                     <td><?php echo htmlspecialchars($fee['remarks']); ?></td>
+                                                    <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
                                                     <td class="no-print action-btns">
+                                                        <?php if (!empty($perms['can_edit'])): ?>
                                                         <button type="button" class="btn btn-xs btn-edit" onclick="openEditModal(<?php echo $fee['fee_card_id']; ?>, <?php echo $fee['total_amount']; ?>, '<?php echo htmlspecialchars(addslashes($fee['remarks'])); ?>', <?php echo $selected_session; ?>, <?php echo $selected_class; ?>, '<?php echo $selected_month; ?>')">
                                                             <span class="glyphicon glyphicon-pencil"></span> Edit
                                                         </button>
+                                                        <?php endif; ?>
+                                                        <?php if (!empty($perms['can_delete'])): ?>
                                                         <button type="button" class="btn btn-xs btn-delete" onclick="openDeleteModal(<?php echo $fee['fee_card_id']; ?>, '<?php echo htmlspecialchars(addslashes($fee['fee_type_title'])); ?>', '<?php echo htmlspecialchars(addslashes($student_data['student_name'])); ?>', <?php echo $selected_session; ?>, <?php echo $selected_class; ?>, '<?php echo $selected_month; ?>')">
                                                             <span class="glyphicon glyphicon-trash"></span> Delete
                                                         </button>
+                                                        <?php endif; ?>
                                                     </td>
+                                                    <?php endif; ?>
                                                 </tr>
                                             <?php 
                                             $first_row = false;
@@ -1163,7 +1177,9 @@ $months = [
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                    <?php if (!empty($perms['can_edit'])): ?>
                     <button type="submit" class="btn btn-primary">Update Fee</button>
+                    <?php endif; ?>
                 </div>
             </form>
         </div>
@@ -1194,7 +1210,9 @@ $months = [
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                    <?php if (!empty($perms['can_delete'])): ?>
                     <button type="submit" class="btn btn-danger">Delete Fee</button>
+                    <?php endif; ?>
                 </div>
             </form>
         </div>

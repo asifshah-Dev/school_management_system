@@ -3,6 +3,7 @@ date_default_timezone_set('Asia/Karachi');
 require_once('security.php');
 require_once('conn_inc.php');
 require_once('gl.php');
+require_once('permissions.php');
 
 $conn->query("SET time_zone = '+05:00'");
 $conn->query("SET collation_connection = 'utf8mb4_general_ci'");
@@ -128,6 +129,26 @@ if ($chkAsset && $chkAsset->num_rows > 0) {
     ")->fetch_assoc();
     $assetCost = (float)$assetSum['total_cost'];
     $assetNet  = (float)$assetSum['total_net'];
+}
+
+// ---------- BUDGETS HEALTH ----------
+$budgetTableExists = false;
+$budgetTotal = 0;
+$budgetDraft = 0;
+$budgetApproved = 0;
+$budgetLocked = 0;
+$budgetLatestTitle = null;
+$chkBudget = $conn->query("SHOW TABLES LIKE 'gl_budgets'");
+if ($chkBudget && $chkBudget->num_rows > 0) {
+    $budgetTableExists = true;
+    $budgetTotal = (int)$conn->query("SELECT COUNT(*) AS c FROM gl_budgets")->fetch_assoc()['c'];
+    if ($budgetTotal > 0) {
+        $budgetDraft    = (int)$conn->query("SELECT COUNT(*) AS c FROM gl_budgets WHERE status='DRAFT'")->fetch_assoc()['c'];
+        $budgetApproved = (int)$conn->query("SELECT COUNT(*) AS c FROM gl_budgets WHERE status='APPROVED'")->fetch_assoc()['c'];
+        $budgetLocked   = (int)$conn->query("SELECT COUNT(*) AS c FROM gl_budgets WHERE status='LOCKED'")->fetch_assoc()['c'];
+        $latest = $conn->query("SELECT title FROM gl_budgets ORDER BY id DESC LIMIT 1")->fetch_assoc();
+        if ($latest) $budgetLatestTitle = $latest['title'];
+    }
 }
 
 // Diagnostic flags
@@ -303,6 +324,7 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
         .link-card.yec .icon         { background: #ede9fe; color: #5b21b6; }
         .link-card.cash .icon        { background: #d1fae5; color: #047857; }
         .link-card.asset .icon       { background: #fef3c7; color: #b45309; }
+        .link-card.budget .icon      { background: #ede9fe; color: #6d28d9; }
 
         .link-card .body { flex: 1; min-width: 0; }
         .link-card .title { font-size: 15px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
@@ -645,7 +667,6 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
             </div>
         </div>
 
-        <!-- Petty Cash tile -->
         <div class="status-tile <?php
             if (!$pcTableExists)        echo 'err';
             elseif ($pcCount > 0)       echo 'ok';
@@ -665,7 +686,6 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
             </div>
         </div>
 
-        <!-- Fixed Assets tile -->
         <div class="status-tile <?php
             if (!$assetTableExists)     echo 'err';
             elseif ($assetActive > 0)   echo 'ok';
@@ -685,6 +705,29 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
             </div>
         </div>
 
+        <!-- Budgets tile (NEW) -->
+        <div class="status-tile <?php
+            if (!$budgetTableExists)      echo 'err';
+            elseif ($budgetTotal === 0)   echo 'warn';
+            elseif ($budgetLocked > 0)    echo 'ok';
+            elseif ($budgetApproved > 0)  echo 'ok';
+            else                          echo 'warn';
+        ?>">
+            <div class="label">Budgets</div>
+            <div class="value"><?php echo $budgetTotal; ?> budget<?php echo $budgetTotal === 1 ? '' : 's'; ?></div>
+            <div class="sub">
+                <?php if (!$budgetTableExists): ?>
+                    <span class="status-pill bad">Table missing</span>
+                <?php elseif ($budgetTotal === 0): ?>
+                    <span class="status-pill warn">None yet</span>
+                <?php else: ?>
+                    <?php if ($budgetDraft > 0): ?><span class="status-pill warn"><?php echo $budgetDraft; ?> draft</span><?php endif; ?>
+                    <?php if ($budgetApproved > 0): ?><span class="status-pill ok"><?php echo $budgetApproved; ?> approved</span><?php endif; ?>
+                    <?php if ($budgetLocked > 0): ?><span class="status-pill ok"><?php echo $budgetLocked; ?> locked</span><?php endif; ?>
+                <?php endif; ?>
+            </div>
+        </div>
+
     </div>
 
     <!-- ===== System Settings ===== -->
@@ -699,6 +742,32 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
                 <div class="url">gl_settings.php<?php echo $lockDate !== null ? ' &middot; Locked through ' . htmlspecialchars($lockDate) : ' &middot; No lock'; ?></div>
             </div>
         </a>
+
+    </div>
+
+    <!-- ===== Budgeting (NEW) ===== -->
+    <div class="section-title">Budgeting</div>
+    <div class="link-grid">
+
+        <a href="gl_budget.php" class="link-card budget">
+            <div class="icon"><span class="glyphicon glyphicon-signal"></span></div>
+            <div class="body">
+                <div class="title">Budgets</div>
+                <div class="desc">Create fiscal-year budgets per session. 12-month grid per account, approve, then lock. Compare against actuals.</div>
+                <div class="url">gl_budget.php &middot; <?php echo $budgetTotal; ?> budget<?php echo $budgetTotal === 1 ? '' : 's'; ?></div>
+            </div>
+        </a>
+
+        <?php if ($budgetTotal > 0 && $budgetLatestTitle): ?>
+        <a href="gl_budget_report.php" class="link-card budget">
+            <div class="icon"><span class="glyphicon glyphicon-stats"></span></div>
+            <div class="body">
+                <div class="title">Budget vs Actual</div>
+                <div class="desc">Month-by-month comparison of budgeted amounts vs actual ledger activity, with variance and progress bars.</div>
+                <div class="url">gl_budget_report.php &middot; latest: <?php echo htmlspecialchars($budgetLatestTitle); ?></div>
+            </div>
+        </a>
+        <?php endif; ?>
 
     </div>
 
@@ -911,13 +980,22 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
         </a>
 
         <a href="gl_cash_flow.php" class="link-card report">
-    <div class="icon"><span class="glyphicon glyphicon-transfer"></span></div>
-    <div class="body">
-        <div class="title">Cash Flow Statement</div>
-        <div class="desc">Where cash came from and went. Split into Operating / Investing / Financing. Verifies against the ledger's cash accounts.</div>
-        <div class="url">gl_cash_flow.php</div>
-    </div>
-</a>
+            <div class="icon"><span class="glyphicon glyphicon-transfer"></span></div>
+            <div class="body">
+                <div class="title">Cash Flow Statement</div>
+                <div class="desc">Where cash came from and went. Split into Operating / Investing / Financing. Verifies against the ledger's cash accounts.</div>
+                <div class="url">gl_cash_flow.php</div>
+            </div>
+        </a>
+
+        <a href="gl_budget.php" class="link-card report">
+            <div class="icon"><span class="glyphicon glyphicon-signal"></span></div>
+            <div class="body">
+                <div class="title">Budgets</div>
+                <div class="desc">Fiscal-year budgets with monthly breakdown per account. Approve and lock to freeze them.</div>
+                <div class="url">gl_budget.php</div>
+            </div>
+        </a>
 
     </div>
 
@@ -1229,13 +1307,14 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
         <ul style="margin: 8px 0 0 20px; padding: 0;">
             <li>Bookmark this page as your home for the ledger system.</li>
             <li>The status board at the top shows the health of the entire engine at a glance.</li>
+            <li><strong>Budgets:</strong> create fiscal-year budgets per session, fill in monthly amounts, approve, lock.</li>
             <li><strong>Petty Cash:</strong> daily cash counts, auto-posted differences to Cash Short/Over (5940).</li>
             <li><strong>Assets &amp; Depreciation:</strong> register fixed assets, run monthly or yearly depreciation.</li>
             <li><strong>Settings:</strong> set the period lock date to prevent backdated entries.</li>
             <li><strong>Bank Reconciliation:</strong> match your bank statement against the ledger.</li>
             <li><strong>Session Close / Year-End Close:</strong> freeze or close a fiscal session.</li>
             <li><strong>Fee Defaulters:</strong> unpaid fee cards grouped by student, expandable to see individual cards.</li>
-            <li><strong>Reset Ledger:</strong> top-right button wipes test data. <strong>Remove this page and <code>gl_test_hub_reset.php</code> before handing over to a real client.</strong></li>
+            <li><strong>Reset Ledger:</strong> top-right button wipes test data. <strong>Budgets are preserved.</strong> Remove this page and <code>gl_test_hub_reset.php</code> before handing over to a real client.</li>
         </ul>
     </div>
 
@@ -1254,7 +1333,7 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
         <div class="modal-body">
 
             <p style="font-size:13px; color:#475569; margin-top:0;">
-                Choose what to wipe. In both cases, <strong>the Chart of Accounts, Suppliers, Mapping tables, Settings, and the Asset Register are preserved.</strong>
+                Choose what to wipe. In both cases, <strong>the Chart of Accounts, Suppliers, Mapping tables, Settings, the Asset Register, and Budgets are preserved.</strong>
             </p>
 
             <div class="reset-option" data-scope="ledger_only">

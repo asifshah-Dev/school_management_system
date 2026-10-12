@@ -1,5 +1,10 @@
 <?php
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 if (session_status() == PHP_SESSION_NONE) session_start();
 if (!isset($_SESSION['lang'])) $_SESSION['lang'] = 'en';
 $lang = $_SESSION['lang'];

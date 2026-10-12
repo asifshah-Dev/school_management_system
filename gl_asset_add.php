@@ -1,6 +1,11 @@
 <?php
 date_default_timezone_set('Asia/Karachi');
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 require_once('gl.php');
 
@@ -376,9 +381,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             <div class="actions">
                 <a href="gl_assets.php" class="action-btn-cancel">Cancel</a>
+                <?php if ($isEdit ? !empty($perms['can_edit']) : !empty($perms['can_add'])): ?>
                 <button type="submit" class="action-btn-primary">
                     <span class="glyphicon glyphicon-ok"></span> <?= $isEdit ? 'Save Changes' : 'Save Asset' ?>
                 </button>
+                <?php endif; ?>
             </div>
         </form>
 

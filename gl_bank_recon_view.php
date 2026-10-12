@@ -1,6 +1,11 @@
 <?php
 date_default_timezone_set('Asia/Karachi');
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 require_once('gl.php');
 
@@ -528,7 +533,7 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
             <button type="button" class="btn-head" onclick="printRecon()">
                 <span class="glyphicon glyphicon-print"></span> Print
             </button>
-            <?php if ($isDraft): ?>
+            <?php if ($isDraft && !empty($perms['can_edit'])): ?>
             <form method="post" style="display:inline;" onsubmit="return confirm('Complete this reconciliation?');">
                 <input type="hidden" name="action" value="complete">
                 <button type="submit" class="btn-head primary">
@@ -545,21 +550,29 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
             <a href="?id=<?= (int)$reconId ?>&tab=overview" class="tab-btn <?= $tab === 'overview' ? 'active' : '' ?>">
                 <span class="glyphicon glyphicon-th-list"></span> Overview
             </a>
+            <?php if (!empty($perms['can_add'])): ?>
             <a href="?id=<?= (int)$reconId ?>&tab=add" class="tab-btn <?= $tab === 'add' ? 'active' : '' ?>">
                 <span class="glyphicon glyphicon-plus"></span> Add Line
             </a>
+            <?php endif; ?>
+            <?php if (!empty($perms['can_add'])): ?>
             <a href="?id=<?= (int)$reconId ?>&tab=bulk" class="tab-btn <?= $tab === 'bulk' ? 'active' : '' ?>">
                 <span class="glyphicon glyphicon-paste"></span> Bulk Paste
             </a>
+            <?php endif; ?>
+            <?php if (!empty($perms['can_edit'])): ?>
             <a href="?id=<?= (int)$reconId ?>&tab=match" class="tab-btn <?= $tab === 'match' ? 'active' : '' ?>">
                 <span class="glyphicon glyphicon-link"></span> Match
                 <?php if ($unmatchedStatement > 0): ?>
                     <span class="count"><?= $unmatchedStatement ?></span>
                 <?php endif; ?>
             </a>
+            <?php endif; ?>
+            <?php if (!empty($perms['can_add'])): ?>
             <a href="?id=<?= (int)$reconId ?>&tab=adjust" class="tab-btn <?= $tab === 'adjust' ? 'active' : '' ?>">
                 <span class="glyphicon glyphicon-check"></span> Adjust
             </a>
+            <?php endif; ?>
         </div>
 
         <!-- TAB: OVERVIEW -->
@@ -615,7 +628,9 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
                                         <th class="num" style="width:80px;">Debit</th>
                                         <th class="num" style="width:80px;">Credit</th>
                                         <th style="width:100px;">Status</th>
+                                        <?php if (!empty($perms['can_edit']) || !empty($perms['can_add']) || !empty($perms['can_delete'])): ?>
                                         <th style="width:180px;">Action</th>
+                                        <?php endif; ?>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -634,20 +649,28 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
                                             <?php elseif ($adjusted): ?><span class="tag adjusted">Adjusted</span>
                                             <?php else: ?><span class="tag unmatched">Unmatched</span><?php endif; ?>
                                         </td>
+                                        <?php if (!empty($perms['can_edit']) || !empty($perms['can_add']) || !empty($perms['can_delete'])): ?>
                                         <td>
                                             <?php if ($matched): ?>
+                                                <?php if (!empty($perms['can_edit'])): ?>
                                                 <a href="?id=<?= (int)$reconId ?>&unmatch=<?= (int)$s['id'] ?>" class="mini-btn mini-btn-warn">Unmatch</a>
+                                                <?php endif; ?>
                                             <?php elseif ($adjusted): ?>
                                                 <a href="gl_transaction_view.php?id=<?= (int)$s['adjustment_txn_id'] ?>" target="_blank" class="mini-btn mini-btn-info">View TXN</a>
                                             <?php elseif ($isDraft): ?>
+                                                <?php if (!empty($perms['can_edit'])): ?>
                                                 <a href="?id=<?= (int)$reconId ?>&tab=match&stmt=<?= (int)$s['id'] ?>" class="mini-btn mini-btn-info">Match</a>
+                                                <?php endif; ?>
+                                                <?php if (!empty($perms['can_add'])): ?>
                                                 <a href="?id=<?= (int)$reconId ?>&tab=adjust&stmt=<?= (int)$s['id'] ?>" class="mini-btn mini-btn-ok">Adjust</a>
+                                                <?php endif; ?>
                                             <?php endif; ?>
-                                            <?php if ($isDraft): ?>
+                                            <?php if ($isDraft && !empty($perms['can_delete'])): ?>
                                                 <a href="?id=<?= (int)$reconId ?>&del_line=<?= (int)$s['id'] ?>" class="mini-btn mini-btn-danger"
                                                    onclick="return confirm('Delete this line?');">✕</a>
                                             <?php endif; ?>
                                         </td>
+                                        <?php endif; ?>
                                     </tr>
                                 <?php endforeach; ?>
                                 </tbody>
@@ -675,7 +698,9 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
                                         <th class="num" style="width:80px;">Debit</th>
                                         <th class="num" style="width:80px;">Credit</th>
                                         <th style="width:100px;">Status</th>
+                                        <?php if (!empty($perms['can_edit'])): ?>
                                         <th style="width:130px;">Action</th>
+                                        <?php endif; ?>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -696,19 +721,23 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
                                             <?php elseif ($mark['mark_type'] === 'MATCHED'): ?><span class="tag matched">Matched</span>
                                             <?php else: ?><span class="tag outstanding">Outstanding</span><?php endif; ?>
                                         </td>
+                                        <?php if (!empty($perms['can_edit'])): ?>
                                         <td>
                                             <?php if ($mark && $mark['mark_type'] === 'MATCHED'): ?>
                                                 <a href="?id=<?= (int)$reconId ?>&unmatch=<?= (int)$mark['matched_statement_id'] ?>" class="mini-btn mini-btn-warn">Unmatch</a>
                                             <?php elseif ($mark && $mark['mark_type'] === 'OUTSTANDING'): ?>
                                                 <a href="?id=<?= (int)$reconId ?>&unmark=<?= (int)$lid ?>" class="mini-btn mini-btn-warn">Unmark</a>
                                             <?php elseif ($isDraft): ?>
+                                                <?php if (!empty($perms['can_edit'])): ?>
                                                 <form method="post" style="display:inline;">
                                                     <input type="hidden" name="action" value="mark_outstanding">
                                                     <input type="hidden" name="ledger_id" value="<?= (int)$lid ?>">
                                                     <button type="submit" class="mini-btn mini-btn-info">Outstanding</button>
                                                 </form>
+                                                <?php endif; ?>
                                             <?php endif; ?>
                                         </td>
+                                        <?php endif; ?>
                                     </tr>
                                 <?php endforeach; ?>
                                 </tbody>
@@ -773,9 +802,11 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
 
                 <div class="form-actions">
                     <a href="?id=<?= (int)$reconId ?>&tab=overview" class="action-btn-cancel">Cancel</a>
+                    <?php if (!empty($perms['can_add'])): ?>
                     <button type="submit" class="action-btn-primary">
                         <span class="glyphicon glyphicon-plus"></span> Add Line
                     </button>
+                    <?php endif; ?>
                 </div>
             </form>
         </div>
@@ -809,9 +840,11 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
 
                 <div class="form-actions">
                     <a href="?id=<?= (int)$reconId ?>&tab=overview" class="action-btn-cancel">Cancel</a>
+                    <?php if (!empty($perms['can_add'])): ?>
                     <button type="submit" class="action-btn-primary">
                         <span class="glyphicon glyphicon-import"></span> Import Lines
                     </button>
+                    <?php endif; ?>
                 </div>
             </form>
         </div>
@@ -884,9 +917,11 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
 
                     <div class="form-actions">
                         <a href="?id=<?= (int)$reconId ?>&tab=overview" class="action-btn-cancel">Cancel</a>
+                        <?php if (!empty($perms['can_edit'])): ?>
                         <button type="submit" class="action-btn-primary">
                             <span class="glyphicon glyphicon-link"></span> Match
                         </button>
+                        <?php endif; ?>
                     </div>
                 </form>
             <?php endif; ?>
@@ -980,9 +1015,11 @@ $availableLedger = array_filter($ledgerLines, function($l) use ($marks) {
 
                     <div class="form-actions">
                         <a href="?id=<?= (int)$reconId ?>&tab=overview" class="action-btn-cancel">Cancel</a>
+                        <?php if (!empty($perms['can_add'])): ?>
                         <button type="submit" class="action-btn-primary">
                             <span class="glyphicon glyphicon-check"></span> Post Adjustment
                         </button>
+                        <?php endif; ?>
                     </div>
                 </form>
             <?php endif; ?>

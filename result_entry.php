@@ -1,6 +1,11 @@
 <?php
 ob_start();
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 if (session_status() == PHP_SESSION_NONE) {
     session_start();
 }
@@ -896,7 +901,9 @@ if ($class_id > 0) {
                                             <?php endforeach; ?>
                                             <?php endif; ?>
                                             <?php if ($has_any_results): ?>
-                                            <th>Actions</th>
+                                            <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<th>Actions</th>
+<?php endif; ?>
                                             <?php endif; ?>
                                         </tr>
                                     </thead>
@@ -988,14 +995,20 @@ if ($class_id > 0) {
                                             <?php endif; ?>
 
                                             <?php if ($has_any_results): ?>
+                                            <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
                                             <td data-label="Actions">
                                                 <?php if ($student['has_results']): ?>
+                                                <?php if (!empty($perms['can_edit'])): ?>
                                                 <button type="button"
                                                     class="btn btn-warning btn-sm action-btn edit-btn">Edit</button>
+                                                <?php endif; ?>
+                                                <?php if (!empty($perms['can_delete'])): ?>
                                                 <button type="button" class="btn btn-dark btn-sm action-btn delete-btn"
                                                     data-student-id="<?php echo $student['id']; ?>">Delete</button>
                                                 <?php endif; ?>
+                                                <?php endif; ?>
                                             </td>
+                                            <?php endif; ?>
                                             <?php endif; ?>
                                         </tr>
                                         <?php endforeach; ?>
@@ -1003,7 +1016,9 @@ if ($class_id > 0) {
                                 </table>
                             </div>
                             <div class="text-right mt-3">
+                                <?php if (!empty($perms['can_add']) || !empty($perms['can_edit'])): ?>
                                 <button type="submit" name="save_results" class="btn btn-success">Save Results</button>
+                                <?php endif; ?>
                             </div>
                         </form>
                     </div>

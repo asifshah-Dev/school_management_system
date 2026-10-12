@@ -1,5 +1,10 @@
 <?php 
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 
 // Enable error reporting for debugging
@@ -3109,7 +3114,9 @@ function getAdmissionsPanel() {
     return `<section class="dashboard-data-panel dashboard-panel-third" aria-labelledby="admissionsTitle">
         <div class="dashboard-data-panel-header">
             <div><h2 class="dashboard-data-panel-title" id="admissionsTitle"><i class="fa-solid fa-user-plus"></i> Admissions</h2><div class="dashboard-data-panel-subtitle">Registration summary this month</div></div>
+            <?php if (!empty($perms['can_add'])): ?>
             <a class="dashboard-panel-link" href="student_registration.php">New registration</a>
+            <?php endif; ?>
         </div>
         <div class="dashboard-admission-summary">
             <div class="dashboard-mini-stat"><strong>${formatNumber(Number(admissions.admitted) || 0)}</strong><span>Admitted</span></div>
@@ -3717,9 +3724,11 @@ function displaySearchResults(students) {
                             <a href="student_profile.php?student_id=${student.id}" class="action-btn action-btn-profile">
                                 <i class="fas fa-user-circle"></i> Profile
                             </a>
+                            <?php if (!empty($perms['can_edit'])): ?>
                             <a href="edit_student.php?student_id=${student.id}" class="action-btn action-btn-edit">
                                 <i class="fas fa-edit"></i> Edit
                             </a>
+                            <?php endif; ?>
                             <a href="mark_leave.php?student_id=${student.id}" class="action-btn action-btn-leave">
                                 <i class="fas fa-sign-out-alt"></i> Leave
                             </a>

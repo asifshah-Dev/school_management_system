@@ -1,6 +1,10 @@
 <?php
 require_once('security.php');
-
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 // Initialize session if not started
 if (session_status() == PHP_SESSION_NONE) {
     session_start();
@@ -1196,7 +1200,9 @@ $ref_types_result->close();
                         <th><?php echo $translations[$lang]['category']; ?></th>
                         <th><?php echo $translations[$lang]['reference_id']; ?></th>
                         <th><?php echo $translations[$lang]['date_time']; ?></th>
-                        <th><?php echo $translations[$lang]['actions']; ?></th>
+                        <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<th><?php echo $translations[$lang]['actions']; ?></th>
+<?php endif; ?>
                     </tr>
                 </thead>
                 <tbody>
@@ -1223,19 +1229,23 @@ $ref_types_result->close();
                         <td><?php echo getCategoryLabel($row['ref_type'], $lang); ?></td>
                         <td><?php echo htmlspecialchars($row['ref_id']); ?></td>
                         <td><?php echo date('d M Y, h:i A', strtotime($row['transaction_date'])); ?></td>
-                        <td>
+                        <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<td>
                             <div class="actions">
                                 <button class="action-btn view" onclick="viewTransaction(<?php echo $row['id']; ?>)" title="<?php echo $translations[$lang]['view']; ?>">
                                     <i class="fas fa-eye"></i>
                                 </button>
-                                <a href="edit_transaction.php?id=<?php echo $row['id']; ?>" class="action-btn edit" title="<?php echo $translations[$lang]['edit']; ?>">
+                                <?php if (!empty($perms['can_edit'])): ?>
+<a href="edit_transaction.php?id=<?php echo $row['id']; ?>" class="action-btn edit" title="<?php echo $translations[$lang]['edit']; ?>">
                                     <i class="fas fa-pen"></i>
                                 </a>
+<?php endif; ?>
                                 <button class="action-btn reverse" onclick="showReverseModal(<?php echo $row['id']; ?>)" title="<?php echo $translations[$lang]['reverse']; ?>">
                                     <i class="fas fa-undo"></i>
                                 </button>
                             </div>
                         </td>
+<?php endif; ?>
                     </tr>
                     <?php endwhile; ?>
                 <?php else: ?>

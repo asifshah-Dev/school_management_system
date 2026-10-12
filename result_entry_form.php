@@ -1,5 +1,10 @@
 <?php
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 if (session_status() == PHP_SESSION_NONE) {
     session_start();
 }
@@ -285,7 +290,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_results'])) {
 
 
                     <div class="text-right">
+                        <?php if (!empty($perms['can_add']) || !empty($perms['can_edit'])): ?>
                         <button type="submit" name="save_results" class="btn btn-success">Save Results</button>
+                        <?php endif; ?>
                         <a href="result_entry.php?exam_id=<?php echo $arrange_exam_id; ?>&class_id=<?php echo $class_id; ?>&exam_type_id=<?php echo $_GET['exam_type_id'] ?? 0; ?>"
                             class="btn btn-default">Back</a>
                     </div>

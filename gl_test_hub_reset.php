@@ -3,6 +3,8 @@ date_default_timezone_set('Asia/Karachi');
 require_once('security.php');
 require_once('conn_inc.php');
 require_once('gl.php');
+require_once('permissions.php');
+require_admin_user($conn);
 
 $conn->query("SET time_zone = '+05:00'");
 $conn->query("SET collation_connection = 'utf8mb4_general_ci'");
@@ -129,6 +131,13 @@ try {
     $conn->begin_transaction();
 
     /* ============================================================
+       BUDGETS (child first — gl_budget_lines references gl_budgets)
+       Wiped in BOTH scopes.
+       ============================================================ */
+    wipe_table($conn, 'gl_budget_lines', $report);
+    wipe_table($conn, 'gl_budgets',      $report);
+
+    /* ============================================================
        OPERATIONAL TABLES (full-reset scope only)
        Order matters — children before parents.
        ============================================================ */
@@ -215,6 +224,17 @@ try {
     } else {
         $report['gl_settings'] = 'skipped (no such table)';
     }
+
+    /* ============================================================
+       PRESERVED — DO NOT WIPE
+       These are master / config / structural tables that must
+       survive a reset:
+         gl_accounts, gl_parties, fee_type_gl_map,
+         expense_category_gl_map, role_gl_map,
+         sessions, users, classes, student_registration,
+         student_class, fee_types, expense_categories,
+         gl_assets (rows preserved, counters reset above)
+       ============================================================ */
 
     $conn->commit();
 

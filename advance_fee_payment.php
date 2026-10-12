@@ -1,5 +1,10 @@
 <?php 
 require_once('security.php'); 
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 require_once('gl.php');
 
@@ -793,6 +798,7 @@ $default_due_date = date('Y-m-t', strtotime("$next_month_year-$next_month-01"));
       <p class="mb-0 mt-1 text-white-50">Create advance payment for future months</p>
     </div>
     
+    <?php if (!empty($perms['can_add'])): ?>
     <form method="POST" action="" id="advancePaymentForm">
       <div class="row">
         <div class="col-md-6">
@@ -955,6 +961,7 @@ $default_due_date = date('Y-m-t', strtotime("$next_month_year-$next_month-01"));
         </div>
       </div>
     </form>
+    <?php endif; ?>
   </div>
   
   <div class="card mt-4">
@@ -1034,7 +1041,7 @@ $default_due_date = date('Y-m-t', strtotime("$next_month_year-$next_month-01"));
                   </button>
                 </td>
                 <td>
-                  <?php if ($can_edit): ?>
+                  <?php if ($can_edit && !empty($perms['can_edit'])): ?>
                   <button class="btn btn-sm btn-outline-warning" onclick="openEditAdvanceModal(
                     <?php echo $payment['id']; ?>, 
                     <?php echo $payment['paid_amount']; ?>, 
@@ -1078,6 +1085,7 @@ $default_due_date = date('Y-m-t', strtotime("$next_month_year-$next_month-01"));
           </h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" style="filter: brightness(0) invert(1);"></button>
         </div>
+        <?php if (!empty($perms['can_edit'])): ?>
         <form method="POST" action="" id="editAdvanceForm">
           <div class="modal-body">
             <input type="hidden" name="transaction_id" id="edit_transaction_id" value="">
@@ -1137,6 +1145,7 @@ $default_due_date = date('Y-m-t', strtotime("$next_month_year-$next_month-01"));
             </button>
           </div>
         </form>
+        <?php endif; ?>
       </div>
     </div>
   </div>

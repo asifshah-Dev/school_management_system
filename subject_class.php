@@ -1,7 +1,11 @@
 <?php
 ob_start();
 require_once('security.php');
-
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 // Initialize session
 if (session_status() == PHP_SESSION_NONE) {
     session_start();
@@ -572,10 +576,12 @@ $colors = [
                         </div>
 
                         <div class="text-right">
-                            <button type="submit" class="btn btn-success">
+                            <?php if ($edit_mode ? !empty($perms['can_edit']) : !empty($perms['can_add'])): ?>
+<button type="submit" class="btn btn-success">
                                 <span class="glyphicon glyphicon-<?php echo $edit_mode ? 'refresh' : 'plus'; ?>"></span> 
                                 <?php echo $edit_mode ? 'Save Changes' : 'Add Assignments'; ?>
                             </button>
+<?php endif; ?>
                             <?php if ($edit_mode): ?>
                                 <a href="<?php echo $_SERVER['PHP_SELF']; ?>" class="btn btn-default">
                                     <span class="glyphicon glyphicon-remove"></span> Cancel
@@ -607,7 +613,9 @@ $colors = [
                                         <th style="width: 15%;">Type</th>
                                         <th style="width: 15%;">Total Marks</th>
                                         <th style="width: 25%;">Sub-Subjects</th>
-                                        <th style="width: 10%;">Actions</th>
+                                        <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<th style="width: 10%;">Actions</th>
+<?php endif; ?>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -615,12 +623,16 @@ $colors = [
                                     <?php foreach ($subject_classes_by_class as $class_id => $class_data): ?>
                                         <!-- Class header row -->
                                         <tr class="class-header class-<?php echo array_search($class_id, array_unique($class_ids)) % count($colors); ?>">
-                                            <td colspan="5">
+                                            <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<td colspan="5">
                                                 <span style="font-size:25px;"><?php echo htmlspecialchars($class_data['class_title']); ?></span>
-                                                <a href="?edit_class=<?php echo $class_id; ?>" class="btn btn-warning action-btn pull-right">
+                                                <?php if (!empty($perms['can_edit'])): ?>
+<a href="?edit_class=<?php echo $class_id; ?>" class="btn btn-warning action-btn pull-right">
                                                     <span class="glyphicon glyphicon-edit"></span> Edit
                                                 </a>
+<?php endif; ?>
                                             </td>
+<?php endif; ?>
                                             <td></td> <!-- Empty cell for actions column alignment -->
                                         </tr>
                                         <?php foreach ($class_data['subjects'] as $sc): ?>
@@ -656,12 +668,16 @@ $colors = [
                                                         <span class="text-muted">None</span>
                                                     <?php endif; ?>
                                                 </td>
-                                                <td>
-                                                    <a href="?delete=<?php echo $sc['id']; ?>" class="btn btn-xs btn-danger action-btn" 
+                                                <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<td>
+                                                    <?php if (!empty($perms['can_delete'])): ?>
+<a href="?delete=<?php echo $sc['id']; ?>" class="btn btn-xs btn-danger action-btn"
                                                        onclick="return confirm('Are you sure you want to delete this assignment?')">
                                                         <span class="glyphicon glyphicon-trash"></span> Delete
                                                     </a>
+<?php endif; ?>
                                                 </td>
+<?php endif; ?>
                                             </tr>
                                         <?php endforeach; ?>
                                     <?php endforeach; ?>

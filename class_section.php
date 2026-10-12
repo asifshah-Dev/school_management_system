@@ -1,6 +1,11 @@
 <?php 
 header('Content-Type: text/html; charset=utf-8');
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 
 // Handle form submit
@@ -45,6 +50,7 @@ $result = $conn->query("
       <div class="panel panel-primary">
         <div class="panel-heading"><h3 class="panel-title">Add Class + Section</h3></div>
         <div class="panel-body">
+          <?php if (!empty($perms['can_add'])): ?>
           <form method="post">
             <div class="form-group">
               <label>Select Class</label>
@@ -69,6 +75,7 @@ $result = $conn->query("
               <button type="reset" class="btn btn-default">Reset</button>
             </div>
           </form>
+          <?php endif; ?>
         </div>
       </div>
 

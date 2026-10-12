@@ -1,6 +1,11 @@
 <?php
 date_default_timezone_set('Asia/Karachi');
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 require_once('gl.php');
 
@@ -405,9 +410,11 @@ foreach ($trees as $type => $data) {
                     <a href="gl_accounts.php" class="btn-action ghost">Clear</a>
                 <?php endif; ?>
             </form>
+            <?php if (!empty($perms['can_add'])): ?>
             <a href="gl_account_add.php" class="btn-action primary">
                 <span class="glyphicon glyphicon-plus"></span> Add New Account
             </a>
+            <?php endif; ?>
         </div>
     </div>
 
@@ -458,7 +465,9 @@ foreach ($trees as $type => $data) {
                                 <th style="width: 90px;">Code</th>
                                 <th>Account Name</th>
                                 <th class="amount-col" style="width: 150px;">Balance</th>
-                                <th class="actions-col">Actions</th>
+                                <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<th class="actions-col">Actions</th>
+<?php endif; ?>
                             </tr>
                         </thead>
                         <tbody>
@@ -476,11 +485,13 @@ foreach ($trees as $type => $data) {
                                     <td class="acc-name parent-name">
                                         <div class="name-with-add">
                                             <span><?php echo htmlspecialchars($parent['name']); ?></span>
+                                            <?php if (!empty($perms['can_add'])): ?>
                                             <a href="gl_account_add.php?parent_id=<?php echo (int)$parent['id']; ?>"
                                                class="add-inline"
                                                title="Add a new account under <?php echo htmlspecialchars($parent['name']); ?>">
                                                 <span class="glyphicon glyphicon-plus"></span> Add
                                             </a>
+                                            <?php endif; ?>
                                             <?php if (!empty($parent['is_contra'])): ?>
                                                 <span class="badge-pill contra">Contra</span>
                                             <?php endif; ?>
@@ -489,16 +500,20 @@ foreach ($trees as $type => $data) {
                                     <td class="amount-col parent-balance <?php echo abs($aggBalance) < 0.005 ? 'zero' : ''; ?>">
                                         <?php echo number_format($aggBalance, 2); ?>
                                     </td>
-                                    <td class="actions-col">
+                                    <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<td class="actions-col">
                                         <a href="gl_account_ledger.php?id=<?php echo (int)$parent['id']; ?>"
                                            class="action-btn ledger">
                                             <span class="glyphicon glyphicon-book"></span> Ledger
                                         </a>
-                                        <a href="gl_account_edit.php?id=<?php echo (int)$parent['id']; ?>"
+                                        <?php if (!empty($perms['can_edit'])): ?>
+<a href="gl_account_edit.php?id=<?php echo (int)$parent['id']; ?>"
                                            class="action-btn edit">
                                             <span class="glyphicon glyphicon-pencil"></span> Edit
                                         </a>
+<?php endif; ?>
                                     </td>
+<?php endif; ?>
                                 </tr>
 
                                 <?php
@@ -517,16 +532,20 @@ foreach ($trees as $type => $data) {
                                         <td class="amount-col <?php echo abs($cBalance) < 0.005 ? 'zero' : ''; ?>">
                                             <?php echo number_format($cBalance, 2); ?>
                                         </td>
-                                        <td class="actions-col">
+                                        <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<td class="actions-col">
                                             <a href="gl_account_ledger.php?id=<?php echo (int)$child['id']; ?>"
                                                class="action-btn ledger">
                                                 <span class="glyphicon glyphicon-book"></span> Ledger
                                             </a>
-                                            <a href="gl_account_edit.php?id=<?php echo (int)$child['id']; ?>"
+                                            <?php if (!empty($perms['can_edit'])): ?>
+<a href="gl_account_edit.php?id=<?php echo (int)$child['id']; ?>"
                                                class="action-btn edit">
                                                 <span class="glyphicon glyphicon-pencil"></span> Edit
                                             </a>
+<?php endif; ?>
                                         </td>
+<?php endif; ?>
                                     </tr>
                                 <?php endforeach; ?>
                             <?php endforeach; ?>

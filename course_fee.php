@@ -1,6 +1,10 @@
 <?php
 require_once('security.php');
-
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 // Initialize session if not started
 if (session_status() == PHP_SESSION_NONE) {
     session_start();
@@ -332,10 +336,12 @@ $class_colors = [
                         </div>
 
                         <div class="text-right">
-                            <button type="submit" class="btn btn-primary">
+                            <?php if ($edit_mode ? !empty($perms['can_edit']) : !empty($perms['can_add'])): ?>
+<button type="submit" class="btn btn-primary">
                                 <span class="glyphicon glyphicon-<?php echo $edit_mode ? 'refresh' : 'plus'; ?>"></span> 
                                 <?php echo $edit_mode ? $translations['save'] : $translations['submit']; ?>
                             </button>
+<?php endif; ?>
                             
                             <?php if ($edit_mode): ?>
                                 <a href="class_fee_types.php" class="btn btn-default">
@@ -374,7 +380,9 @@ $class_colors = [
                                             <th><?php echo $translations['fee_type_label']; ?></th>
                                             <th><?php echo $translations['session_label']; ?></th>
                                             <th><?php echo $translations['amount_label']; ?></th>
-                                            <th><?php echo $translations['actions']; ?></th>
+                                            <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<th><?php echo $translations['actions']; ?></th>
+<?php endif; ?>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -386,16 +394,22 @@ $class_colors = [
                                                 <td><?php echo htmlspecialchars($row['fee_type_title']); ?></td>
                                                 <td><?php echo htmlspecialchars($row['session_title'] ?? 'N/A'); ?></td>
                                                 <td><?php echo htmlspecialchars($row['amount']); ?></td>
-                                                <td>
-                                                    <a href="?edit_class_id=<?php echo $row['class_id']; ?>&edit_session_id=<?php echo $row['session_id']; ?>" class="btn btn-xs btn-warning">
+                                                <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<td>
+                                                    <?php if (!empty($perms['can_edit'])): ?>
+<a href="?edit_class_id=<?php echo $row['class_id']; ?>&edit_session_id=<?php echo $row['session_id']; ?>" class="btn btn-xs btn-warning">
                                                         <span class="glyphicon glyphicon-edit"></span> 
                                                         <?php echo $translations['edit']; ?>
                                                     </a>
-                                                    <a href="?delete=<?php echo $row['id']; ?>" class="btn btn-xs btn-danger" onclick="return confirm('<?php echo $translations['delete_confirm']; ?>');">
+<?php endif; ?>
+                                                    <?php if (!empty($perms['can_delete'])): ?>
+<a href="?delete=<?php echo $row['id']; ?>" class="btn btn-xs btn-danger" onclick="return confirm('<?php echo $translations['delete_confirm']; ?>');">
                                                         <span class="glyphicon glyphicon-trash"></span> 
                                                         <?php echo $translations['delete']; ?>
                                                     </a>
+<?php endif; ?>
                                                 </td>
+<?php endif; ?>
                                             </tr>
                                         <?php endforeach; ?>
                                     </tbody>

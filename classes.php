@@ -1,7 +1,11 @@
 <?php
 ob_start();
 require_once('security.php');
-
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 if (session_status() == PHP_SESSION_NONE) session_start();
 
 if (!isset($_SESSION['csrf_token'])) $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
@@ -497,7 +501,9 @@ body {
                         </div>
 
                         <div class="text-right">
-                            <button type="submit" class="btn btn-success"><?php echo $edit_mode ? $translations[$lang]['save'] : $translations[$lang]['submit']; ?></button>
+                            <?php if ($edit_mode ? !empty($perms['can_edit']) : !empty($perms['can_add'])): ?>
+<button type="submit" class="btn btn-success"><?php echo $edit_mode ? $translations[$lang]['save'] : $translations[$lang]['submit']; ?></button>
+<?php endif; ?>
                             <?php if ($edit_mode): ?>
                                 <a href="<?php echo $_SERVER['PHP_SELF']; ?>" class="btn btn-default"><?php echo $translations[$lang]['cancel']; ?></a>
                             <?php else: ?>
@@ -520,7 +526,9 @@ body {
                                 <thead>
                                     <tr>
                                         <th>Class Information</th>
-                                        <th class="actions"><?php echo $translations[$lang]['actions']; ?></th>
+                                        <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<th class="actions"><?php echo $translations[$lang]['actions']; ?></th>
+<?php endif; ?>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -531,10 +539,16 @@ body {
                                                 <div class="sections"><?php echo htmlspecialchars($row['sections'] ?: 'No Sections'); ?></div>
                                                 <div class="date"><?php echo $row['dated'] ? date('d M Y', strtotime($row['dated'])) : 'No Date'; ?></div>
                                             </td>
-                                            <td class="actions">
-                                                <a href="?edit=<?php echo $row['id']; ?>" class="btn btn-warning btn-xs">Edit</a>
-                                                <a href="?delete=<?php echo $row['id']; ?>" class="btn btn-danger btn-xs" onclick="return confirm('Are you sure?')">Delete</a>
+                                            <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+<td class="actions">
+                                                <?php if (!empty($perms['can_edit'])): ?>
+<a href="?edit=<?php echo $row['id']; ?>" class="btn btn-warning btn-xs">Edit</a>
+<?php endif; ?>
+                                                <?php if (!empty($perms['can_delete'])): ?>
+<a href="?delete=<?php echo $row['id']; ?>" class="btn btn-danger btn-xs" onclick="return confirm('Are you sure?')">Delete</a>
+<?php endif; ?>
                                             </td>
+<?php endif; ?>
                                         </tr>
                                     <?php endforeach; ?>
                                 </tbody>

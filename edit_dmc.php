@@ -2,6 +2,11 @@
 ob_start();
 header('Content-Type: text/html; charset=utf-8');
 require_once('security.php');
+/* ==== AUTHORIZATION GATE ==== */
+require_once('permissions.php');
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
+/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 
 // Initialize variables
@@ -188,8 +193,10 @@ if ($student_id > 0 && $arrange_exam_id > 0) {
                                                    value="<?php echo htmlspecialchars($mark['marks']); ?>"
                                                    class="form-control input-sm" style="width: 100px;" min="0" max="100"
                                                    required>
+                                            <?php if (!empty($perms['can_edit'])): ?>
                                             <button type="submit" class="btn btn-primary btn-sm"
                                                     style="margin-top: 5px;">Save</button>
+                                            <?php endif; ?>
                                         </form>
                                     </td>
                                 </tr>
