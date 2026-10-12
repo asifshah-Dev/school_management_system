@@ -108,14 +108,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_voucher'])) {
 }
 
 // ---------------------------------------------------------------------------
-// Load accounts
+// Load accounts — grouped by voucher use case
 // ---------------------------------------------------------------------------
 $allAccounts = gl_list_accounts($conn, null, true);
+
+// Payments (CPV/BPV): debit side can be Expense, Liability, or Asset
+// Receipts (CRV/BRV): credit side can be Revenue, Asset, or Liability
 $paymentAccounts = [];
 $receiptAccounts = [];
+
 foreach ($allAccounts as $a) {
-    if (in_array($a['account_type'], ['EXPENSE','LIABILITY'], true)) $paymentAccounts[] = $a;
-    if (in_array($a['account_type'], ['REVENUE','ASSET'], true))     $receiptAccounts[] = $a;
+    if (in_array($a['account_type'], ['EXPENSE','LIABILITY','ASSET'], true)) {
+        $paymentAccounts[] = $a;
+    }
+    if (in_array($a['account_type'], ['REVENUE','ASSET','LIABILITY'], true)) {
+        $receiptAccounts[] = $a;
+    }
 }
 ?>
 <!DOCTYPE html>
@@ -445,6 +453,7 @@ foreach ($allAccounts as $a) {
                 </label>
                 <select id="account_id" name="account_id" required>
                     <option value="">— Select Account —</option>
+
                     <optgroup label="Expenses" id="opt_expenses">
                         <?php foreach ($paymentAccounts as $a): if ($a['account_type'] !== 'EXPENSE') continue; ?>
                             <option value="<?php echo (int)$a['id']; ?>"
@@ -454,6 +463,7 @@ foreach ($allAccounts as $a) {
                             </option>
                         <?php endforeach; ?>
                     </optgroup>
+
                     <optgroup label="Liabilities" id="opt_liabilities">
                         <?php foreach ($paymentAccounts as $a): if ($a['account_type'] !== 'LIABILITY') continue; ?>
                             <option value="<?php echo (int)$a['id']; ?>"
@@ -463,6 +473,7 @@ foreach ($allAccounts as $a) {
                             </option>
                         <?php endforeach; ?>
                     </optgroup>
+
                     <optgroup label="Revenue" id="opt_revenue">
                         <?php foreach ($receiptAccounts as $a): if ($a['account_type'] !== 'REVENUE') continue; ?>
                             <option value="<?php echo (int)$a['id']; ?>"
@@ -472,6 +483,7 @@ foreach ($allAccounts as $a) {
                             </option>
                         <?php endforeach; ?>
                     </optgroup>
+
                     <optgroup label="Assets" id="opt_assets">
                         <?php foreach ($receiptAccounts as $a): if ($a['account_type'] !== 'ASSET') continue; ?>
                             <option value="<?php echo (int)$a['id']; ?>"
@@ -544,7 +556,6 @@ foreach ($allAccounts as $a) {
 </div>
 
 <script>
-// Load jQuery only if not already present
 if (typeof jQuery === 'undefined') {
     document.write('<script src="https://code.jquery.com/jquery-3.7.1.min.js"><\/script>');
 }
@@ -562,23 +573,26 @@ function onTypeChange(type) {
     document.getElementById('payment_method').required = isBank;
 
     const isPayment = (type === 'CPV' || type === 'BPV');
+
+    // Payments: show Expenses + Liabilities + Assets
+    // Receipts: show Revenue + Assets + Liabilities
     document.getElementById('opt_expenses').style.display    = isPayment ? '' : 'none';
-    document.getElementById('opt_liabilities').style.display = isPayment ? '' : 'none';
+    document.getElementById('opt_liabilities').style.display = '';
     document.getElementById('opt_revenue').style.display     = isPayment ? 'none' : '';
-    document.getElementById('opt_assets').style.display      = isPayment ? 'none' : '';
+    document.getElementById('opt_assets').style.display      = '';
 
     const accountLabel = document.getElementById('account_label');
     const partyHelp    = document.getElementById('party_help');
     const accountHelp  = document.getElementById('account_help');
 
     if (isPayment) {
-        accountLabel.textContent = 'Expense / Liability Account';
+        accountLabel.textContent = 'Account (Expense / Liability / Asset)';
         partyHelp.textContent    = 'Who are you paying?';
-        accountHelp.textContent  = 'The expense or liability being reduced';
+        accountHelp.textContent  = 'Expense, liability, or asset being debited';
     } else {
-        accountLabel.textContent = 'Revenue / Asset Account';
+        accountLabel.textContent = 'Account (Revenue / Asset / Liability)';
         partyHelp.textContent    = 'Who is paying you?';
-        accountHelp.textContent  = 'The revenue or receivable being recorded';
+        accountHelp.textContent  = 'Revenue, asset, or liability being credited';
     }
 
     // Reset account selection if it's now hidden
@@ -628,7 +642,6 @@ document.addEventListener('DOMContentLoaded', function() {
     onTypeChange(currentType);
     updateAmountPreview();
 
-    // Init Select2 if available
     if (window.jQuery && jQuery.fn.select2) {
         jQuery('#session_id').select2({ width: '100%' });
         jQuery('#account_id').select2({ width: '100%', placeholder: '— Select Account —' });
@@ -638,7 +651,6 @@ document.addEventListener('DOMContentLoaded', function() {
             dropdownParent: jQuery('body')
         });
 
-        // Wire Select2 changes back into our visibility logic
         jQuery('#account_id').on('change', function(){ syncSupplierField(); });
     } else {
         document.getElementById('account_id').addEventListener('change', syncSupplierField);

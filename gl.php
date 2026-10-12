@@ -97,8 +97,8 @@ function gl_suggest_next_code(mysqli $conn, string $parentCode): ?string {
 
     $stmt = $conn->prepare("
         SELECT code FROM gl_accounts
-        WHERE code LIKE CONCAT(?, '%')
-          AND code <> ?
+        WHERE code COLLATE utf8mb4_general_ci LIKE CONCAT(? COLLATE utf8mb4_general_ci, '%')
+          AND code COLLATE utf8mb4_general_ci <> ? COLLATE utf8mb4_general_ci
           AND LENGTH(code) = ?
         ORDER BY CAST(SUBSTRING(code, 3) AS UNSIGNED) DESC
         LIMIT 1

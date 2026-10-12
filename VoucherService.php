@@ -77,28 +77,6 @@ class VoucherService
     // Draft lifecycle
     // =========================================================================
 
-    /**
-     * Create a new voucher in DRAFT state.
-     *
-     * INSERT has 15 placeholders (status is literal 'DRAFT').
-     * Column order and bind order MUST match exactly:
-     *
-     *   1. voucher_type       s
-     *   2. voucher_number     s
-     *   3. entry_date         s
-     *   4. session_id         i
-     *   5. amount             d
-     *   6. party_name         s
-     *   7. party_contact      s
-     *   8. party_id           i
-     *   9. payment_method     s
-     *  10. reference_number   s
-     *  11. bank_name          s
-     *  12. account_id         i
-     *  13. narration          s
-     *  14. attachment_path    s
-     *  15. created_by         i
-     */
     public function createDraft(array $data): array
     {
         $this->validateVoucherData($data, true);
@@ -123,21 +101,21 @@ class VoucherService
         // Type string: s s s i d s s i s s s i s s i  = "sssidssisssissi" (15 chars)
         $stmt->bind_param(
             "sssidssisssissi",
-            $data['voucher_type'],     // 1  s
-            $number,                   // 2  s
-            $data['entry_date'],       // 3  s
-            $data['session_id'],       // 4  i
-            $data['amount'],           // 5  d
-            $data['party_name'],       // 6  s
-            $data['party_contact'],    // 7  s
-            $partyId,                  // 8  i
-            $data['payment_method'],   // 9  s
-            $data['reference_number'], // 10 s
-            $data['bank_name'],        // 11 s
-            $data['account_id'],       // 12 i
-            $data['narration'],        // 13 s
-            $data['attachment_path'],  // 14 s
-            $data['created_by']        // 15 i
+            $data['voucher_type'],
+            $number,
+            $data['entry_date'],
+            $data['session_id'],
+            $data['amount'],
+            $data['party_name'],
+            $data['party_contact'],
+            $partyId,
+            $data['payment_method'],
+            $data['reference_number'],
+            $data['bank_name'],
+            $data['account_id'],
+            $data['narration'],
+            $data['attachment_path'],
+            $data['created_by']
         );
 
         if (!$stmt->execute()) {
@@ -151,26 +129,6 @@ class VoucherService
         return ['id' => $id, 'voucher_number' => $number];
     }
 
-    /**
-     * Update a draft voucher. Only works while status = DRAFT.
-     *
-     * UPDATE has 13 placeholders (12 SET + 1 WHERE id).
-     * Bind order:
-     *
-     *   1. entry_date          s
-     *   2. session_id          i
-     *   3. amount              d
-     *   4. party_name          s
-     *   5. party_contact       s
-     *   6. party_id            i
-     *   7. payment_method      s
-     *   8. reference_number    s
-     *   9. bank_name           s
-     *  10. account_id          i
-     *  11. narration           s
-     *  12. attachment_path     s
-     *  13. id (WHERE)          i
-     */
     public function updateDraft(int $voucherId, array $data): void
     {
         $existing = $this->getVoucher($voucherId);
@@ -199,19 +157,19 @@ class VoucherService
         // Type string: s i d s s i s s s i s s i  = "sidsississisii" (13 chars)
         $stmt->bind_param(
             "sidsississisii",
-            $data['entry_date'],       // 1  s
-            $data['session_id'],       // 2  i
-            $data['amount'],           // 3  d
-            $data['party_name'],       // 4  s
-            $data['party_contact'],    // 5  s
-            $partyId,                  // 6  i
-            $data['payment_method'],   // 7  s
-            $data['reference_number'], // 8  s
-            $data['bank_name'],        // 9  s
-            $data['account_id'],       // 10 i
-            $data['narration'],        // 11 s
-            $data['attachment_path'],  // 12 s
-            $voucherId                 // 13 i
+            $data['entry_date'],
+            $data['session_id'],
+            $data['amount'],
+            $data['party_name'],
+            $data['party_contact'],
+            $partyId,
+            $data['payment_method'],
+            $data['reference_number'],
+            $data['bank_name'],
+            $data['account_id'],
+            $data['narration'],
+            $data['attachment_path'],
+            $voucherId
         );
 
         if (!$stmt->execute()) {
@@ -549,12 +507,16 @@ class VoucherService
             $accType = $acc['account_type'];
 
             if (in_array($type, ['CPV','BPV'], true)) {
-                if (!in_array($accType, ['EXPENSE','LIABILITY'], true)) {
-                    throw new InvalidArgumentException("For a payment voucher, account must be Expense or Liability");
+                // Payments: debit side is Expense, Liability, or Asset
+                // (Asset is allowed for fixed-asset purchases, prepayments, etc.)
+                if (!in_array($accType, ['EXPENSE','LIABILITY','ASSET'], true)) {
+                    throw new InvalidArgumentException("For a payment voucher, account must be Expense, Liability, or Asset");
                 }
             } else {
-                if (!in_array($accType, ['REVENUE','ASSET'], true)) {
-                    throw new InvalidArgumentException("For a receipt voucher, account must be Revenue or Asset");
+                // Receipts: credit side is Revenue, Asset, or Liability
+                // (Liability is allowed for loans received, advance fee collections, etc.)
+                if (!in_array($accType, ['REVENUE','ASSET','LIABILITY'], true)) {
+                    throw new InvalidArgumentException("For a receipt voucher, account must be Revenue, Asset, or Liability");
                 }
             }
         }

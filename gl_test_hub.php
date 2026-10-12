@@ -910,6 +910,15 @@ $engineReady = ($triggerCount === 4 && $procCount === 2);
             </div>
         </a>
 
+        <a href="gl_cash_flow.php" class="link-card report">
+    <div class="icon"><span class="glyphicon glyphicon-transfer"></span></div>
+    <div class="body">
+        <div class="title">Cash Flow Statement</div>
+        <div class="desc">Where cash came from and went. Split into Operating / Investing / Financing. Verifies against the ledger's cash accounts.</div>
+        <div class="url">gl_cash_flow.php</div>
+    </div>
+</a>
+
     </div>
 
     <!-- ===== Ledger ===== -->
