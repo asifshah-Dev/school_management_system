@@ -3,6 +3,9 @@
  * security.php — session bootstrap + automatic per-user module gate
  * for the VIEW action only. Page-level add/edit/delete gating is
  * handled by require_action() called explicitly on write pages.
+ *
+ * Role 6 (Parent): restricted to a whitelist of parent-facing pages.
+ * Anything else → 403.
  */
 
 if (session_status() === PHP_SESSION_NONE) {
@@ -13,6 +16,32 @@ if (session_status() === PHP_SESSION_NONE) {
 if (!isset($_SESSION['user_id']) || (int)$_SESSION['user_id'] <= 0) {
     header('Location: login.php');
     exit;
+}
+
+// ───── Role 6 (Parent) hard restriction ─────
+// Parents can only reach whitelisted pages. Everything else → 403.
+$__roleId = (int)($_SESSION['role_id'] ?? 0);
+if ($__roleId === 6) {
+    $__current = strtolower(basename($_SERVER['SCRIPT_NAME'] ?? ''));
+    $__parent_whitelist = [
+        'parent_dashboard.php',
+        'parent_fee_view.php',
+        'parent_attendance.php',
+        'parent_result.php',
+        'profile.php',
+        'logout.php',
+        'login.php',
+        '403.php',
+        'security.php',
+        'permissions.php',
+        'conn_inc.php',
+        'navbar.php',
+    ];
+    if (!in_array($__current, $__parent_whitelist, true)) {
+        header("Location: 403.php");
+        exit;
+    }
+    return; // parents skip the rest of the module gate
 }
 
 // --- load connection (idempotent) ---

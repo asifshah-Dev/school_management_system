@@ -1,1349 +1,952 @@
 <?php
 ob_start();
+header('Content-Type: text/html; charset=utf-8');
 require_once('security.php');
-/* ==== AUTHORIZATION GATE ==== */
 require_once('permissions.php');
 require_action($conn, __FILE__);
 $perms = current_user_perms($conn, __FILE__);
-/* ==== END AUTHORIZATION GATE ==== */
-if (session_status() == PHP_SESSION_NONE) {
-    session_start();
-}
-
-// Generate CSRF token if not set
-if (!isset($_SESSION['csrf_token'])) {
-    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
-}
+if (session_status() === PHP_SESSION_NONE) session_start();
+if (!isset($_SESSION['csrf_token'])) $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 
 require_once('conn_inc.php');
 
-// Enable error reporting for debugging
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL);
+$csrf = $_SESSION['csrf_token'];
 
-// Initialize variables
-$exam_id = isset($_GET['exam_id']) ? intval($_GET['exam_id']) : 0;
-$class_id = isset($_GET['class_id']) ? intval($_GET['class_id']) : 0;
-$exam_type_id = isset($_GET['exam_type_id']) ? intval($_GET['exam_type_id']) : 0;
-$sel_section_id = isset($_GET['section_id']) ? intval($_GET['section_id']) : 0;
-$section_id = isset($_POST['section_id']) ? intval($_POST['section_id']) : 0;
-$subject_id = isset($_POST['subject_id']) ? intval($_POST['subject_id']) : (isset($_GET['subject_id']) ? intval($_GET['subject_id']) : 0);
-$session_id = 0;
-$students = [];
-$show_students = false;
-$messages = [];
-$selection_text = '';
-$subject_title = '';
-$max_marks = 100; // Default for main subject
-$sub_subjects = []; // Store sub-subjects for the selected subject
-$has_any_results = false; // Track if any student has results
+/* ═══════════════════════════════════════════════════════════
+   PICKER
+   ═══════════════════════════════════════════════════════════ */
+$arrange_exam_id = (int)($_GET['exam_id'] ?? 0);
 
-// Fetch current session
-$stmt = $conn->query("SELECT id, title FROM sessions order by id desc  LIMIT 1");
-if ($stmt->num_rows > 0) {
-    $row = $stmt->fetch_assoc();
-    $session_id = $row['id'];
-    $session_title = $row['title'];
-} else {
-    $stmt = $conn->query("SELECT id, title FROM sessions ORDER BY title DESC LIMIT 1");
-    if ($stmt->num_rows > 0) {
-        $row = $stmt->fetch_assoc();
-        $session_id = $row['id'];
-        $session_title = $row['title'];
-    } else {
-        $messages[] = ['text' => 'No sessions available.', 'type' => 'warning'];
+if ($arrange_exam_id <= 0) {
+
+    $f_session = (int)($_GET['session_id'] ?? 0);
+    $f_type    = (int)($_GET['exam_type_id'] ?? 0);
+    $f_class   = (int)($_GET['class_id'] ?? 0);
+    $f_kind    = in_array($_GET['kind'] ?? '', array('test','term'), true) ? $_GET['kind'] : '';
+    $f_search  = trim($_GET['q'] ?? '');
+
+    $PAGE  = max(1, (int)($_GET['page'] ?? 1));
+    $LIMIT = 20;
+    $OFFSET = ($PAGE - 1) * $LIMIT;
+
+    /* Dropdowns */
+    $sessions = array();
+    $q = $conn->query("SELECT id, title FROM sessions WHERE status = 0 ORDER BY id DESC");
+    if ($q) while ($r = $q->fetch_assoc()) $sessions[] = $r;
+
+    $exam_types = array('test' => array(), 'term' => array());
+    $q = $conn->query("SELECT id, title, exam_kind FROM exam_types WHERE status = 0 ORDER BY exam_kind, title");
+    if ($q) while ($r = $q->fetch_assoc()) {
+        $k = $r['exam_kind'] === 'test' ? 'test' : 'term';
+        $exam_types[$k][] = $r;
     }
+
+    $classes = array();
+    $q = $conn->query("SELECT id, title FROM classes WHERE status = 0 OR status IS NULL ORDER BY title");
+    if ($q) while ($r = $q->fetch_assoc()) $classes[] = $r;
+
+    /* WHERE */
+    $where = array("1=1");
+    if ($f_session > 0) $where[] = "ae.session_id = " . (int)$f_session;
+    if ($f_type > 0)    $where[] = "ae.exam_type_id = " . (int)$f_type;
+    if ($f_class > 0)   $where[] = "ae.class_id = " . (int)$f_class;
+    if ($f_kind !== '') $where[] = "ae.exam_kind = '" . $conn->real_escape_string($f_kind) . "'";
+    if ($f_search !== '') {
+        $s = $conn->real_escape_string($f_search);
+        $where[] = "(c.title LIKE '%$s%' OR et.title LIKE '%$s%')";
+    }
+    $where_sql = implode(' AND ', $where);
+
+    $total_rows = 0;
+    $q = $conn->query("SELECT COUNT(*) AS c FROM arrange_exam ae INNER JOIN classes c ON c.id = ae.class_id INNER JOIN exam_types et ON et.id = ae.exam_type_id WHERE $where_sql");
+    if ($q) $total_rows = (int)$q->fetch_assoc()['c'];
+    $total_pages = max(1, (int)ceil($total_rows / $LIMIT));
+
+    $picker_rows = array();
+    $sql = "SELECT ae.id, ae.start_date, ae.exam_kind, ae.session_id, ae.class_id, c.title AS class_title, et.title AS exam_type_title, (SELECT COUNT(*) FROM arrange_exam_subjects WHERE arrange_exam_id = ae.id) AS subject_count, (SELECT COUNT(*) FROM results WHERE arrange_exam_id = ae.id) AS result_count FROM arrange_exam ae INNER JOIN classes c ON c.id = ae.class_id INNER JOIN exam_types et ON et.id = ae.exam_type_id WHERE $where_sql ORDER BY ae.start_date DESC, ae.id DESC LIMIT $LIMIT OFFSET $OFFSET";
+    $q = $conn->query($sql);
+    if ($q) while ($r = $q->fetch_assoc()) $picker_rows[] = $r;
+
+    $qstr = function($overrides = array()) {
+        $base = array(
+            'session_id'   => $_GET['session_id']   ?? '',
+            'exam_type_id' => $_GET['exam_type_id'] ?? '',
+            'class_id'     => $_GET['class_id']     ?? '',
+            'kind'         => $_GET['kind']         ?? '',
+            'q'            => $_GET['q']            ?? '',
+            'page'         => $_GET['page']         ?? '',
+        );
+        foreach ($overrides as $k => $v) $base[$k] = $v;
+        return http_build_query(array_filter($base, function($v){ return $v !== '' && $v !== null; }));
+    };
+    ?>
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+    <meta charset="utf-8">
+    <title>Result Entry - Pick Arrangement</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: #eef1f5; font-family: 'Inter', sans-serif; color: #1e293b; }
+        .wrap { max-width: 1400px; margin: 30px auto; padding: 0 20px; }
+        .head { background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%); color: #fff; padding: 26px 32px; border-radius: 12px 12px 0 0; }
+        .head h1 { font-size: 24px; font-weight: 700; }
+        .head .sub { font-size: 13px; opacity: 0.9; margin-top: 6px; }
+        .card { background: #fff; padding: 24px 28px 30px 28px; border-radius: 0 0 12px 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+        .filter-panel { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px 18px; margin-bottom: 20px; }
+        .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+        .field label { display: block; font-size: 11px; font-weight: 700; color: #334155; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; }
+        .field select, .field input { width: 100%; height: 40px; padding: 0 12px; border: 1px solid #cbd5e1; border-radius: 10px; font-size: 13px; font-family: inherit; background: #fff; }
+        .field select:focus, .field input:focus { outline: none; border-color: #1e40af; box-shadow: 0 0 0 4px rgba(30,64,175,0.1); }
+        .filter-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; padding-top: 14px; border-top: 1px solid #e2e8f0; }
+        .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 40px; padding: 0 16px; border-radius: 10px; font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; border: 1px solid; text-decoration: none; }
+        .btn-primary { background: #1e40af; color: #fff; border-color: #1e40af; }
+        .btn-primary:hover { background: #1e3a8a; color: #fff; text-decoration: none; }
+        .btn-ghost { background: #fff; color: #334155; border-color: #cbd5e1; }
+        .btn-ghost:hover { background: #f1f5f9; color: #1e293b; text-decoration: none; }
+        .btn-success { background: #059669; color: #fff; border-color: #059669; }
+        .btn-success:hover { background: #047857; color: #fff; text-decoration: none; }
+        .btn-sm { height: 32px; padding: 0 12px; font-size: 12px; }
+        .list-head { font-size: 12px; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 2px; margin: 0 0 12px 0; padding-bottom: 8px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
+        .list-head .count { font-size: 11px; color: #94a3b8; font-weight: 600; letter-spacing: 0; text-transform: none; }
+        table.g { width: 100%; border-collapse: collapse; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
+        table.g thead th { background: #1e3a8a; color: #fff; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; padding: 12px; text-align: left; }
+        table.g tbody td { padding: 12px; font-size: 13px; border-bottom: 1px solid #f1f5f9; }
+        table.g tbody tr:hover td { background: #f8fafc; }
+        .pill { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; }
+        .pill.term { background: #dbeafe; color: #1e40af; }
+        .pill.test { background: #fef3c7; color: #92400e; }
+        .pill.muted { background: #f1f5f9; color: #64748b; }
+        .pagination { display: flex; justify-content: center; align-items: center; gap: 6px; margin-top: 20px; padding-top: 18px; border-top: 1px solid #e2e8f0; flex-wrap: wrap; }
+        .pagination a, .pagination span { display: inline-flex; align-items: center; justify-content: center; min-width: 36px; height: 36px; padding: 0 10px; border-radius: 8px; font-size: 13px; font-weight: 700; text-decoration: none; border: 1px solid #cbd5e1; background: #fff; color: #334155; }
+        .pagination a:hover { background: #eff6ff; border-color: #1e40af; color: #1e40af; text-decoration: none; }
+        .pagination .current { background: #1e40af; color: #fff; border-color: #1e40af; }
+        .pagination .disabled { opacity: 0.4; pointer-events: none; }
+        .pagination .dots { border: none; background: transparent; color: #94a3b8; }
+        .empty { padding: 60px 20px; text-align: center; color: #94a3b8; }
+        .empty .big { font-size: 44px; opacity: 0.4; margin-bottom: 10px; }
+        .empty h3 { font-size: 17px; color: #475569; font-weight: 600; }
+    </style>
+    </head>
+    <body>
+    <?php require_once('navbar.php'); ?>
+    <div class="wrap">
+        <div class="head">
+            <h1><i class="fas fa-pen-to-square"></i> Result Entry</h1>
+            <div class="sub">Filter and pick an arrangement to enter or edit marks</div>
+        </div>
+        <div class="card">
+
+            <form method="get" class="filter-panel">
+                <div class="filter-grid">
+                    <div class="field">
+                        <label>Session</label>
+                        <select name="session_id" onchange="this.form.submit()">
+                            <option value="0">All Sessions</option>
+                            <?php foreach ($sessions as $s): ?>
+                                <option value="<?= (int)$s['id'] ?>" <?= (int)$s['id'] === $f_session ? 'selected' : '' ?>>
+                                    <?= htmlspecialchars($s['title']) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label>Kind</label>
+                        <select name="kind" onchange="this.form.submit()">
+                            <option value="">All</option>
+                            <option value="term" <?= $f_kind === 'term' ? 'selected' : '' ?>>Term Exams</option>
+                            <option value="test" <?= $f_kind === 'test' ? 'selected' : '' ?>>Tests</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label>Exam Type</label>
+                        <select name="exam_type_id" onchange="this.form.submit()">
+                            <option value="0">All Exam Types</option>
+                            <?php foreach (array('test','term') as $k): ?>
+                                <?php if (empty($exam_types[$k])) continue; ?>
+                                <optgroup label="<?= $k === 'test' ? 'Tests' : 'Term Exams' ?>">
+                                    <?php foreach ($exam_types[$k] as $et): ?>
+                                        <option value="<?= (int)$et['id'] ?>" <?= (int)$et['id'] === $f_type ? 'selected' : '' ?>>
+                                            <?= htmlspecialchars($et['title']) ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </optgroup>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label>Class</label>
+                        <select name="class_id" onchange="this.form.submit()">
+                            <option value="0">All Classes</option>
+                            <?php foreach ($classes as $c): ?>
+                                <option value="<?= (int)$c['id'] ?>" <?= (int)$c['id'] === $f_class ? 'selected' : '' ?>>
+                                    <?= htmlspecialchars($c['title']) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label>Search</label>
+                        <input type="text" name="q" value="<?= htmlspecialchars($f_search) ?>" placeholder="Class or exam name...">
+                    </div>
+                </div>
+                <div class="filter-actions">
+                    <a href="result_entry.php" class="btn btn-ghost"><i class="fas fa-times"></i> Clear</a>
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-search"></i> Apply</button>
+                </div>
+            </form>
+
+            <div class="list-head">
+                <span>Arrangements</span>
+                <span class="count">
+                    <?= number_format($total_rows) ?> total
+                    <?php if ($total_pages > 1): ?>
+                        &middot; page <?= $PAGE ?> of <?= $total_pages ?>
+                    <?php endif; ?>
+                </span>
+            </div>
+
+            <?php if (empty($picker_rows)): ?>
+                <div class="empty">
+                    <div class="big">&#128221;</div>
+                    <h3>No arrangements match your filters</h3>
+                </div>
+            <?php else: ?>
+                <table class="g">
+                    <thead>
+                        <tr>
+                            <th style="width:5%;">#</th>
+                            <th>Class</th>
+                            <th>Exam Type</th>
+                            <th>Start Date</th>
+                            <th style="text-align:center;">Subjects</th>
+                            <th style="text-align:center;">Results</th>
+                            <th style="text-align:right;">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    <?php $i = $OFFSET + 1; foreach ($picker_rows as $r): ?>
+                        <tr>
+                            <td><?= $i++ ?></td>
+                            <td><strong><?= htmlspecialchars($r['class_title']) ?></strong></td>
+                            <td><span class="pill <?= htmlspecialchars($r['exam_kind']) ?>"><?= htmlspecialchars($r['exam_type_title']) ?></span></td>
+                            <td><?= date('d M Y', strtotime($r['start_date'])) ?></td>
+                            <td style="text-align:center;">
+                                <?php if ((int)$r['subject_count'] > 0): ?>
+                                    <span class="pill term"><?= (int)$r['subject_count'] ?></span>
+                                <?php else: ?>
+                                    <span class="pill muted">none</span>
+                                <?php endif; ?>
+                            </td>
+                            <td style="text-align:center;">
+                                <?php if ((int)$r['result_count'] > 0): ?>
+                                    <span class="pill term"><?= (int)$r['result_count'] ?></span>
+                                <?php else: ?>
+                                    <span class="pill muted">0</span>
+                                <?php endif; ?>
+                            </td>
+                            <td style="text-align:right;">
+                                <a href="result_entry.php?exam_id=<?= (int)$r['id'] ?>" class="btn btn-sm btn-primary">
+                                    <i class="fas fa-arrow-right"></i> Open
+                                </a>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+
+                <?php if ($total_pages > 1): ?>
+                    <div class="pagination">
+                        <a href="?<?= $qstr(['page' => 1]) ?>" class="<?= $PAGE <= 1 ? 'disabled' : '' ?>"><i class="fas fa-angles-left"></i></a>
+                        <a href="?<?= $qstr(['page' => max(1, $PAGE - 1)]) ?>" class="<?= $PAGE <= 1 ? 'disabled' : '' ?>"><i class="fas fa-angle-left"></i></a>
+                        <?php
+                        $start = max(1, $PAGE - 2);
+                        $end   = min($total_pages, $PAGE + 2);
+                        if ($start > 1) {
+                            echo '<a href="?' . $qstr(['page' => 1]) . '">1</a>';
+                            if ($start > 2) echo '<span class="dots">...</span>';
+                        }
+                        for ($p = $start; $p <= $end; $p++) {
+                            if ($p === $PAGE) echo '<span class="current">' . $p . '</span>';
+                            else echo '<a href="?' . $qstr(['page' => $p]) . '">' . $p . '</a>';
+                        }
+                        if ($end < $total_pages) {
+                            if ($end < $total_pages - 1) echo '<span class="dots">...</span>';
+                            echo '<a href="?' . $qstr(['page' => $total_pages]) . '">' . $total_pages . '</a>';
+                        }
+                        ?>
+                        <a href="?<?= $qstr(['page' => min($total_pages, $PAGE + 1)]) ?>" class="<?= $PAGE >= $total_pages ? 'disabled' : '' ?>"><i class="fas fa-angle-right"></i></a>
+                        <a href="?<?= $qstr(['page' => $total_pages]) ?>" class="<?= $PAGE >= $total_pages ? 'disabled' : '' ?>"><i class="fas fa-angles-right"></i></a>
+                    </div>
+                <?php endif; ?>
+            <?php endif; ?>
+        </div>
+    </div>
+    </body>
+    </html>
+    <?php
+    $conn->close();
+    ob_end_flush();
+    exit;
 }
+
+/* ═══════════════════════════════════════════════════════════
+   LOAD ARRANGEMENT (unchanged)
+   ═══════════════════════════════════════════════════════════ */
+$sql = "SELECT ae.*, et.title AS exam_type_title, et.exam_kind, c.title AS class_title, s.title AS session_title FROM arrange_exam ae INNER JOIN exam_types et ON et.id = ae.exam_type_id INNER JOIN classes c ON c.id = ae.class_id LEFT JOIN sessions s ON s.id = ae.session_id WHERE ae.id = ?";
+$stmt = $conn->prepare($sql);
+$stmt->bind_param("i", $arrange_exam_id);
+$stmt->execute();
+$arr = $stmt->get_result()->fetch_assoc();
 $stmt->close();
 
-// Validate and fetch exam type and class
-$exam_type_title = '';
-$class_title = '';
-if ($exam_type_id > 0) {
-    $stmt = $conn->prepare("SELECT title FROM exam_types WHERE id = ?");
-    $stmt->bind_param("i", $exam_type_id);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    if ($row = $result->fetch_assoc()) {
-        $exam_type_title = $row['title'];
-    } else {
-        $messages[] = ['text' => 'Invalid or unavailable exam type.', 'type' => 'danger'];
-    }
-    $stmt->close();
+if (!$arr) {
+    $_SESSION['message'] = 'Arrangement not found.';
+    $_SESSION['message_type'] = 'danger';
+    header('Location: result_entry.php');
+    exit;
 }
 
-if ($class_id > 0) {
-    $stmt = $conn->prepare("SELECT c.title as class_title,s.title as section_title FROM classes c 
-    left join class_sections cs on cs.class_id = c.id
-    left join sections s on cs.section_id = s.id
-    WHERE c.id = ?");
-    $stmt->bind_param("i", $class_id);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    if ($row = $result->fetch_assoc()) {
-        $class_title = $row['class_title'] . ' ' . $row['section_title'];
-    } else {
-        $messages[] = ['text' => 'Invalid or unavailable class.', 'type' => 'danger'];
-    }
-    $stmt->close();
+$class_id = (int)$arr['class_id'];
+$session_id = (int)$arr['session_id'];
+
+/* ═══════════════════════════════════════════════════════════
+   LOAD ARRANGEMENT SUBJECTS
+   ═══════════════════════════════════════════════════════════ */
+$arrSubjects = array();
+$sqlAs = "SELECT aes.id AS arr_sub_id, aes.subject_id, aes.max_marks, s.title AS subject_title, s.type AS subject_type FROM arrange_exam_subjects aes INNER JOIN subjects s ON s.id = aes.subject_id WHERE aes.arrange_exam_id = " . (int)$arrange_exam_id . " ORDER BY aes.display_order, s.title";
+$q = $conn->query($sqlAs);
+if ($q) while ($r = $q->fetch_assoc()) {
+    $r['sub_subjects'] = array();
+    $arrSubjects[(int)$r['arr_sub_id']] = $r;
 }
 
-// Validate exam_id
-if ($exam_id > 0) {
-    $stmt = $conn->prepare("SELECT id FROM arrange_exam WHERE id = ? AND exam_type_id = ? AND class_id = ?");
-    $stmt->bind_param("iii", $exam_id, $exam_type_id, $class_id);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    if ($result->num_rows == 0) {
-        $messages[] = ['text' => 'Invalid exam configuration.', 'type' => 'danger'];
-    }
-    $stmt->close();
-}
-
-// Set selection text
-if ($session_id && $exam_type_title && $class_title) {
-    $selection_text = "$session_title - $exam_type_title - $class_title";
-} elseif (!$messages) {
-    $messages[] = ['text' => 'Please ensure valid session, exam type, and class are provided.', 'type' => 'danger'];
-}
-
-// Fetch subjects for the selected class
-$subjects = [];
-if ($class_id > 0) {
-    $stmt = $conn->prepare("
-        SELECT sc.id as subject_class_id, sc.subject_id, s.title, sc.marks
-        FROM subject_class sc
-        JOIN subjects s ON sc.subject_id = s.id
-        WHERE sc.class_id = ?
-        ORDER BY s.title
-    ");
-    $stmt->bind_param("i", $class_id);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    while ($row = $result->fetch_assoc()) {
-        $subjects[$row['subject_id']] = [
-            'subject_class_id' => $row['subject_class_id'],
-            'title' => $row['title'],
-            'marks' => $row['marks']
-        ];
-    }
-    $stmt->close();
-    if (empty($subjects)) {
-        $messages[] = ['text' => 'No subjects available for this class.', 'type' => 'warning'];
+if (!empty($arrSubjects)) {
+    $ids = implode(',', array_map('intval', array_keys($arrSubjects)));
+    $sqlSs = "SELECT aes.arrange_exam_subject_id, aes.sub_subject_id, aes.max_marks, ss.title AS sub_subject_title FROM arrange_exam_sub_subjects aes INNER JOIN sub_subjects ss ON ss.id = aes.sub_subject_id WHERE aes.arrange_exam_subject_id IN ($ids) ORDER BY aes.display_order, ss.title";
+    $q = $conn->query($sqlSs);
+    if ($q) while ($r = $q->fetch_assoc()) {
+        $arrSubjects[(int)$r['arrange_exam_subject_id']]['sub_subjects'][(int)$r['sub_subject_id']] = $r;
     }
 }
 
-// Fetch subject title and max marks if subject_id is set
-$subject_class_id = 0;
-if ($subject_id > 0) {
-    $stmt = $conn->prepare("
-        SELECT s.title, sc.marks, sc.id as subject_class_id
-        FROM subjects s
-        JOIN subject_class sc ON s.id = sc.subject_id
-        WHERE s.id = ? AND sc.class_id = ?
-    ");
-    $stmt->bind_param("ii", $subject_id, $class_id);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    if ($row = $result->fetch_assoc()) {
-        $subject_title = $row['title'];
-        $max_marks = $row['marks'];
-        $subject_class_id = $row['subject_class_id'];
-    } else {
-        $messages[] = ['text' => 'Invalid or unavailable subject.', 'type' => 'danger'];
-    }
-    $stmt->close();
+$arr_sub_id = (int)($_GET['arr_sub_id'] ?? 0);
+if ($arr_sub_id <= 0 && !empty($arrSubjects)) {
+    $keys = array_keys($arrSubjects);
+    $arr_sub_id = (int)$keys[0];
 }
+$selected = isset($arrSubjects[$arr_sub_id]) ? $arrSubjects[$arr_sub_id] : null;
 
-// Fetch sub-subjects for the selected subject
-if ($subject_class_id > 0) {
-    $stmt = $conn->prepare("
-        SELECT scs.id as subject_class_sub_id, scs.sub_subject_id, ss.title, scs.marks
-        FROM subject_class_sub scs
-        JOIN sub_subjects ss ON scs.sub_subject_id = ss.id
-        WHERE scs.subject_class_id = ?
-        ORDER BY ss.title
-    ");
-    $stmt->bind_param("i", $subject_class_id);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    while ($row = $result->fetch_assoc()) {
-        $sub_subjects[$row['sub_subject_id']] = [
-            'subject_class_sub_id' => $row['subject_class_sub_id'],
-            'title' => $row['title'],
-            'marks' => $row['marks']
-        ];
-    }
-    $stmt->close();
-}
-
-// Handle form submission for saving results
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_results'])) {
-    if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
-        $_SESSION['message'] = "Invalid CSRF token.";
+/* ═══════════════════════════════════════════════════════════
+   SAVE RESULTS
+   ═══════════════════════════════════════════════════════════ */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'save_results') {
+    if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $csrf) {
+        $_SESSION['message'] = 'Invalid request token.';
         $_SESSION['message_type'] = 'danger';
-        $_SESSION['show_alert'] = true;
-        header("Location: " . $_SERVER['PHP_SELF'] . "?exam_id=$exam_id&class_id=$class_id&exam_type_id=$exam_type_id&section_id=$section_id&subject_id=$subject_id");
-        exit();
+        header('Location: result_entry.php?exam_id=' . $arrange_exam_id . '&arr_sub_id=' . $arr_sub_id);
+        exit;
     }
 
-    $marks = isset($_POST['marks']) ? $_POST['marks'] : [];
-    $statuses = isset($_POST['student_status']) ? $_POST['student_status'] : []; // Single status per student
-    $invalid_marks = [];
-    $conn->begin_transaction();
-    try {
-        foreach ($marks as $student_id => $subjects_data) {
-            $student_id = intval($student_id);
-            $status = isset($statuses[$student_id]) ? intval($statuses[$student_id]) : 0; // Single status per student
-            
-            if ($status == 1) { // If student is absent, set all marks to 0
-                if (empty($sub_subjects)) {
-                    $subjects_data[0] = 0; // Set main subject marks to 0
-                } else {
-                    foreach ($sub_subjects as $sub_subject_id => $sub_data) {
-                        $subjects_data[$sub_subject_id] = 0; // Set all sub-subject marks to 0
-                    }
+    $post_arr_sub_id = (int)($_POST['arr_sub_id'] ?? 0);
+    if (!isset($arrSubjects[$post_arr_sub_id])) {
+        $_SESSION['message'] = 'Subject is not part of this arrangement.';
+        $_SESSION['message_type'] = 'danger';
+        header('Location: result_entry.php?exam_id=' . $arrange_exam_id);
+        exit;
+    }
+
+    $subj = $arrSubjects[$post_arr_sub_id];
+    $subject_id = (int)$subj['subject_id'];
+    $is_composite = !empty($subj['sub_subjects']);
+    $marks = isset($_POST['marks']) ? $_POST['marks'] : array();
+    $remarks = isset($_POST['remarks']) ? $_POST['remarks'] : array();
+    $student_status = isset($_POST['student_status']) ? $_POST['student_status'] : array();
+    $subject_name = $subj['subject_title'];
+
+    /* Server-side validation */
+    $invalid = array();
+    foreach ($marks as $student_id => $rows) {
+        $sid_int = (int)$student_id;
+        if ($sid_int <= 0) continue;
+
+        $status = isset($student_status[$student_id]) ? (int)$student_status[$student_id] : 0;
+        if ($status === 1) continue;
+
+        if ($is_composite) {
+            foreach ($rows as $ss_id => $raw) {
+                $ss_id_int = (int)$ss_id;
+                if (!isset($subj['sub_subjects'][$ss_id_int])) continue;
+                if ($raw === '' || $raw === null) continue;
+                $v = (float)$raw;
+                $max = (float)$subj['sub_subjects'][$ss_id_int]['max_marks'];
+                if ($v < 0 || $v > $max) {
+                    $invalid[] = 'Student ID ' . $sid_int . ', ' . $subj['sub_subjects'][$ss_id_int]['sub_subject_title'] . ': ' . $v . ' (max ' . $max . ')';
                 }
             }
+        } else {
+            if (!isset($rows[0])) continue;
+            $raw = $rows[0];
+            if ($raw === '' || $raw === null) continue;
+            $v = (float)$raw;
+            $max = (float)$subj['max_marks'];
+            if ($v < 0 || $v > $max) {
+                $invalid[] = 'Student ID ' . $sid_int . ', ' . $subject_name . ': ' . $v . ' (max ' . $max . ')';
+            }
+        }
+    }
+    if (!empty($invalid)) {
+        $_SESSION['message'] = 'Marks out of range: ' . implode('; ', array_slice($invalid, 0, 5)) . (count($invalid) > 5 ? ' and ' . (count($invalid) - 5) . ' more.' : '');
+        $_SESSION['message_type'] = 'danger';
+        header('Location: result_entry.php?exam_id=' . $arrange_exam_id . '&arr_sub_id=' . $arr_sub_id);
+        exit;
+    }
 
-            if (empty($sub_subjects)) {
-                // Validate and save main subject marks and status
-                if (isset($subjects_data[0])) {
-                    $obtained_marks = $status == 1 ? 0 : floatval($subjects_data[0]); // Force 0 if absent
-                    if ($status == 0 && ($obtained_marks < 0 || $obtained_marks > $max_marks)) {
-                        $invalid_marks[] = "Marks for student ID $student_id ($obtained_marks) exceed max ($max_marks) or are negative.";
-                        continue;
-                    }
-                    
-                    $stmt = $conn->prepare("SELECT id FROM results WHERE student_id = ? AND arrange_exam_id = ? AND subject_class_id = ? AND subject_class_sub_id = 0");
-                    $stmt->bind_param("iii", $student_id, $exam_id, $subject_class_id);
-                    $stmt->execute();
-                    $result = $stmt->get_result();
+    $subject_class_id = 0;
+    $q = $conn->query("SELECT id FROM subject_class WHERE class_id = " . (int)$class_id . " AND subject_id = " . (int)$subject_id . " LIMIT 1");
+    if ($q && $r = $q->fetch_assoc()) $subject_class_id = (int)$r['id'];
 
-                    if ($result->num_rows > 0) {
-                        $stmt = $conn->prepare("UPDATE results SET marks = ?, status = ? WHERE student_id = ? AND arrange_exam_id = ? AND subject_class_id = ? AND subject_class_sub_id = 0");
-                        $stmt->bind_param("diiii", $obtained_marks, $status, $student_id, $exam_id, $subject_class_id);
-                    } else {
-                        $stmt = $conn->prepare("INSERT INTO results (student_id, arrange_exam_id, subject_class_id, subject_class_sub_id, marks, status) VALUES (?, ?, ?, 0, ?, ?)");
-                        $stmt->bind_param("iiidi", $student_id, $exam_id, $subject_class_id, $obtained_marks, $status);
-                    }
-                    $stmt->execute();
+    $conn->begin_transaction();
+    try {
+        $ins = $conn->prepare("INSERT INTO results (student_id, arrange_exam_id, subject_class_id, subject_name, subject_class_sub_id, sub_subject_name, marks, max_marks, status, remarks, arrange_exam_subject_id, arrange_exam_sub_subject_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $upd = $conn->prepare("UPDATE results SET marks = ?, max_marks = ?, status = ?, remarks = ?, arrange_exam_subject_id = ?, arrange_exam_sub_subject_id = ? WHERE student_id = ? AND arrange_exam_id = ? AND arrange_exam_subject_id = ? AND (arrange_exam_sub_subject_id IS NULL AND ? = 0 OR arrange_exam_sub_subject_id = ?)");
+
+        $saved = 0;
+        $zero_i = 0;
+
+        foreach ($marks as $student_id => $rows) {
+            $sid_int = (int)$student_id;
+            if ($sid_int <= 0) continue;
+
+            $student_remark = isset($remarks[$student_id]) ? trim($remarks[$student_id]) : '';
+            $status = isset($student_status[$student_id]) ? (int)$student_status[$student_id] : 0;
+            if ($status !== 0 && $status !== 1) $status = 0;
+
+            if ($is_composite) {
+                foreach ($rows as $ss_id => $raw_val) {
+                    $ss_id_int = (int)$ss_id;
+                    if (!isset($subj['sub_subjects'][$ss_id_int])) continue;
+
+                    $ss_max = (float)$subj['sub_subjects'][$ss_id_int]['max_marks'];
+                    $ss_title = $subj['sub_subjects'][$ss_id_int]['sub_subject_title'];
+                    $val_num = ($status === 1 || $raw_val === '' || $raw_val === null) ? 0.0 : (float)$raw_val;
+
+                    $arr_ss_id = 0;
+                    $q = $conn->query("SELECT id FROM arrange_exam_sub_subjects WHERE arrange_exam_subject_id = " . (int)$post_arr_sub_id . " AND sub_subject_id = " . (int)$ss_id_int . " LIMIT 1");
+                    if ($q && $r = $q->fetch_assoc()) $arr_ss_id = (int)$r['id'];
+
+                    $sub_class_sub_id = 0;
+                    $q = $conn->query("SELECT id FROM subject_class_sub WHERE subject_class_id = " . (int)$subject_class_id . " AND sub_subject_id = " . (int)$ss_id_int . " LIMIT 1");
+                    if ($q && $r = $q->fetch_assoc()) $sub_class_sub_id = (int)$r['id'];
+
+                    $upd->bind_param("ddisiiiiiii",
+                        $val_num,
+                        $ss_max,
+                        $status,
+                        $student_remark,
+                        $post_arr_sub_id,
+                        $arr_ss_id,
+                        $sid_int,
+                        $arrange_exam_id,
+                        $post_arr_sub_id,
+                        $ss_id_int,
+                        $ss_id_int
+                    );
+                    $upd->execute();
+
+                    if ($upd->affected_rows > 0) { $saved++; continue; }
+                    if ($val_num == 0.0 && $student_remark === '' && $status === 0) continue;
+
+                    $ins->bind_param("iiisisddisii",
+                        $sid_int,
+                        $arrange_exam_id,
+                        $subject_class_id,
+                        $subject_name,
+                        $sub_class_sub_id,
+                        $ss_title,
+                        $val_num,
+                        $ss_max,
+                        $status,
+                        $student_remark,
+                        $post_arr_sub_id,
+                        $arr_ss_id
+                    );
+                    $ins->execute();
+                    $saved++;
                 }
             } else {
-                // Validate and save sub-subject marks with single student status
-                foreach ($sub_subjects as $sub_subject_id => $sub_data) {
-                    if (isset($subjects_data[$sub_subject_id])) {
-                        $obtained_marks = $status == 1 ? 0 : floatval($subjects_data[$sub_subject_id]); // Force 0 if absent
-                        if ($status == 0 && ($obtained_marks < 0 || $obtained_marks > $sub_data['marks'])) {
-                            $invalid_marks[] = "Marks for student ID $student_id, sub-subject {$sub_data['title']} ($obtained_marks) exceed max ({$sub_data['marks']}) or are negative.";
-                            continue;
-                        }
-                        
-                        $subject_class_sub_id = $sub_data['subject_class_sub_id'];
-                        $stmt = $conn->prepare("SELECT id FROM results WHERE student_id = ? AND arrange_exam_id = ? AND subject_class_id = ? AND subject_class_sub_id = ?");
-                        $stmt->bind_param("iiii", $student_id, $exam_id, $subject_class_id, $subject_class_sub_id);
-                        $stmt->execute();
-                        $result = $stmt->get_result();
+                $raw_val = isset($rows[0]) ? $rows[0] : '';
+                $max = (float)$subj['max_marks'];
+                $val_num = ($status === 1 || $raw_val === '' || $raw_val === null) ? 0.0 : (float)$raw_val;
 
-                        if ($result->num_rows > 0) {
-                            $stmt = $conn->prepare("UPDATE results SET marks = ?, status = ? WHERE student_id = ? AND arrange_exam_id = ? AND subject_class_id = ? AND subject_class_sub_id = ?");
-                            $stmt->bind_param("diiiii", $obtained_marks, $status, $student_id, $exam_id, $subject_class_id, $subject_class_sub_id);
-                        } else {
-                            $stmt = $conn->prepare("INSERT INTO results (student_id, arrange_exam_id, subject_class_id, subject_class_sub_id, marks, status) VALUES (?, ?, ?, ?, ?, ?)");
-                            $stmt->bind_param("iiiidi", $student_id, $exam_id, $subject_class_id, $subject_class_sub_id, $obtained_marks, $status);
-                        }
-                        $stmt->execute();
-                    }
-                }
+                $upd->bind_param("ddisiiiiiii",
+                    $val_num,
+                    $max,
+                    $status,
+                    $student_remark,
+                    $post_arr_sub_id,
+                    $zero_i,
+                    $sid_int,
+                    $arrange_exam_id,
+                    $post_arr_sub_id,
+                    $zero_i,
+                    $zero_i
+                );
+                $upd->execute();
+
+                if ($upd->affected_rows > 0) { $saved++; continue; }
+                if ($val_num == 0.0 && $student_remark === '' && $status === 0) continue;
+
+                $empty_ss_title = '';
+                $ins->bind_param("iiisisddisii",
+                    $sid_int,
+                    $arrange_exam_id,
+                    $subject_class_id,
+                    $subject_name,
+                    $zero_i,
+                    $empty_ss_title,
+                    $val_num,
+                    $max,
+                    $status,
+                    $student_remark,
+                    $post_arr_sub_id,
+                    $zero_i
+                );
+                $ins->execute();
+                $saved++;
             }
         }
-        
-        if (!empty($invalid_marks)) {
-            $conn->rollback();
-            $_SESSION['message'] = "Invalid marks detected: " . implode("; ", $invalid_marks);
-            $_SESSION['message_type'] = 'danger';
-            $_SESSION['show_alert'] = true;
-            header("Location: " . $_SERVER['PHP_SELF'] . "?exam_id=$exam_id&class_id=$class_id&exam_type_id=$exam_type_id&subject_id=$subject_id");
-            exit();
-        }
+
+        $ins->close();
+        $upd->close();
         $conn->commit();
-        $_SESSION['message'] = "Results saved successfully!";
+        $_SESSION['message'] = $saved . ' result row(s) saved.';
         $_SESSION['message_type'] = 'success';
-        $_SESSION['show_alert'] = true;
-    } catch (Exception $e) {
+    } catch (Throwable $e) {
         $conn->rollback();
-        $_SESSION['message'] = "Error: " . $e->getMessage();
+        $_SESSION['message'] = 'Save failed: ' . $e->getMessage();
         $_SESSION['message_type'] = 'danger';
-        $_SESSION['show_alert'] = true;
-        error_log("SQL Error: " . $e->getMessage(), 3, 'errors.log');
     }
-    header("Location: " . $_SERVER['PHP_SELF'] . "?exam_id=$exam_id&class_id=$class_id&exam_type_id=$exam_type_id&section_id=$section_id&subject_id=$subject_id");
-    exit();
+    header('Location: result_entry.php?exam_id=' . $arrange_exam_id . '&arr_sub_id=' . $arr_sub_id);
+    exit;
 }
 
-// Handle delete marks request
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_marks'])) {
-    if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
-        $_SESSION['message'] = "Invalid CSRF token.";
-        $_SESSION['message_type'] = 'danger';
-        $_SESSION['show_alert'] = true;
-        header("Location: " . $_SERVER['PHP_SELF'] . "?exam_id=$exam_id&class_id=$class_id&exam_type_id=$exam_type_id&section_id=$section_id&subject_id=$subject_id");
-        exit();
-    }
+/* ═══════════════════════════════════════════════════════════
+   LOAD STUDENTS + EXISTING RESULTS
+   ═══════════════════════════════════════════════════════════ */
+$students = array();
+$sqlStu = "SELECT sr.id, sr.name, sr.father_name, sr.reg_no FROM student_class sc INNER JOIN student_registration sr ON sr.id = sc.student_registration_id WHERE sc.class_id = " . (int)$class_id . " AND sc.session_id = " . (int)$session_id . " AND sc.status = 0 AND sr.status = 0 ORDER BY sr.name";
+$q = $conn->query($sqlStu);
+if ($q) while ($r = $q->fetch_assoc()) $students[] = $r;
 
-    $student_id = intval($_POST['student_id']);
-
-    $conn->begin_transaction();
-    try {
-        $stmt = $conn->prepare("DELETE FROM results WHERE student_id = ? AND arrange_exam_id = ? AND subject_class_id = ?");
-        $stmt->bind_param("iii", $student_id, $exam_id, $subject_class_id);
-        $stmt->execute();
-        if ($stmt->affected_rows > 0) {
-            $conn->commit();
-            $_SESSION['message'] = "All marks deleted successfully for student ID $student_id";
-            $_SESSION['message_type'] = 'success';
-            $_SESSION['show_alert'] = true;
-        } else {
-            $conn->rollback();
-            $_SESSION['message'] = "No marks found to delete for student ID $student_id";
-            $_SESSION['message_type'] = 'warning';
-            $_SESSION['show_alert'] = true;
+$existing = array();
+$student_exam_status = array();
+if ($selected) {
+    $sel_arr_sub_id = (int)$selected['arr_sub_id'];
+    $sqlEx = "SELECT student_id, subject_class_sub_id, arrange_exam_sub_subject_id, marks, remarks, status FROM results WHERE arrange_exam_id = " . (int)$arrange_exam_id . " AND arrange_exam_subject_id = " . (int)$sel_arr_sub_id;
+    $q = $conn->query($sqlEx);
+    if ($q) {
+        while ($r = $q->fetch_assoc()) {
+            $st = (int)$r['student_id'];
+            $ss = $r['arrange_exam_sub_subject_id'] !== null ? (int)$r['arrange_exam_sub_subject_id'] : 0;
+            $existing[$st][$ss] = array(
+                'marks' => $r['marks'],
+                'remarks' => $r['remarks'],
+            );
+            if ((int)$r['status'] === 1) $student_exam_status[$st] = 1;
         }
-        $stmt->close();
-    } catch (Exception $e) {
-        $conn->rollback();
-        $_SESSION['message'] = "Error deleting marks for student ID $student_id: " . $e->getMessage();
-        $_SESSION['message_type'] = 'danger';
-        $_SESSION['show_alert'] = true;
-        error_log("SQL Error: student_id=$student_id, error=" . $e->getMessage(), 3, 'errors.log');
-    }
-    header("Location: " . $_SERVER['PHP_SELF'] . "?exam_id=$exam_id&class_id=$class_id&exam_type_id=$exam_type_id&section_id=$section_id&subject_id=$subject_id");
-    exit();
-}
-
-// Function to fetch students
-function fetchStudents($conn, $class_id, $session_id, $exam_id, $subject_class_id, $sub_subjects) {
-    global $has_any_results;
-    $students = [];
-    $stmt = $conn->prepare("
-        SELECT sr.id, sr.name, c.title as class_title, s.title as section_title
-        FROM student_registration sr
-        JOIN student_class sc ON sr.id = sc.student_registration_id
-        LEFT JOIN classes c ON sc.class_id = c.id
-        LEFT JOIN class_sections cs on cs.class_id = c.id
-        LEFT JOIN sections s on cs.section_id = s.id
-        WHERE c.id = ? AND sc.session_id = ? AND sr.status = 0 AND sc.status = 0
-        ORDER BY sr.name
-    ");
-    $stmt->bind_param("ii", $class_id, $session_id);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    while ($row = $result->fetch_assoc()) {
-        // Get student status from any result record for this student/exam/subject
-        $row['status'] = 0; // Default to Present
-        $row['marks'] = null;
-        $row['sub_marks'] = [];
-        
-        // Fetch main subject status and marks (if no sub-subjects)
-        if (empty($sub_subjects)) {
-            $stmt2 = $conn->prepare("SELECT marks, status FROM results WHERE student_id = ? AND arrange_exam_id = ? AND subject_class_id = ? AND subject_class_sub_id = 0 ORDER BY marks DESC");
-            $stmt2->bind_param("iii", $row['id'], $exam_id, $subject_class_id);
-            $stmt2->execute();
-            $res2 = $stmt2->get_result();
-            if ($res2->num_rows > 0) {
-                $res_row = $res2->fetch_assoc();
-                $row['marks'] = $res_row['marks'];
-                $row['status'] = $res_row['status']; // Single status for student
-                $has_any_results = true;
-            }
-            $stmt2->close();
-        } else {
-            // For sub-subjects, get status from any sub-subject record
-            $stmt2 = $conn->prepare("SELECT status FROM results WHERE student_id = ? AND arrange_exam_id = ? AND subject_class_id = ? LIMIT 1");
-            $stmt2->bind_param("iii", $row['id'], $exam_id, $subject_class_id);
-            $stmt2->execute();
-            $res2 = $stmt2->get_result();
-            if ($res2->num_rows > 0) {
-                $res_row = $res2->fetch_assoc();
-                $row['status'] = $res_row['status']; // Single status for student
-                $has_any_results = true;
-            }
-            $stmt2->close();
-            
-            // Fetch sub-subject marks
-            foreach ($sub_subjects as $sub_subject_id => $sub_data) {
-                $subject_class_sub_id = $sub_data['subject_class_sub_id'];
-                $stmt2 = $conn->prepare("SELECT marks FROM results WHERE student_id = ? AND arrange_exam_id = ? AND subject_class_id = ? AND subject_class_sub_id = ? ORDER BY marks DESC");
-                $stmt2->bind_param("iiii", $row['id'], $exam_id, $subject_class_id, $subject_class_sub_id);
-                $stmt2->execute();
-                $res2 = $stmt2->get_result();
-                if ($res2->num_rows > 0) {
-                    $res_row = $res2->fetch_assoc();
-                    $row['sub_marks'][$sub_subject_id] = $res_row['marks'];
-                    $has_any_results = true;
-                } else {
-                    $row['sub_marks'][$sub_subject_id] = null;
-                }
-                $stmt2->close();
-            }
-        }
-        
-        $row['has_results'] = !is_null($row['marks']) || !empty(array_filter($row['sub_marks']));
-        $students[] = $row;
-    }
-    $stmt->close();
-    return $students;
-}
-
-// Handle View button
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['view_students'])) {
-    $subject_id = intval($_POST['subject_id']);
-    $session_id = intval($_POST['session_id']);
-    $exam_id = intval($_POST['exam_id']);
-    $class_id = intval($_POST['class_id']); 
-    $exam_type_id = intval($_POST['exam_type_id']);
-
-    header("Location: result_entry.php?exam_id={$exam_id}&class_id={$class_id}&exam_type_id={$exam_type_id}&subject_id={$subject_id}");
-}
-
-// Auto-load students if $sel_section_id and $subject_id are present in GET
-if ($class_id > 0 && $session_id > 0 && $subject_id > 0) {
-    // Validate section belongs to class
-    $stmt = $conn->prepare("SELECT id FROM classes WHERE id = ?");
-    $stmt->bind_param("i", $class_id);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    if ($result->num_rows == 0) {
-        $messages[] = ['text' => 'Invalid section for the selected class.', 'type' => 'danger'];
-    } else {
-        $students = fetchStudents($conn, $class_id, $session_id, $exam_id, $subject_class_id, $sub_subjects);
-        $show_students = !empty($students);
-        if (!$show_students) {
-            $messages[] = ['text' => 'No students found for the selected section and subject.', 'type' => 'warning'];
-        }
-        $section_id = $sel_section_id;
-    }
-    $stmt->close();
-}
-$sections = [];
-if ($class_id > 0) {
-    $stmt = $conn->prepare("
-        SELECT s.id AS section_id, s.title AS section_title, c.id AS class_id, c.title AS class_title
-        FROM classes c
-        LEFT JOIN class_sections cs ON cs.class_id = c.id
-        LEFT JOIN sections s ON s.id = cs.section_id
-        WHERE c.id = ?
-        ORDER BY c.title
-    ");
-    $stmt->bind_param("i", $class_id);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    while ($row = $result->fetch_assoc()) {
-        $sections[$row['class_id']][] = $row['class_title'] . ' ' . $row['section_title'];
-    }
-    $stmt->close();
-
-    if (empty($sections)) {
-        $messages[] = ['text' => 'No sections available for this class.', 'type' => 'warning'];
     }
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <title>Result Entry</title>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
-    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/js/bootstrap.min.js"></script>
-    <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
-    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
-    <style>
-    .table th,
-    .table td {
-        text-align: left;
-        vertical-align: middle;
+<meta charset="utf-8">
+<title>Result Entry</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #eef1f5; font-family: 'Inter', sans-serif; color: #1e293b; }
+    .wrap { max-width: 1400px; margin: 30px auto; padding: 0 20px; }
+    .head { background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%); color: #fff; padding: 24px 30px; border-radius: 12px 12px 0 0; display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; flex-wrap: wrap; }
+    .head h1 { font-size: 22px; font-weight: 700; }
+    .head .sub { font-size: 13px; opacity: 0.9; margin-top: 6px; }
+    .head .hb { display: inline-flex; align-items: center; gap: 6px; padding: 9px 14px; border-radius: 8px; font-size: 12px; font-weight: 700; text-decoration: none; cursor: pointer; border: 1px solid rgba(255,255,255,0.3); background: rgba(255,255,255,0.15); color: #fff; font-family: inherit; margin-left: 6px; }
+    .head .hb:hover { background: #fff; color: #1e40af; border-color: #fff; text-decoration: none; }
+    .card { background: #fff; padding: 20px 26px 26px 26px; border-radius: 0 0 12px 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .alert { padding: 12px 16px; border-radius: 8px; margin-bottom: 18px; font-size: 14px; border-left: 4px solid; }
+    .alert.success { background: #d1fae5; border-color: #059669; color: #065f46; }
+    .alert.danger  { background: #fee2e2; border-color: #dc2626; color: #991b1b; }
+    .alert.warning { background: #fef3c7; border-color: #d97706; color: #92400e; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 42px; padding: 0 20px; border-radius: 10px; font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; border: 1px solid; text-decoration: none; }
+    .btn-primary { background: #1e40af; color: #fff; border-color: #1e40af; }
+    .btn-primary:hover { background: #1e3a8a; color: #fff; text-decoration: none; }
+    .btn-success { background: #059669; color: #fff; border-color: #059669; }
+    .btn-success:hover { background: #047857; color: #fff; text-decoration: none; }
+    .btn-ghost { background: #fff; color: #334155; border-color: #cbd5e1; }
+    .btn-ghost:hover { background: #f1f5f9; color: #1e293b; text-decoration: none; }
+    .subject-picker { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; padding-bottom: 16px; border-bottom: 1px solid #e2e8f0; }
+    .subj-tab { padding: 10px 16px; border-radius: 10px; font-size: 13px; font-weight: 700; border: 1px solid #cbd5e1; background: #fff; color: #334155; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+    .subj-tab:hover { text-decoration: none; color: #1e40af; border-color: #1e40af; }
+    .subj-tab.active { background: #1e40af; color: #fff; border-color: #1e40af; }
+    .subj-tab.active:hover { color: #fff; }
+    .info-bar { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 16px; margin-bottom: 16px; display: flex; gap: 24px; flex-wrap: wrap; font-size: 13px; }
+    .info-bar strong { color: #1e40af; }
+    .tbl-wrap { overflow-x: auto; border-radius: 10px; border: 1px solid #e2e8f0; }
+    table.res { width: 100%; border-collapse: collapse; }
+    table.res thead th { background: #1e3a8a; color: #fff; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; padding: 10px 8px; text-align: center; border-right: 1px solid rgba(255,255,255,0.15); }
+    table.res thead th.name-head { text-align: left; min-width: 220px; }
+    table.res thead th.status-head { background: #7c3aed; }
+    table.res thead th.total-head { background: #059669; }
+    table.res tbody td { padding: 8px; font-size: 13px; border-right: 1px solid #f1f5f9; border-bottom: 1px solid #f1f5f9; vertical-align: middle; text-align: center; background: #fff; }
+    table.res tbody td.student-cell { text-align: left; font-weight: 600; background: #f8fafc; }
+    table.res tbody td.student-cell small { display: block; font-size: 11px; color: #64748b; font-weight: 400; margin-top: 2px; }
+    table.res tbody td.total-cell { font-weight: 700; color: #065f46; background: #f0fdf4; font-size: 14px; }
+    table.res tbody tr.absent-row td { background: #fef2f2; }
+    table.res tbody tr:hover td { background: #f8fafc; }
+    table.res tbody tr:hover td.student-cell { background: #f1f5f9; }
+    .mark-input { width: 76px; height: 36px; padding: 0 8px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px; font-family: inherit; font-weight: 600; text-align: center; background: #fff; }
+    .mark-input:focus { outline: none; border-color: #1e40af; box-shadow: 0 0 0 3px rgba(30,64,175,0.15); }
+    .mark-input.over { border-color: #dc2626; background: #fef2f2; animation: shake 0.4s; }
+    @keyframes shake {
+        0%,100% { transform: translateX(0); }
+        25% { transform: translateX(-3px); }
+        75% { transform: translateX(3px); }
     }
-
-    .alert {
-        margin-bottom: 20px;
+    .mark-input:disabled { background: #f1f5f9; color: #94a3b8; }
+    .status-select { height: 36px; padding: 0 8px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 12px; font-family: inherit; font-weight: 600; background: #fff; cursor: pointer; }
+    .status-select.present { background: #d1fae5; color: #065f46; border-color: #6ee7b7; }
+    .status-select.absent { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
+    .remark-input { width: 180px; height: 36px; padding: 0 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 12px; font-family: inherit; text-align: left; background: #fff; }
+    .remark-input:focus { outline: none; border-color: #1e40af; box-shadow: 0 0 0 3px rgba(30,64,175,0.15); }
+    .actions { display: flex; justify-content: flex-end; gap: 10px; padding-top: 18px; border-top: 1px solid #e2e8f0; margin-top: 18px; }
+    .empty { padding: 60px 20px; text-align: center; color: #94a3b8; }
+    .empty .big { font-size: 44px; opacity: 0.4; margin-bottom: 10px; }
+    .empty h3 { font-size: 17px; color: #475569; font-weight: 600; }
+    .pill { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; }
+    .pill.term { background: #dbeafe; color: #1e40af; }
+    .pill.test { background: #fef3c7; color: #92400e; }
+    .bulk-row { display: flex; gap: 8px; align-items: center; padding: 0 0 14px 0; flex-wrap: wrap; }
+    .bulk-row label { font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 1px; }
+    @media print {
+        @page { margin: 10mm; size: A4 landscape; }
+        body * { visibility: hidden !important; }
+        body { background: #fff; }
+        .print-area, .print-area * { visibility: visible !important; }
+        .print-area { position: absolute; left: 0; top: 0; width: 100%; }
+        .head, .actions, .subject-picker, .no-print, .bulk-row { display: none !important; }
+        .card { box-shadow: none; padding: 0; }
+        .mark-input, .remark-input, .status-select { border: none; background: transparent; }
     }
-
-    .select2-container {
-        width: 100% !important;
-    }
-
-    .select2-container--disabled .select2-selection {
-        background-color: #f5f5f5;
-    }
-
-    .marks-input {
-        width: 80px;
-    }
-
-    .action-btn {
-        margin: 0 5px;
-    }
-
-    .popup-alert {
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        z-index: 1050;
-        min-width: 300px;
-    }
-
-    /* Mobile-specific styles for screens smaller than 768px */
-    @media (max-width: 768px) {
-        body {
-            padding: 15px;
-            font-size: 1.1rem;
-            line-height: 1.6;
-            background-color: #f8f9fa;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            color: #2c3e50;
-        }
-
-        .container {
-            max-width: 100%;
-            padding: 20px;
-            margin: 0 auto;
-            background: #ffffff;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-            border-radius: 10px;
-        }
-
-        h1,
-        .panel-title {
-            font-size: 1.8rem;
-            text-align: center;
-            margin-bottom: 20px;
-            color: #2c3e50;
-        }
-
-        h2 {
-            font-size: 1.4rem;
-            margin-bottom: 15px;
-        }
-
-        /* Card view for table */
-        .table-responsive {
-            overflow-x: hidden;
-            -webkit-overflow-scrolling: touch;
-            margin-bottom: 20px;
-        }
-
-        .table {
-            width: 100%;
-            background: transparent;
-        }
-
-        thead {
-            display: none;
-        }
-
-        tbody {
-            display: block;
-        }
-
-        tr {
-            display: block;
-            margin-bottom: 20px;
-            background: #ffffff;
-            border: 1px solid #dfe4ea;
-            border-radius: 10px;
-            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
-            padding: 15px;
-        }
-
-        td {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 10px 15px;
-            border-bottom: 1px solid #eceff1;
-            font-size: 0.95rem;
-            color: #2c3e50;
-        }
-
-        td:last-child {
-            border-bottom: none;
-        }
-
-        td::before {
-            content: attr(data-label);
-            font-weight: 600;
-            font-size: 1rem;
-            color: #1a252f;
-            flex: 0 0 45%;
-            text-align: left;
-        }
-
-        td>*:not(:first-child) {
-            margin-left: 11px;
-        }
-
-        /* Marks display, inputs, and buttons */
-        .marks-display {
-            font-size: 0.95rem;
-            color: #2c3e50;
-        }
-
-        .marks-input {
-            width: 100%;
-            padding: 10px;
-            font-size: 1rem;
-            border: 1px solid #ced4da;
-            border-radius: 6px;
-            background-color: #f9fbfc;
-        }
-
-        .action-btn {
-            display: inline-block;
-            width: 100%;
-            padding: 10px;
-            font-size: 1rem;
-            border-radius: 6px;
-            margin: 5px 0;
-            text-align: center;
-            transition: background-color 0.2s ease-in-out;
-        }
-
-        .btn-warning {
-            background-color: #f39c12;
-            color: #ffffff;
-        }
-
-        .btn-warning:hover {
-            background-color: #e67e22;
-        }
-
-        .btn-danger {
-            background-color: #e74c3c;
-            color: #ffffff;
-        }
-
-        .btn-danger:hover {
-            background-color: #c0392b;
-        }
-
-        /* Alert styling */
-        .alert {
-            padding: 15px;
-            margin-bottom: 20px;
-            font-size: 1rem;
-            border-radius: 8px;
-            line-height: 1.5;
-            background-color: #ffffff;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        }
-
-        .alert-success {
-            background-color: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-
-        .alert-danger {
-            background-color: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-
-        .alert-warning {
-            background-color: #fff3cd;
-            color: #856404;
-            border: 1px solid #ffeeba;
-        }
-
-        .select2-container .select2-selection {
-            font-size: 1rem;
-            padding: 8px;
-            border-radius: 6px;
-            border: 1px solid #ced4da;
-            background-color: #f9fbfc;
-        }
-
-        .popup-alert {
-            min-width: 85%;
-            right: 15px;
-            top: 15px;
-            padding: 15px;
-            font-size: 1rem;
-            border-radius: 8px;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-        }
-    }
-
-    .status-label {
-        display: inline-block;
-        padding: 6px 12px;
-        border-radius: 4px;
-        font-size: 12px;
-        font-weight: bold;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    }
-
-    .status-present {
-        background-color: #007bff94;
-        color: white;
-        box-shadow: 0 2px 4px rgba(40, 167, 69, 0.3);
-    }
-
-    .status-absent {
-        background-color: #dc3545;
-        color: white;
-        box-shadow: 0 2px 4px rgba(220, 53, 69, 0.3);
-    }
-
-    .status-label:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-        transition: all 0.3s ease;
-    }
-
-    /* Extra small screens (mobiles < 576px) */
-    @media (max-width: 576px) {
-        body {
-            padding: 10px;
-            font-size: 1rem;
-        }
-
-        .container {
-            padding: 15px;
-        }
-
-        h1,
-        .panel-title {
-            font-size: 1.6rem;
-        }
-
-        h2 {
-            font-size: 1.3rem;
-        }
-
-        tr {
-            margin-bottom: 15px;
-            padding: 12px;
-        }
-
-        td {
-            font-size: 0.9rem;
-            padding: 8px 12px;
-        }
-
-        td::before {
-            font-size: 0.95rem;
-            flex: 0 0 50%;
-        }
-
-        .marks-input {
-            font-size: 0.95rem;
-            padding: 8px;
-        }
-
-        .action-btn {
-            font-size: 0.95rem;
-            padding: 8px;
-        }
-
-        .alert {
-            font-size: 0.95rem;
-            padding: 12px;
-        }
-
-        .select2-container .select2-selection {
-            font-size: 0.95rem;
-            padding: 7px;
-            height: 40px;
-        }
-
-        .popup-alert {
-            min-width: 90%;
-            right: 10px;
-            top: 10px;
-        }
-
-    }
-    </style>
+</style>
 </head>
-
 <body>
-    <?php require_once('navbar.php'); ?>
-    <div class="container">
-        <div class="row">
-            <div class="col-md-12 ">
-                <!-- Messages for Empty Data -->
-                <?php if (!empty($messages)): ?>
-                <?php foreach ($messages as $msg): ?>
-                <div class="alert alert-<?php echo $msg['type']; ?>">
-                    <?php echo $msg['text']; ?>
-                </div>
-                <?php endforeach; ?>
-                <?php endif; ?>
 
-                <!-- Session Message -->
-                <?php if (isset($_SESSION['message'])): ?>
-                <div class="alert alert-<?php echo $_SESSION['message_type']; ?>">
-                    <?php echo $_SESSION['message']; ?>
-                    <?php if (isset($_SESSION['show_alert']) && $_SESSION['show_alert']): ?>
-                    <script>
-                    $(document).ready(function() {
-                        showPopupAlert('<?php echo addslashes($_SESSION['message']); ?>',
-                            '<?php echo $_SESSION['message_type']; ?>');
-                    });
-                    </script>
-                    <?php endif; ?>
-                    <?php unset($_SESSION['message'], $_SESSION['message_type'], $_SESSION['show_alert']); ?>
-                </div>
-                <?php endif; ?>
+<?php require_once('navbar.php'); ?>
 
-                <!-- Selection Panel -->
-                <div class="panel panel-primary">
-                    <div class="panel-heading">
-                        <h3 class="panel-title">Result Entry</h3>
-                    </div>
-                    <div class="panel-body">
-                        <form method="post" action="">
-                            <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
-                            <input type="hidden" name="session_id" value="<?php echo $session_id; ?>">
-                            <input type="hidden" name="exam_type_id" value="<?php echo $exam_type_id; ?>">
-                            <input type="hidden" name="class_id" value="<?php echo $class_id; ?>">
-                            <input type="hidden" name="exam_id" value="<?php echo $exam_id; ?>">
-
-                            <div class="form-group">
-                                <label>Session, Exam Type, and Class:</label>
-                                <select class="form-control select2" disabled>
-                                    <option><?php echo htmlspecialchars($selection_text); ?></option>
-                                </select>
-                            </div>
-
-                            <div class="form-group">
-                                <label>Section:</label>
-                                <select name="class_id" id="section_id" class="form-control select2" required
-                                    <?php echo empty($sections) ? 'disabled' : ''; ?>>
-                                    <option value="">-- Select Section --</option>
-                                    <?php foreach ($sections as $classId => $sectionTitles): ?>
-                                    <?php foreach ($sectionTitles as $title): ?>
-                                    <option value="<?php echo $classId; ?>"
-                                        <?php echo $classId == $classId ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars($title); ?>
-                                    </option>
-                                    <?php endforeach; ?>
-                                    <?php endforeach; ?>
-                                </select>
-                            </div>
-
-                            <div class="form-group">
-                                <label>Subject:</label>
-                                <select name="subject_id" id="subject_id" class="form-control select2" required
-                                    <?php echo empty($subjects) ? 'disabled' : ''; ?>>
-                                    <option value="">-- Select Subject --</option>
-                                    <?php foreach ($subjects as $id => $data): ?>
-                                    <option value="<?php echo $id; ?>"
-                                        <?php echo $subject_id == $id ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars($data['title']); ?>
-                                    </option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </div>
-
-                            <div class="text-right">
-                                <button type="submit" name="view_students" class="btn btn-primary"
-                                    <?php echo empty($selection_text) || empty($sections) || empty($subjects) ? 'disabled' : ''; ?>>View</button>
-                                <?php if ($show_students): ?>
-
-                                <?php endif; ?>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-
-                <!-- Student List Panel -->
-                <?php if ($show_students): ?>
-                <div class="panel panel-info">
-                    <div class="panel-heading clearfix">
-                        <h3 class="panel-title pull-left" id="awardListHeading">
-                            Students - <?php echo htmlspecialchars($selection_text  . ' - ' . $subject_title); ?>
-                        </h3>
-                        <button type="button" class="btn btn-info btn-sm pull-right float-end"
-                            onclick="printAwardList()">Print Award List</button>
-                    </div>
-
-                    <div class="panel-body">
-                        <form method="post" action="" id="resultsForm">
-                            <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
-                            <input type="hidden" name="session_id" value="<?php echo $session_id; ?>">
-                            <input type="hidden" name="exam_type_id" value="<?php echo $exam_type_id; ?>">
-                            <input type="hidden" name="class_id" value="<?php echo $class_id; ?>">
-                            <input type="hidden" name="exam_id" value="<?php echo $exam_id; ?>">
-                            <input type="hidden" name="subject_id" value="<?php echo $subject_id; ?>">
-                            <input type="hidden" name="section_id" value="<?php echo $section_id; ?>">
-                            <div class="table-responsive">
-                                <table class="table table-bordered table-hover" id="resultsTable">
-                                    <thead>
-                                        <tr>
-                                            <th>#</th>
-                                            <th>Student Name</th>
-                                            <th>Class</th>
-                                            <th>Present/Absent</th> <!-- Single column for status -->
-                                            <?php if (empty($sub_subjects)): ?>
-                                            <th><?php echo htmlspecialchars($subject_title); ?> (Max:
-                                                <?php echo $max_marks; ?>)</th>
-                                            <?php else: ?>
-                                            <?php foreach ($sub_subjects as $sub_subject_id => $sub_data): ?>
-                                            <th><?php echo htmlspecialchars($sub_data['title']); ?> (Max:
-                                                <?php echo $sub_data['marks']; ?>)</th>
-                                            <?php endforeach; ?>
-                                            <?php endif; ?>
-                                            <?php if ($has_any_results): ?>
-                                            <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
-<th>Actions</th>
-<?php endif; ?>
-                                            <?php endif; ?>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <?php $counter = 1; ?>
-                                        <?php foreach ($students as $student): ?>
-                                        <tr data-student-id="<?php echo $student['id']; ?>">
-                                            <td data-label="#"><?php echo $counter++; ?></td>
-                                            <td data-label="Student Name">
-                                                <?php echo htmlspecialchars($student['name']); ?></td>
-                                            <td data-label="Class">
-                                                <?php echo htmlspecialchars($student['class_title']) . ' ' . $student['section_title']; ?>
-                                            </td>
-
-                                            <!-- Single Present/Absent dropdown per student -->
-                                            <td data-label="Present/Absent">
-                                                <?php if ($student['has_results']): ?>
-                                                <span class="status-display">
-                                                    <?php if ($student['status'] == 0): ?>
-                                                    <span class="status-label status-present"
-                                                        title="Student is Present">
-                                                        ✓ Present
-                                                    </span>
-                                                    <?php else: ?>
-                                                    <span class="status-label status-absent" title="Student is Absent">
-                                                        ✗ Absent
-                                                    </span>
-                                                    <?php endif; ?>
-                                                </span>
-                                                <select name="student_status[<?php echo $student['id']; ?>]"
-                                                    class="form-control edit-mode student-status"
-                                                    style="display: none;">
-                                                    <option value="0"
-                                                        <?php echo $student['status'] == 0 ? 'selected' : ''; ?>>Present
-                                                    </option>
-                                                    <option value="1"
-                                                        <?php echo $student['status'] == 1 ? 'selected' : ''; ?>>Absent
-                                                    </option>
-                                                </select>
-                                                <?php else: ?>
-                                                <select name="student_status[<?php echo $student['id']; ?>]"
-                                                    class="form-control student-status">
-                                                    <option value="0" selected>Present</option>
-                                                    <option value="1">Absent</option>
-                                                </select>
-                                                <?php endif; ?>
-                                            </td>
-
-                                            <?php if (empty($sub_subjects)): ?>
-                                            <td
-                                                data-label="<?php echo htmlspecialchars($subject_title . ' (Max: ' . $max_marks . ')'); ?>">
-                                                <?php if ($student['has_results'] && !is_null($student['marks'])): ?>
-                                                <span
-                                                    class="marks-display"><?php echo htmlspecialchars($student['marks']); ?></span>
-                                                <input type="number" name="marks[<?php echo $student['id']; ?>][0]"
-                                                    value="<?php echo htmlspecialchars($student['marks'] ?? ''); ?>"
-                                                    min="0" max="<?php echo $max_marks; ?>" step="0.01"
-                                                    class="form-control marks-input edit-mode" style="display: none;"
-                                                    placeholder="Enter marks">
-                                                <?php else: ?>
-                                                <input type="number" name="marks[<?php echo $student['id']; ?>][0]"
-                                                    value="<?php echo $student['status'] == 1 ? '0' : ''; ?>" min="0"
-                                                    max="<?php echo $max_marks; ?>" step="0.01"
-                                                    class="form-control marks-input" placeholder="Enter marks">
-                                                <?php endif; ?>
-                                            </td>
-                                            <?php else: ?>
-                                            <?php foreach ($sub_subjects as $sub_subject_id => $sub_data): ?>
-                                            <td
-                                                data-label="<?php echo htmlspecialchars($sub_data['title'] . ' (Max: ' . $sub_data['marks'] . ')'); ?>">
-                                                <?php if ($student['has_results'] && !is_null($student['sub_marks'][$sub_subject_id])): ?>
-                                                <span
-                                                    class="marks-display"><?php echo htmlspecialchars($student['sub_marks'][$sub_subject_id]); ?></span>
-                                                <input type="number"
-                                                    name="marks[<?php echo $student['id']; ?>][<?php echo $sub_subject_id; ?>]"
-                                                    value="<?php echo htmlspecialchars($student['sub_marks'][$sub_subject_id] ?? ''); ?>"
-                                                    min="0" max="<?php echo $sub_data['marks']; ?>" step="0.01"
-                                                    class="form-control marks-input edit-mode" style="display: none;"
-                                                    placeholder="Enter marks">
-                                                <?php else: ?>
-                                                <input type="number"
-                                                    name="marks[<?php echo $student['id']; ?>][<?php echo $sub_subject_id; ?>]"
-                                                    value="<?php echo $student['status'] == 1 ? '0' : ''; ?>" min="0"
-                                                    max="<?php echo $sub_data['marks']; ?>" step="0.01"
-                                                    class="form-control marks-input" placeholder="Enter marks">
-                                                <?php endif; ?>
-                                            </td>
-                                            <?php endforeach; ?>
-                                            <?php endif; ?>
-
-                                            <?php if ($has_any_results): ?>
-                                            <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
-                                            <td data-label="Actions">
-                                                <?php if ($student['has_results']): ?>
-                                                <?php if (!empty($perms['can_edit'])): ?>
-                                                <button type="button"
-                                                    class="btn btn-warning btn-sm action-btn edit-btn">Edit</button>
-                                                <?php endif; ?>
-                                                <?php if (!empty($perms['can_delete'])): ?>
-                                                <button type="button" class="btn btn-dark btn-sm action-btn delete-btn"
-                                                    data-student-id="<?php echo $student['id']; ?>">Delete</button>
-                                                <?php endif; ?>
-                                                <?php endif; ?>
-                                            </td>
-                                            <?php endif; ?>
-                                            <?php endif; ?>
-                                        </tr>
-                                        <?php endforeach; ?>
-                                    </tbody>
-                                </table>
-                            </div>
-                            <div class="text-right mt-3">
-                                <?php if (!empty($perms['can_add']) || !empty($perms['can_edit'])): ?>
-                                <button type="submit" name="save_results" class="btn btn-success">Save Results</button>
-                                <?php endif; ?>
-                            </div>
-                        </form>
-                    </div>
-                </div>
+<div class="wrap">
+    <div class="head no-print">
+        <div>
+            <h1><i class="fas fa-pen-to-square"></i> Result Entry</h1>
+            <div class="sub">
+                <span class="pill <?= htmlspecialchars($arr['exam_kind']) ?>"><?= htmlspecialchars($arr['exam_type_title']) ?></span>
+                &nbsp; <strong><?= htmlspecialchars($arr['class_title']) ?></strong>
+                &nbsp;&middot;&nbsp; <?= date('d M Y', strtotime($arr['start_date'])) ?>
+                <?php if (!empty($arr['session_title'])): ?>
+                    &nbsp;&middot;&nbsp; <?= htmlspecialchars($arr['session_title']) ?>
                 <?php endif; ?>
             </div>
         </div>
+        <div class="no-print">
+            <a href="result_entry.php" class="hb"><i class="fas fa-arrow-left"></i> Back to List</a>
+        </div>
     </div>
 
-    <script>
-    $(document).ready(function() {
-        // Initialize Select2
-        $('.select2').select2({
-            placeholder: "Select an option",
-            allowClear: true
-        });
+    <div class="card">
+        <div class="print-area">
 
-        // Auto-dismiss alerts
-        setTimeout(function() {
-            $('.alert').fadeOut('slow');
-        }, 5000);
+        <?php if (isset($_SESSION['message'])): ?>
+            <div class="alert <?= htmlspecialchars($_SESSION['message_type']) ?> no-print"><?= htmlspecialchars($_SESSION['message']) ?></div>
+            <?php unset($_SESSION['message'], $_SESSION['message_type']); ?>
+        <?php endif; ?>
 
-        // Show pop-up alert
-        function showPopupAlert(message, type) {
-            const alertClass = type === 'success' ? 'alert-success' : (type === 'warning' ?
-                'alert-warning' : 'alert-danger');
-            const alertHtml = `
-                    <div class="alert ${alertClass} popup-alert">
-                        <button type="button" class="close" data-dismiss="alert">&times;</button>
-                        ${message}
-                    </div>
-                `;
-            $('body').append(alertHtml);
-            setTimeout(function() {
-                $('.popup-alert').fadeOut('slow', function() {
-                    $(this).remove();
-                });
-            }, 5000);
-        }
-
-        // Handle student status change
-        $(document).on('change', '.student-status', function() {
-            const statusSelect = $(this);
-            const statusValue = statusSelect.val(); // 0 = Present, 1 = Absent
-            const studentRow = statusSelect.closest('tr');
-            const marksInputs = studentRow.find('.marks-input');
-
-            if (statusValue == '1') { // Absent
-                // Set all marks to 0
-                marksInputs.each(function() {
-                    $(this).val('0');
-                    $(this).prop("readonly", true);
-                });
-
-                // Update display spans if visible
-                const marksDisplays = studentRow.find('.marks-display');
-                marksDisplays.each(function() {
-                    $(this).text('0');
-
-                });
-            } else { // Present
-                // Clear marks
-                marksInputs.each(function() {
-                    if ($(this).val() == '0') {
-                        $(this).val('');
-                        $(this).prop("readonly", false);
-
-                    }
-                });
-            }
-        });
-
-        // Initialize status on page load
-        $('.student-status').each(function() {
-            if ($(this).val() == '1') {
-                const studentRow = $(this).closest('tr');
-                const marksInputs = studentRow.find('.marks-input');
-                marksInputs.val('0');
-            }
-        });
-
-        // Edit button click - allow editing even when absent
-        $('.edit-btn').on('click', function() {
-            const studentRow = $(this).closest('tr');
-            studentRow.find('.marks-display').hide();
-            studentRow.find('.marks-input').show();
-            studentRow.find('.status-display').hide();
-            studentRow.find('.student-status.edit-mode').show();
-            $(this).hide();
-            studentRow.find('.delete-btn').hide();
-        });
-
-        // Delete button click
-        $('.delete-btn').on('click', function() {
-            if (!confirm('Are you sure you want to delete all marks for this student?')) return;
-            const studentId = $(this).data('student-id');
-            $.post('', {
-                delete_marks: true,
-                csrf_token: '<?php echo $_SESSION['csrf_token']; ?>',
-                student_id: studentId
-            }, function(response) {
-                location.reload();
-            });
-        });
-    });
-
-    function printAwardList() {
-    // Collect student data
-    var students = [];
-    var rows = document.querySelectorAll("#resultsTable tbody tr");
-    
-    rows.forEach(function(row, index) {
-        var cols = row.querySelectorAll("td");
-        if (cols.length > 0) {
-            var student = {
-                id: index + 1,
-                name: cols[1].innerText.trim(),
-                marks: []
-            };
-            
-            <?php if (empty($sub_subjects)): ?>
-                // Main subject only: columns are #(0), Name(1), Class(2), Status(3), Marks(4), [Actions(5)]
-                if (cols[4]) {
-                    var marksDisplay = cols[4].querySelector('.marks-display');
-                    student.marks.push(marksDisplay ? marksDisplay.innerText.trim() : '');
-                } else {
-                    student.marks.push('');
-                }
-            <?php else: ?>
-                // Sub-subjects: columns are #(0), Name(1), Class(2), Status(3), Sub1(4), Sub2(5), ..., [Actions]
-                <?php 
-                $colIndex = 4; // Start after Status column
-                foreach ($sub_subjects as $sub_id => $sub): 
-                ?>
-                    if (cols[<?php echo $colIndex; ?>]) {
-                        var marksDisplay = cols[<?php echo $colIndex; ?>].querySelector('.marks-display');
-                        student.marks.push(marksDisplay ? marksDisplay.innerText.trim() : '');
-                    } else {
-                        student.marks.push('');
-                    }
-                <?php 
-                    $colIndex++;
-                endforeach; 
-                ?>
-            <?php endif; ?>
-            
-            students.push(student);
-        }
-    });
-
-    // Dynamic data from PHP
-    var awardClass = "<?php echo addslashes($class_title); ?>";
-    var awardSession = "<?php echo addslashes($session_title); ?>";
-    var awardExamType = "<?php echo addslashes($exam_type_title); ?>";
-    var awardSubject = "<?php echo addslashes($subject_title); ?>";
-
-    // Subjects/Sub-subjects columns for header
-    var awardSubjects = [];
-    <?php if (!empty($sub_subjects)): ?>
-        <?php foreach ($sub_subjects as $sub_id => $sub): ?>
-            awardSubjects.push("<?php echo addslashes($sub['title'] . ' (Max: ' . $sub['marks'] . ')'); ?>");
-        <?php endforeach; ?>
-    <?php else: ?>
-        awardSubjects.push("<?php echo addslashes($subject_title . ' (Max: ' . $max_marks . ')'); ?>");
-    <?php endif; ?>
-
-    // Build HTML for print
-    var html = `
-        <html>
-        <head>
-            <title>Award List</title>
-            <style>
-                body { 
-                    font-family: Arial, sans-serif; 
-                    padding: 20px; 
-                    margin: 0;
-                }
-                .header {
-                    text-align: center;
-                    margin-bottom: 30px;
-                }
-                h2 { 
-                    text-align: center; 
-                    margin-bottom: 5px; 
-                    font-size: 18px;
-                }
-                h4 { 
-                    text-align: center; 
-                    margin-bottom: 20px; 
-                    font-weight: normal; 
-                    font-size: 14px;
-                }
-                table { 
-                    width: 100%; 
-                    border-collapse: collapse; 
-                    font-size: 12px; 
-                }
-                th, td { 
-                    border: 1px solid #444; 
-                    padding: 8px; 
-                    text-align: center; 
-                }
-                th { 
-                    background-color: #f2f2f2; 
-                    font-weight: bold;
-                }
-                td.text-left { 
-                    text-align: left; 
-                    padding-left: 10px; 
-                }
-                tbody tr:nth-child(even) { 
-                    background-color: #f9f9f9; 
-                }
-                @media print {
-                    body { 
-                        padding: 0; 
-                    }
-                    table { 
-                        page-break-inside: auto; 
-                    }
-                    tr { 
-                        page-break-inside: avoid; 
-                        page-break-after: auto; 
-                    }
-                }
-            </style>
-        </head>
-        <body>
-            <div class="header">
-                <h2>Award List of Class ${awardClass}</h2>
-                <h4>Session: ${awardSession} | Exam Type: ${awardExamType} | Subject: ${awardSubject}</h4>
+        <?php if (empty($arrSubjects)): ?>
+            <div class="empty">
+                <div class="big">&#128221;</div>
+                <h3>No subjects assigned to this arrangement</h3>
+                <p style="margin-top:12px;">
+                    <a href="arrange_exam.php?edit=<?= (int)$arrange_exam_id ?>" style="color:#1e40af;font-weight:700;">Assign subjects first</a>
+                </p>
             </div>
-            <table>
-                <thead>
-                    <tr>
-                        <th>#</th>
-                        <th>Student Name</th>`;
-    
-    awardSubjects.forEach(function(sub) {
-        html += `<th>${sub}</th>`;
-    });
-    
-    html += `<th>Present/Absent</th>
-                    </tr>
-                </thead>
-                <tbody>`;
-    
-    students.forEach(function(stu) {
-        html += `<tr>
-            <td>${stu.id}</td>
-            <td class="text-left">${stu.name}</td>`;
-        
-        stu.marks.forEach(function(mark) {
-            html += `<td>${mark || ''}</td>`;
-        });
-        
-        // Empty Present/Absent column
-        html += `<td></td>`;
-        
-        html += `</tr>`;
-    });
-    
-    html += `
-                </tbody>
-            </table>
-        </body>
-        </html>
-    `;
+        <?php elseif (empty($students)): ?>
+            <div class="empty">
+                <div class="big">&#128101;</div>
+                <h3>No students enrolled in this class for this session</h3>
+            </div>
+        <?php else: ?>
 
-    // Remove any existing print iframe
-    var existingIframe = document.getElementById('printIframe');
-    if (existingIframe) {
-        existingIframe.parentNode.removeChild(existingIframe);
-    }
+            <div class="subject-picker no-print">
+                <?php foreach ($arrSubjects as $asid => $as): ?>
+                    <a href="?exam_id=<?= (int)$arrange_exam_id ?>&arr_sub_id=<?= (int)$asid ?>"
+                       class="subj-tab <?= (int)$asid === $arr_sub_id ? 'active' : '' ?>">
+                        <i class="fas fa-book"></i>
+                        <?= htmlspecialchars($as['subject_title']) ?>
+                        <span style="font-size:11px;opacity:0.75;">(<?= (int)round($as['max_marks']) ?>)</span>
+                    </a>
+                <?php endforeach; ?>
+            </div>
 
-    // Create an iframe for printing instead of a new window
-    var iframe = document.createElement('iframe');
-    iframe.id = 'printIframe';
-    iframe.style.display = 'none';
-    document.body.appendChild(iframe);
-    
-    var iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-    iframeDoc.write(html);
-    iframeDoc.close();
-    
-    // Flag to prevent multiple print triggers
-    var hasPrinted = false;
-    
-    // Function to handle printing
-    function handlePrint() {
-        if (!hasPrinted) {
-            hasPrinted = true;
-            try {
-                iframe.contentWindow.focus();
-                iframe.contentWindow.print();
-                
-                // Remove iframe after a delay
-                setTimeout(function() {
-                    try {
-                        if (iframe && iframe.parentNode) {
-                            iframe.parentNode.removeChild(iframe);
-                        }
-                    } catch (e) {
-                        console.log('Iframe already removed');
+            <?php if ($selected): ?>
+                <?php
+                $is_composite = !empty($selected['sub_subjects']);
+                $total_max = 0;
+                if ($is_composite) {
+                    foreach ($selected['sub_subjects'] as $ss) $total_max += (float)$ss['max_marks'];
+                } else {
+                    $total_max = (float)$selected['max_marks'];
+                }
+                ?>
+
+                <div class="info-bar no-print">
+                    <div>Subject: <strong><?= htmlspecialchars($selected['subject_title']) ?></strong></div>
+                    <div><?= $is_composite ? 'Composite' : 'Standalone' ?> &middot; Max: <strong><?= number_format($total_max, 0) ?></strong></div>
+                    <div><strong><?= count($students) ?></strong> student(s)</div>
+                </div>
+
+                <form method="post" id="resultsForm">
+                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf) ?>">
+                    <input type="hidden" name="action" value="save_results">
+                    <input type="hidden" name="arr_sub_id" value="<?= (int)$arr_sub_id ?>">
+
+                    <div class="bulk-row no-print">
+                        <label>Bulk:</label>
+                        <button type="button" class="btn btn-ghost" style="height:32px;padding:0 12px;font-size:12px;" onclick="setAllStatus(0)"><i class="fas fa-check"></i> All Present</button>
+                        <button type="button" class="btn btn-ghost" style="height:32px;padding:0 12px;font-size:12px;color:#dc2626;border-color:#fca5a5;" onclick="setAllStatus(1)"><i class="fas fa-times"></i> All Absent</button>
+                    </div>
+
+                    <div class="tbl-wrap">
+                        <table class="res">
+                            <thead>
+                                <tr>
+                                    <th class="name-head">Student</th>
+                                    <th class="status-head" style="width:120px;">Status</th>
+                                    <?php if ($is_composite): ?>
+                                        <?php foreach ($selected['sub_subjects'] as $ssId => $ss): ?>
+                                            <th>
+                                                <?= htmlspecialchars($ss['sub_subject_title']) ?>
+                                                <div style="font-size:9px;opacity:0.75;font-weight:500;">(Max <?= (int)round($ss['max_marks']) ?>)</div>
+                                            </th>
+                                        <?php endforeach; ?>
+                                    <?php else: ?>
+                                        <th>
+                                            Obtained
+                                            <div style="font-size:9px;opacity:0.75;font-weight:500;">(Max <?= (int)round($selected['max_marks']) ?>)</div>
+                                        </th>
+                                    <?php endif; ?>
+                                    <th class="total-head">Total</th>
+                                    <th style="min-width:200px;">Remarks</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                            <?php foreach ($students as $st):
+                                $stId = (int)$st['id'];
+                                $row_remark = '';
+                                if (isset($existing[$stId][0]['remarks'])) $row_remark = $existing[$stId][0]['remarks'];
+                                if ($row_remark === '' && $is_composite) {
+                                    foreach ($selected['sub_subjects'] as $ssId => $ss) {
+                                        if (isset($existing[$stId][(int)$ssId]['remarks']) && $existing[$stId][(int)$ssId]['remarks'] !== '') {
+                                            $row_remark = $existing[$stId][(int)$ssId]['remarks'];
+                                            break;
+                                        }
+                                    }
+                                }
+                                $cur_status = isset($student_exam_status[$stId]) ? 1 : 0;
+                            ?>
+                                <tr data-student-id="<?= $stId ?>" class="<?= $cur_status === 1 ? 'absent-row' : '' ?>">
+                                    <td class="student-cell">
+                                        <?= htmlspecialchars($st['name']) ?>
+                                        <small><?= htmlspecialchars($st['father_name'] ?: '') ?><?= !empty($st['reg_no']) ? ' &middot; ' . htmlspecialchars($st['reg_no']) : '' ?></small>
+                                    </td>
+                                    <td>
+                                        <select name="student_status[<?= $stId ?>]" class="status-select <?= $cur_status === 1 ? 'absent' : 'present' ?>">
+                                            <option value="0" <?= $cur_status === 0 ? 'selected' : '' ?>>Present</option>
+                                            <option value="1" <?= $cur_status === 1 ? 'selected' : '' ?>>Absent</option>
+                                        </select>
+                                    </td>
+                                    <?php if ($is_composite): ?>
+                                        <?php foreach ($selected['sub_subjects'] as $ssId => $ss):
+                                            $cur = isset($existing[$stId][(int)$ssId]['marks']) ? $existing[$stId][(int)$ssId]['marks'] : '';
+                                        ?>
+                                            <td>
+                                                <input type="number"
+                                                       name="marks[<?= $stId ?>][<?= (int)$ssId ?>]"
+                                                       class="mark-input js-mark"
+                                                       data-max="<?= (float)$ss['max_marks'] ?>"
+                                                       min="0"
+                                                       max="<?= (float)$ss['max_marks'] ?>"
+                                                       step="0.5"
+                                                       value="<?= htmlspecialchars((string)$cur) ?>"
+                                                       <?= $cur_status === 1 ? 'disabled' : '' ?>>
+                                            </td>
+                                        <?php endforeach; ?>
+                                    <?php else:
+                                        $cur = isset($existing[$stId][0]['marks']) ? $existing[$stId][0]['marks'] : '';
+                                    ?>
+                                        <td>
+                                            <input type="number"
+                                                   name="marks[<?= $stId ?>][0]"
+                                                   class="mark-input js-mark"
+                                                   data-max="<?= (float)$selected['max_marks'] ?>"
+                                                   min="0"
+                                                   max="<?= (float)$selected['max_marks'] ?>"
+                                                   step="0.5"
+                                                   value="<?= htmlspecialchars((string)$cur) ?>"
+                                                   <?= $cur_status === 1 ? 'disabled' : '' ?>>
+                                        </td>
+                                    <?php endif; ?>
+                                    <td class="total-cell js-total">0</td>
+                                    <td>
+                                        <input type="text"
+                                               name="remarks[<?= $stId ?>]"
+                                               class="remark-input"
+                                               maxlength="150"
+                                               value="<?= htmlspecialchars($row_remark) ?>"
+                                               placeholder="Optional remark">
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="actions no-print">
+                        <?php if (!empty($perms['can_add']) || !empty($perms['can_edit'])): ?>
+                            <button type="submit" class="btn btn-success"><i class="fas fa-save"></i> Save Results</button>
+                        <?php endif; ?>
+                        <button type="button" class="btn btn-ghost" onclick="window.print();"><i class="fas fa-print"></i> Print</button>
+                    </div>
+                </form>
+
+                <script>
+                function clampInput(inp){
+                    if (inp.disabled) { inp.classList.remove('over'); return 0; }
+                    var max = parseFloat(inp.getAttribute('data-max') || 0);
+                    var v = parseFloat(inp.value);
+                    if (isNaN(v)) { inp.classList.remove('over'); return 0; }
+                    if (v < 0) { v = 0; inp.value = 0; inp.classList.add('over'); var t1 = inp; setTimeout(function(){ t1.classList.remove('over'); }, 700); }
+                    if (v > max) {
+                        v = max;
+                        inp.value = max;
+                        inp.classList.add('over');
+                        var t2 = inp;
+                        setTimeout(function(){ t2.classList.remove('over'); }, 700);
+                    } else {
+                        inp.classList.remove('over');
                     }
-                }, 2000);
-            } catch (e) {
-                console.log('Print error:', e);
-            }
-        }
-    }
-    
-    // Handle iframe load
-    iframe.onload = handlePrint;
-    
-    // Fallback: If iframe is already loaded
-    if (iframeDoc.readyState === 'complete') {
-        setTimeout(handlePrint, 500);
-    }
-}
-    </script>
+                    return v;
+                }
+                function updateRow(tr){
+                    var inputs = tr.querySelectorAll('.js-mark');
+                    var total = 0;
+                    inputs.forEach(function(inp){ total += clampInput(inp); });
+                    var cell = tr.querySelector('.js-total');
+                    if (cell) cell.textContent = total ? total.toFixed(1).replace(/\.0$/, '') : '0';
+                }
+                function applyAbsent(tr){
+                    var statusSel = tr.querySelector('.status-select');
+                    var marks = tr.querySelectorAll('.js-mark');
+                    if (statusSel.value === '1') {
+                        tr.classList.add('absent-row');
+                        marks.forEach(function(inp){
+                            if (!inp.disabled) {
+                                inp.dataset.prev = inp.value;
+                                inp.value = '';
+                                inp.disabled = true;
+                            }
+                        });
+                    } else {
+                        tr.classList.remove('absent-row');
+                        marks.forEach(function(inp){
+                            inp.disabled = false;
+                            if (inp.dataset.prev !== undefined && inp.value === '') {
+                                inp.value = inp.dataset.prev;
+                            }
+                        });
+                    }
+                    updateRow(tr);
+                }
+                document.querySelectorAll('table.res tbody tr').forEach(function(tr){
+                    tr.querySelectorAll('.js-mark').forEach(function(inp){
+                        inp.addEventListener('input', function(){
+                            var max = parseFloat(this.getAttribute('data-max') || 0);
+                            var v = parseFloat(this.value);
+                            if (!isNaN(v)) {
+                                if (v > max) {
+                                    this.value = max;
+                                    this.classList.add('over');
+                                    var that = this;
+                                    setTimeout(function(){ that.classList.remove('over'); }, 700);
+                                } else if (v < 0) {
+                                    this.value = 0;
+                                    this.classList.add('over');
+                                    var that2 = this;
+                                    setTimeout(function(){ that2.classList.remove('over'); }, 700);
+                                } else {
+                                    this.classList.remove('over');
+                                }
+                            }
+                            updateRow(tr);
+                        });
+                        inp.addEventListener('blur', function(){ updateRow(tr); });
+                    });
+                    var statusSel = tr.querySelector('.status-select');
+                    if (statusSel) {
+                        statusSel.addEventListener('change', function(){
+                            this.classList.remove('present','absent');
+                            this.classList.add(this.value === '1' ? 'absent' : 'present');
+                            applyAbsent(tr);
+                        });
+                    }
+                    updateRow(tr);
+                });
+                function setAllStatus(v){
+                    document.querySelectorAll('table.res tbody tr').forEach(function(tr){
+                        var statusSel = tr.querySelector('.status-select');
+                        if (!statusSel) return;
+                        statusSel.value = String(v);
+                        statusSel.classList.remove('present','absent');
+                        statusSel.classList.add(v === 1 ? 'absent' : 'present');
+                        applyAbsent(tr);
+                    });
+                }
+                document.getElementById('resultsForm').addEventListener('submit', function(e){
+                    var bad = false;
+                    document.querySelectorAll('.js-mark').forEach(function(inp){
+                        if (inp.disabled) return;
+                        var max = parseFloat(inp.getAttribute('data-max') || 0);
+                        var v = parseFloat(inp.value);
+                        if (isNaN(v)) return;
+                        if (v < 0 || v > max) { bad = true; inp.classList.add('over'); }
+                    });
+                    if (bad) {
+                        e.preventDefault();
+                        alert('Some marks exceed the subject max. Fix the red fields and try again.');
+                    }
+                });
+                </script>
+            <?php endif; ?>
+
+        <?php endif; ?>
+
+        </div><!-- /.print-area -->
+    </div>
+</div>
 
 </body>
-
 </html>
-<?php
-$conn->close();
-?>
+<?php $conn->close(); ob_end_flush(); ?>

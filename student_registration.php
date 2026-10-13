@@ -309,6 +309,23 @@ if ($edit_mode && !empty($student_data['id'])) {
     $stmt->close();
 }
 
+// Existing parent links (edit mode)
+$existing_parent_links = [];
+if ($edit_mode && !empty($student_data['id'])) {
+    $stmt = $conn->prepare("
+        SELECT u.id, u.username, u.email, u.mobile_no, ps.relationship, ps.is_primary
+        FROM parent_students ps
+        JOIN users u ON u.id = ps.parent_user_id
+        WHERE ps.student_id = ?
+        ORDER BY ps.is_primary DESC, u.username
+    ");
+    $stmt->bind_param("i", $student_data['id']);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    while ($row = $res->fetch_assoc()) $existing_parent_links[] = $row;
+    $stmt->close();
+}
+
 // ---------- Form submission ----------
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['student_id'])) {
 
@@ -429,6 +446,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['student_id'])) {
     $guardian_cnic_sql  = $guardian_cnic ? "'$guardian_cnic'" : "NULL";
     $admission_date_sql = $admission_date ? "'" . mysqli_real_escape_string($conn, $admission_date) . "'" : "NULL";
     $father_income_sql  = $father_income !== null ? $father_income : "NULL";
+
+    $new_student_id = 0;
 
     if ($student_id > 0) {
         // UPDATE
@@ -566,6 +585,64 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['student_id'])) {
         }
     }
 
+    // ───────────── PARENT ACCOUNT CREATION ─────────────
+    $create_parent = !empty($_POST['create_parent_account']);
+    if ($create_parent) {
+        $link_student_id = ($student_id > 0) ? $student_id : ($new_student_id ?? 0);
+
+        $p_username   = trim($_POST['parent_username'] ?? '');
+        $p_email      = trim($_POST['parent_email'] ?? '');
+        $p_mobile     = trim($_POST['parent_mobile'] ?? '');
+        $p_password   = trim($_POST['parent_password'] ?? '');
+        $p_rel        = $_POST['parent_relationship'] ?? 'father';
+        $p_is_primary = !empty($_POST['parent_is_primary']) ? 1 : 0;
+
+        if (!in_array($p_rel, ['father','mother','guardian','other'], true)) $p_rel = 'father';
+
+        if ($link_student_id > 0 && $p_username !== '') {
+            $dupe = $conn->prepare("SELECT id FROM users WHERE username = ? LIMIT 1");
+            $dupe->bind_param("s", $p_username);
+            $dupe->execute();
+            $dupe_row = $dupe->get_result()->fetch_assoc();
+            $dupe->close();
+
+            if ($dupe_row) {
+                $_SESSION['message'] = 'Student saved, but parent username "' . htmlspecialchars($p_username) . '" already exists. Create the link manually.';
+                $_SESSION['message_type'] = 'warning';
+            } else {
+                if ($p_password === '') $p_password = bin2hex(random_bytes(4));
+
+                $stmt = $conn->prepare("
+                    INSERT INTO users (role_id, username, password, mobile_no, email, salary, status, village_council_id)
+                    VALUES (6, ?, ?, ?, ?, NULL, 0, NULL)
+                ");
+                $stmt->bind_param("ssss", $p_username, $p_password, $p_mobile, $p_email);
+                $stmt->execute();
+                $parent_user_id = $conn->insert_id;
+                $stmt->close();
+
+                if ($p_is_primary) {
+                    $conn->query("UPDATE parent_students SET is_primary = 0 WHERE student_id = " . (int)$link_student_id);
+                }
+
+                $link_stmt = $conn->prepare("
+                    INSERT INTO parent_students (parent_user_id, student_id, relationship, is_primary)
+                    VALUES (?, ?, ?, ?)
+                ");
+                $link_stmt->bind_param("iisi", $parent_user_id, $link_student_id, $p_rel, $p_is_primary);
+
+                if ($link_stmt->execute()) {
+                    $_SESSION['message'] = 'Student saved. Parent account "' . htmlspecialchars($p_username) . '" created with password: ' . htmlspecialchars($p_password);
+                    $_SESSION['message_type'] = 'success';
+                } else {
+                    $_SESSION['message'] = 'Student saved. Parent user created but link failed: ' . $link_stmt->error;
+                    $_SESSION['message_type'] = 'danger';
+                }
+                $link_stmt->close();
+            }
+        }
+    }
+
     header("Location: student_registration.php");
     exit();
 }
@@ -575,6 +652,9 @@ if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
     $id = intval($_GET['delete']);
 
     $stmt = $conn->prepare("DELETE FROM student_fee_assignments WHERE student_id = ?");
+    $stmt->bind_param("i", $id); $stmt->execute(); $stmt->close();
+
+    $stmt = $conn->prepare("DELETE FROM parent_students WHERE student_id = ?");
     $stmt->bind_param("i", $id); $stmt->execute(); $stmt->close();
 
     $stmt = $conn->prepare("DELETE FROM student_class WHERE student_registration_id = ?");
@@ -1020,6 +1100,89 @@ if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
                             </div>
                             <?php endif; ?>
 
+                            <!-- PARENT LOGIN SECTION -->
+                            <?php if (!empty($perms['can_add']) || !empty($perms['can_edit'])): ?>
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <div class="form-section" style="background: #f0f9ff; border: 2px solid #bae6fd;">
+                                        <h4 style="border-bottom-color: #0369a1; color: #0369a1;">Parent Login Account</h4>
+
+                                        <?php if ($edit_mode && !empty($existing_parent_links)): ?>
+                                            <p style="font-size: 13px; color: #334155; margin-bottom: 12px;">Linked parent accounts:</p>
+                                            <ul style="margin: 0 0 16px 20px; font-size: 13px;">
+                                                <?php foreach ($existing_parent_links as $pl): ?>
+                                                    <li>
+                                                        <strong><?= htmlspecialchars($pl['username']) ?></strong>
+                                                        (<?= htmlspecialchars($pl['relationship']) ?><?= $pl['is_primary'] ? ', primary' : '' ?>)
+                                                        — <?= htmlspecialchars($pl['email'] ?: 'no email') ?>
+                                                    </li>
+                                                <?php endforeach; ?>
+                                            </ul>
+                                        <?php endif; ?>
+
+                                        <div class="form-group">
+                                            <label class="checkbox-label">
+                                                <input type="checkbox" id="create_parent_account" name="create_parent_account" value="1">
+                                                Create a parent login account for this student
+                                            </label>
+                                            <small class="text-muted">Check to add a parent login. Existing links are never removed by this form.</small>
+                                        </div>
+
+                                        <div id="parentAccountFields" style="display: none;">
+                                            <div class="row">
+                                                <div class="col-md-4">
+                                                    <div class="form-group">
+                                                        <label>Parent Username <span class="text-danger">*</span></label>
+                                                        <input type="text" class="form-control" name="parent_username" id="parent_username" maxlength="50" placeholder="e.g. parent_ahmed">
+                                                    </div>
+                                                </div>
+                                                <div class="col-md-4">
+                                                    <div class="form-group">
+                                                        <label>Parent Email</label>
+                                                        <input type="email" class="form-control" name="parent_email" placeholder="parent@example.com">
+                                                    </div>
+                                                </div>
+                                                <div class="col-md-4">
+                                                    <div class="form-group">
+                                                        <label>Parent Mobile</label>
+                                                        <input type="text" class="form-control" name="parent_mobile" pattern="[0-9]{11}" maxlength="11" placeholder="03XXXXXXXXX"
+                                                            oninput="this.value=this.value.replace(/[^0-9]/g,''); if(this.value.length>11)this.value=this.value.slice(0,11);">
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="row">
+                                                <div class="col-md-4">
+                                                    <div class="form-group">
+                                                        <label>Password <span class="text-danger">*</span></label>
+                                                        <input type="text" class="form-control" name="parent_password" id="parent_password" placeholder="Min 4 chars, blank to auto-generate">
+                                                    </div>
+                                                </div>
+                                                <div class="col-md-4">
+                                                    <div class="form-group">
+                                                        <label>Relationship</label>
+                                                        <select class="form-control" name="parent_relationship">
+                                                            <option value="father">Father</option>
+                                                            <option value="mother">Mother</option>
+                                                            <option value="guardian">Guardian</option>
+                                                            <option value="other">Other</option>
+                                                        </select>
+                                                    </div>
+                                                </div>
+                                                <div class="col-md-4">
+                                                    <div class="form-group">
+                                                        <label class="checkbox-label" style="margin-top: 28px;">
+                                                            <input type="checkbox" name="parent_is_primary" value="1" checked>
+                                                            Primary contact
+                                                        </label>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <?php endif; ?>
+
                             <div class="row">
                                 <div class="col-md-12">
                                     <div class="form-section" style="background: #f8f9fa; border: none;">
@@ -1067,6 +1230,22 @@ if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
                 e.preventDefault(); return false;
             }
         });
+
+        // Parent account section — show/hide
+        $('#create_parent_account').on('change', function() {
+            if ($(this).is(':checked')) {
+                $('#parentAccountFields').slideDown(200);
+                $('#parent_username, #parent_password').prop('required', true);
+                if (!$('#parent_username').val()) {
+                    var regNo = $('#reg_no').val().trim();
+                    if (regNo) $('#parent_username').val('parent_' + regNo);
+                }
+            } else {
+                $('#parentAccountFields').slideUp(200);
+                $('#parent_username, #parent_password').prop('required', false);
+            }
+        });
+        $('#create_parent_account').trigger('change');
 
         var feeRowIndex = 0;
         function addCustomFeeRow() {

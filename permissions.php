@@ -3,6 +3,7 @@
  * permissions.php — per-user module permissions.
  *
  * Rule:
+ *   - Role 6 (Parent): hard-denied from every staff page.
  *   - Admin (role_id = 1): always allowed.
  *   - If a user_modules row exists for (user, module): its flags win.
  *     can_view=0 → DENIED. can_view=1 → allowed (and per-action flags apply).
@@ -16,7 +17,7 @@ if (!defined('ADMIN_ROLE_ID')) {
 
 function gl_user_can(mysqli $conn, int $userId, string $moduleUrl, ?int $roleId = null): array
 {
-    $deny = ['can_view'=>false,'can_add'=>false,'can_edit'=>false,'can_delete'=>false];
+    $deny  = ['can_view'=>false,'can_add'=>false,'can_edit'=>false,'can_delete'=>false];
     $allow = ['can_view'=>true,'can_add'=>true,'can_edit'=>true,'can_delete'=>true];
 
     if ($userId <= 0) return $deny;
@@ -31,6 +32,7 @@ function gl_user_can(mysqli $conn, int $userId, string $moduleUrl, ?int $roleId 
     }
 
     if ($roleId === ADMIN_ROLE_ID) return $allow;
+    if ($roleId === 6) return $deny;   // Parent: hard deny on any module
 
     $basename = strtolower(basename(parse_url($moduleUrl, PHP_URL_PATH) ?: $moduleUrl));
     if ($basename === '') return $allow;
@@ -140,6 +142,12 @@ function detect_requested_action(string $scriptBasename): string
 
 function require_action(mysqli $conn, string $scriptFilePath): void
 {
+    // Parents are hard-denied from any staff page
+    if ((int)($_SESSION['role_id'] ?? 0) === 6) {
+        header('Location: 403.php');
+        exit;
+    }
+
     $basename = basename($scriptFilePath);
     $action   = detect_requested_action($basename);
     if (!current_user_can($conn, $basename, $action)) {
@@ -150,6 +158,12 @@ function require_action(mysqli $conn, string $scriptFilePath): void
 
 function require_current_user_can(mysqli $conn, string $moduleUrl, string $action = 'view'): void
 {
+    // Parents are hard-denied
+    if ((int)($_SESSION['role_id'] ?? 0) === 6) {
+        header('Location: 403.php');
+        exit;
+    }
+
     if (!current_user_can($conn, $moduleUrl, $action)) {
         header('Location: 403.php');
         exit;

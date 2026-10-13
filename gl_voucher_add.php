@@ -15,6 +15,15 @@ $conn->query("SET collation_connection = 'utf8mb4_general_ci'");
 
 $service = new VoucherService($conn);
 
+// Preselect voucher type from URL: gl_voucher_add.php?type=CRV
+if (
+    $_SERVER['REQUEST_METHOD'] !== 'POST' &&
+    !empty($_GET['type']) &&
+    in_array(strtoupper($_GET['type']), ['CPV','CRV','BPV','BRV'], true)
+) {
+    $_POST['voucher_type'] = strtoupper($_GET['type']);
+}
+
 // Current session
 $currentSession = $conn->query("
     SELECT id, title FROM sessions WHERE status = 0 ORDER BY id DESC LIMIT 1

@@ -9,7 +9,14 @@ $user_id = (int)($_SESSION['user_id'] ?? 0);
 $role_modules = [];
 $module_parents = [];
 
+// ───── Parents get no module scanning ─────
+$__is_parent_role = false;
 if ($user_id > 0) {
+    $__r = $conn->query("SELECT role_id FROM users WHERE id = " . (int)$user_id)->fetch_assoc();
+    if ($__r && (int)$__r['role_id'] === 6) $__is_parent_role = true;
+}
+
+if ($user_id > 0 && !$__is_parent_role) {
     $qry = "
         SELECT m.id, m.parent_id, m.title, m.url,
                CASE
@@ -23,7 +30,7 @@ if ($user_id > 0) {
         LEFT JOIN user_modules um
             ON um.user_id = u.id AND um.module_id = m.id
         WHERE u.id = ? AND m.status = 1
-        ORDER BY m.parent_id, m.title
+        ORDER BY m.parent_id, (m.url IN ('finance_hub.php','gl_hub.php', 'academic_hub.php', 'exam_hub.php')) DESC, m.title
     ";
     $stmt = $conn->prepare($qry);
     $stmt->bind_param("i", $user_id);
@@ -99,25 +106,21 @@ if ($user_id > 0) {
     --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
     --radius: 12px;
     --transition: all 0.2s ease-in-out;
-    
-    /* Quick links color - #3b3a85 */
     --quicklink-bg: #3b3a85;
     --quicklink-text: #ffffff;
     --quicklink-hover-bg: #000000;
     --quicklink-hover-text: #ffffff;
   }
-  
-  * { 
-    font-family: 'Inter', sans-serif; 
+
+  * {
+    font-family: 'Inter', sans-serif;
     margin: 0;
     padding: 0;
     box-sizing: border-box;
   }
-  
-  /* Top Quick Links Bar - Separate from Navbar */
+
   .top-quick-bar {
     background: var(--background);
- 
     min-height: 20px;
     padding: 0.5rem 1.5rem;
     position: relative;
@@ -155,15 +158,9 @@ if ($user_id > 0) {
     color: var(--quicklink-hover-text);
   }
 
-  /* Hide quick links on mobile/tablet */
-  @media (max-width: 991px) {
-    .top-quick-bar {
-      display: none;
-    }
-  }
+  @media (max-width: 991px) { .top-quick-bar { display: none; } }
 
-  /* Main Navbar */
-  .navbar { 
+  .navbar {
     background: var(--background);
     height: 55px;
     backdrop-filter: blur(20px);
@@ -172,40 +169,32 @@ if ($user_id > 0) {
     z-index: 1030;
     transition: var(--transition);
   }
-  
-  .navbar-main-content {
+
+  .navbar-main-content { display: flex; align-items: center; width: 100%; }
+
+  .navbar-brand {
+    font-weight: 700;
+    color: var(--text-primary) !important;
     display: flex;
     align-items: center;
-    width: 100%;
-  }
-  
-  .navbar-brand { 
-    font-weight: 700; 
-    color: var(--text-primary) !important; 
-    display: flex; 
-    align-items: center; 
     font-size: 1.1rem;
     transition: var(--transition);
     margin-right: 2rem;
   }
-  
-  .navbar-brand:hover {
-    transform: translateY(-1px);
-  }
-  
-  .navbar-brand img { 
+
+  .navbar-brand:hover { transform: translateY(-1px); }
+
+  .navbar-brand img {
     height: 36px;
     margin-right: 10px;
     border-radius: 8px;
     transition: var(--transition);
     filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
   }
-  
-  .navbar-brand:hover img {
-    transform: scale(1.05);
-  }
-  
-  .brand-text { 
+
+  .navbar-brand:hover img { transform: scale(1.05); }
+
+  .brand-text {
     font-size: 1.1rem;
     color: #000000;
     line-height: 1.2;
@@ -215,37 +204,30 @@ if ($user_id > 0) {
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
-  
-  .brand-text span {
-    font-size: 20px !important;
-  }
-  
-  .brand-text small {
-    font-size: 8px !important;
-  }
-  
-  .nav-link { 
-    color: var(--text-secondary) !important; 
-    font-weight: 500; 
+
+  .brand-text span { font-size: 20px !important; }
+  .brand-text small { font-size: 8px !important; }
+
+  .nav-link {
+    color: var(--text-secondary) !important;
+    font-weight: 500;
     margin: 0 0.15rem;
-    transition: var(--transition); 
+    transition: var(--transition);
     font-size: 0.8rem;
     padding: 0.4rem 0.8rem !important;
     border-radius: 8px;
     position: relative;
   }
-  
+
   .nav-link:hover,
-  .nav-link.active { 
-    color: var(--primary) !important; 
+  .nav-link.active {
+    color: var(--primary) !important;
     background: var(--hover-bg);
     transform: translateY(-1px);
   }
-  
-  .nav-link.active {
-    font-weight: 600;
-  }
-  
+
+  .nav-link.active { font-weight: 600; }
+
   .nav-link.active::after {
     content: '';
     position: absolute;
@@ -257,9 +239,9 @@ if ($user_id > 0) {
     border-radius: 2px;
     transform: translateX(-50%);
   }
-  
-  .dropdown-menu { 
-    border-radius: var(--radius); 
+
+  .dropdown-menu {
+    border-radius: var(--radius);
     box-shadow: var(--shadow-lg);
     animation: slideIn 0.25s ease-out;
     border: 1px solid var(--border);
@@ -268,9 +250,9 @@ if ($user_id > 0) {
     margin-top: 0.4rem !important;
     min-width: 200px;
   }
-  
-  .dropdown-item { 
-    font-weight: 500; 
+
+  .dropdown-item {
+    font-weight: 500;
     padding: 0.4rem 0.8rem;
     font-size: 0.75rem;
     color: var(--text-secondary) !important;
@@ -278,20 +260,17 @@ if ($user_id > 0) {
     transition: var(--transition);
     margin: 0.1rem 0;
   }
-  
-  .dropdown-item:hover { 
-    background: var(--primary-light) !important; 
+
+  .dropdown-item:hover {
+    background: var(--primary-light) !important;
     color: white !important;
     transform: translateX(3px);
   }
-  
-  .dropdown-divider {
-    border-color: var(--border);
-    margin: 0.3rem 0;
-  }
-  
-  .btn-logout { 
-    font-weight: 600; 
+
+  .dropdown-divider { border-color: var(--border); margin: 0.3rem 0; }
+
+  .btn-logout {
+    font-weight: 600;
     border-radius: 8px;
     padding: 0.4rem 1rem;
     font-size: 0.75rem;
@@ -299,23 +278,14 @@ if ($user_id > 0) {
     border: none;
     margin-left: 20px !important;
   }
-  
-  .btn-logout:hover { 
-    background: #bab9b9 100%; 
-    transform: translateY(-2px);
+
+  .btn-logout:hover { background: #bab9b9 100%; transform: translateY(-2px); }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(-8px) scale(0.98); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
   }
-  
-  @keyframes slideIn { 
-    from { 
-      opacity: 0; 
-      transform: translateY(-8px) scale(0.98); 
-    } 
-    to { 
-      opacity: 1; 
-      transform: translateY(0) scale(1); 
-    } 
-  }
-  
+
   .navbar-toggler {
     border: none;
     padding: 0.4rem;
@@ -323,23 +293,19 @@ if ($user_id > 0) {
     transition: var(--transition);
     background: var(--surface);
   }
-  
-  .navbar-toggler:focus {
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-  }
-  
+
+  .navbar-toggler:focus { box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
+
   .navbar-toggler-icon {
     background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='rgba(30, 41, 59, 0.7)' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e");
     width: 1.2em;
     height: 1.2em;
   }
-  
+
   @media (max-width: 991px) {
-    .navbar { 
-      padding: 0.5rem 1rem;
-    }
-    
-    .navbar-collapse { 
+    .navbar { padding: 0.5rem 1rem; }
+
+    .navbar-collapse {
       background: var(--background);
       padding: 0.8rem;
       border-radius: var(--radius);
@@ -347,72 +313,38 @@ if ($user_id > 0) {
       box-shadow: var(--shadow-lg);
       border: 1px solid var(--border);
     }
-    
-    .nav-link { 
-      color: var(--text-primary) !important; 
+
+    .nav-link {
+      color: var(--text-primary) !important;
       font-size: 0.85rem;
       padding: 0.5rem 0.8rem !important;
       margin: 0.2rem 0;
     }
-    
-    .dropdown-menu { 
+
+    .dropdown-menu {
       background: var(--surface);
       margin: 0.4rem 0 0.4rem 0.8rem;
       border: 1px solid var(--border);
     }
-    
-    .dropdown-item { 
-      padding: 0.5rem 0.8rem;
-      font-size: 0.8rem;
-    }
-    
-    .btn-logout { 
-      margin-top: 0.8rem;
-      width: 100%;
-      text-align: center;
-    }
 
-    .navbar-brand {
-      margin-right: 1rem;
-    }
+    .dropdown-item { padding: 0.5rem 0.8rem; font-size: 0.8rem; }
 
-    .navbar-brand img {
-      height: 32px;
-    }
+    .btn-logout { margin-top: 0.8rem; width: 100%; text-align: center; }
 
-    .brand-text span {
-      font-size: 18px !important;
-    }
-
-    .brand-text small {
-      font-size: 7px !important;
-    }
+    .navbar-brand { margin-right: 1rem; }
+    .navbar-brand img { height: 32px; }
+    .brand-text span { font-size: 18px !important; }
+    .brand-text small { font-size: 7px !important; }
   }
 
-  /* Extra small devices */
   @media (max-width: 575px) {
-    .navbar {
-      padding: 0.4rem 0.8rem;
-    }
-
-    .navbar-brand {
-      font-size: 1rem;
-    }
-
-    .navbar-brand img {
-      height: 28px;
-      margin-right: 6px;
-    }
-
-    .brand-text span {
-      font-size: 16px !important;
-    }
-
-    .brand-text small {
-      font-size: 6px !important;
-    }
+    .navbar { padding: 0.4rem 0.8rem; }
+    .navbar-brand { font-size: 1rem; }
+    .navbar-brand img { height: 28px; margin-right: 6px; }
+    .brand-text span { font-size: 16px !important; }
+    .brand-text small { font-size: 6px !important; }
   }
-  
+
   .badge-notification {
     position: absolute;
     top: -5px;
@@ -428,7 +360,7 @@ if ($user_id > 0) {
     justify-content: center;
     font-weight: 600;
   }
-  
+
   .user-profile {
     display: flex;
     align-items: center;
@@ -438,7 +370,7 @@ if ($user_id > 0) {
     background: var(--surface);
     border: 1px solid var(--border);
   }
-  
+
   .user-avatar {
     width: 32px;
     height: 32px;
@@ -452,29 +384,18 @@ if ($user_id > 0) {
     margin-right: 8px;
     font-size: 0.9rem;
   }
-  
-  .user-info {
-    flex: 1;
-  }
-  
-  .user-name {
-    font-weight: 600;
-    color: var(--text-primary);
-    font-size: 0.8rem;
-  }
-  
-  .user-role {
-    font-size: 0.7rem;
-    color: var(--text-secondary);
-  }
 
-  /* Body styles */
+  .user-info { flex: 1; }
+  .user-name { font-weight: 600; color: var(--text-primary); font-size: 0.8rem; }
+  .user-role { font-size: 0.7rem; color: var(--text-secondary); }
+
   body {
     font-family: 'Inter', sans-serif;
     background-color: #f4f6f9;
     color: #2d3748;
     line-height: 1.4;
     font-size: 14px;
+    background-color: #f4f6f9 !important;
   }
 
   .container {
@@ -504,10 +425,7 @@ if ($user_id > 0) {
     margin: 0;
   }
 
-  .panel-body {
-    padding: 15px;
-    background-color: #f6f5f5;
-  }
+  .panel-body { padding: 15px; background-color: #f6f5f5; }
 
   .alert {
     border-radius: 6px;
@@ -541,9 +459,7 @@ if ($user_id > 0) {
     margin-bottom: 10px;
   }
 
-  .form-group {
-    margin-bottom: 10px;
-  }
+  .form-group { margin-bottom: 10px; }
 
   .form-group label {
     font-size: 13px;
@@ -575,72 +491,21 @@ if ($user_id > 0) {
     flex-wrap: wrap;
   }
 
-  .form-group-inline .form-control {
-    width: auto;
-    min-width: 60px;
-  }
+  .form-group-inline .form-control { width: auto; min-width: 60px; }
+  .form-group-inline select.form-control { min-width: 100px; }
+  .form-group input[type="checkbox"] { transform: scale(1.2); margin-right: 8px; }
 
-  .form-group-inline select.form-control {
-    min-width: 100px;
-  }
+  .btn { border-radius: 5px; padding: 8px 15px; font-size: 13px; font-weight: 500; transition: all 0.2s ease; }
+  .btn-primary { background-color: #2b6cb0; border-color: #2b6cb0; }
+  .btn-primary:hover { background-color: #2c5282; border-color: #2c5282; }
+  .btn-secondary { background-color: #718096; border-color: #718096; }
+  .btn-secondary:hover { background-color: #5a667a; border-color: #5a667a; }
+  .btn-danger { background-color: #e53e3e; border-color: #e53e3e; }
+  .btn-danger:hover { background-color: #c53030; border-color: #c53030; }
+  .btn-info { background-color: #38b2ac; border-color: #38b2ac; }
+  .btn-info:hover { background-color: #319795; border-color: #319795; }
 
-  .form-group input[type="checkbox"] {
-    transform: scale(1.2);
-    margin-right: 8px;
-  }
-
-  .btn {
-    border-radius: 5px;
-    padding: 8px 15px;
-    font-size: 13px;
-    font-weight: 500;
-    transition: all 0.2s ease;
-  }
-
-  .btn-primary {
-    background-color: #2b6cb0;
-    border-color: #2b6cb0;
-  }
-
-  .btn-primary:hover {
-    background-color: #2c5282;
-    border-color: #2c5282;
-  }
-
-  .btn-secondary {
-    background-color: #718096;
-    border-color: #718096;
-  }
-
-  .btn-secondary:hover {
-    background-color: #5a667a;
-    border-color: #5a667a;
-  }
-
-  .btn-danger {
-    background-color: #e53e3e;
-    border-color: #e53e3e;
-  }
-
-  .btn-danger:hover {
-    background-color: #c53030;
-    border-color: #c53030;
-  }
-
-  .btn-info {
-    background-color: #38b2ac;
-    border-color: #38b2ac;
-  }
-
-  .btn-info:hover {
-    background-color: #319795;
-    border-color: #319795;
-  }
-
-  .table-responsive {
-    border-radius: 6px;
-    overflow: hidden;
-  }
+  .table-responsive { border-radius: 6px; overflow: hidden; }
 
   .table {
     margin-bottom: 0;
@@ -666,46 +531,18 @@ if ($user_id > 0) {
     color: #2d3748;
   }
 
-  .table-striped tbody tr:nth-of-type(odd) {
-    background-color: #f7fafc;
-  }
+  .table-striped tbody tr:nth-of-type(odd) { background-color: #f7fafc; }
+  .table-striped tbody tr:hover { background-color: #edf2f7; }
 
-  .table-striped tbody tr:hover {
-    background-color: #edf2f7;
-  }
+  .student-image { max-width: 60px; max-height: 60px; border-radius: 4px; object-fit: cover; }
 
-  .student-image {
-    max-width: 60px;
-    max-height: 60px;
-    border-radius: 4px;
-    object-fit: cover;
-  }
-
-  #old_dues_amount_container {
-    margin-top: 10px;
-  }
-
-  .two-column-form .row > div {
-    margin-bottom: 10px;
-  }
+  #old_dues_amount_container { margin-top: 10px; }
+  .two-column-form .row > div { margin-bottom: 10px; }
 
   @media (max-width: 768px) {
-    .two-column-form .row > div {
-      margin-bottom: 10px;
-    }
-
-    .form-group-inline {
-      flex-direction: column;
-      align-items: flex-start;
-    }
-
-    .form-group-inline .form-control {
-      width: 100%;
-    }
-  }
-  
-  body {
-    background-color: #f4f6f9 !important;
+    .two-column-form .row > div { margin-bottom: 10px; }
+    .form-group-inline { flex-direction: column; align-items: flex-start; }
+    .form-group-inline .form-control { width: 100%; }
   }
 </style>
 
@@ -716,51 +553,29 @@ $dashboard_initials = strtoupper(substr($dashboard_username, 0, 2));
 $dashboard_icon_for_title = static function ($title) {
     $title = strtolower((string) $title);
     $icon_rules = [
-        ['dashboard', 'fa-gauge-high'],
-        ['student', 'fa-user-graduate'],
-        ['admission', 'fa-user-plus'],
-        ['parent', 'fa-people-roof'],
-        ['teacher', 'fa-chalkboard-user'],
-        ['staff', 'fa-people-group'],
-        ['attendance', 'fa-calendar-check'],
-        ['fee', 'fa-coins'],
-        ['payment', 'fa-credit-card'],
-        ['salary', 'fa-money-check-dollar'],
-        ['finance', 'fa-wallet'],
-        ['expense', 'fa-receipt'],
-        ['class', 'fa-chalkboard'],
-        ['section', 'fa-users'],
-        ['subject', 'fa-book-open'],
-        ['exam', 'fa-file-pen'],
-        ['result', 'fa-square-poll-vertical'],
-        ['timetable', 'fa-calendar-days'],
-        ['report', 'fa-chart-pie'],
-        ['transport', 'fa-bus'],
-        ['vehicle', 'fa-truck'],
-        ['library', 'fa-book'],
-        ['book', 'fa-book-open'],
-        ['inventory', 'fa-boxes-stacked'],
-        ['hostel', 'fa-building'],
-        ['message', 'fa-comments'],
-        ['notice', 'fa-bullhorn'],
-        ['event', 'fa-calendar-day'],
-        ['website', 'fa-globe'],
-        ['setting', 'fa-gear'],
-        ['role', 'fa-shield-halved'],
-        ['permission', 'fa-key'],
-        ['user', 'fa-users'],
-        ['account', 'fa-address-card'],
-        ['certificate', 'fa-certificate'],
-        ['subscription', 'fa-rotate'],
-        ['gateway', 'fa-arrow-right-arrow-left'],
-        ['app', 'fa-table-cells'],
-        ['hr', 'fa-briefcase'],
-        ['logout', 'fa-right-from-bracket']
+        ['dashboard', 'fa-gauge-high'], ['student', 'fa-user-graduate'],
+        ['admission', 'fa-user-plus'], ['parent', 'fa-people-roof'],
+        ['teacher', 'fa-chalkboard-user'], ['staff', 'fa-people-group'],
+        ['attendance', 'fa-calendar-check'], ['fee', 'fa-coins'],
+        ['payment', 'fa-credit-card'], ['salary', 'fa-money-check-dollar'],
+        ['finance', 'fa-wallet'], ['expense', 'fa-receipt'],
+        ['class', 'fa-chalkboard'], ['section', 'fa-users'],
+        ['subject', 'fa-book-open'], ['exam', 'fa-file-pen'],
+        ['result', 'fa-square-poll-vertical'], ['timetable', 'fa-calendar-days'],
+        ['report', 'fa-chart-pie'], ['transport', 'fa-bus'],
+        ['vehicle', 'fa-truck'], ['library', 'fa-book'],
+        ['book', 'fa-book-open'], ['inventory', 'fa-boxes-stacked'],
+        ['hostel', 'fa-building'], ['message', 'fa-comments'],
+        ['notice', 'fa-bullhorn'], ['event', 'fa-calendar-day'],
+        ['website', 'fa-globe'], ['setting', 'fa-gear'],
+        ['role', 'fa-shield-halved'], ['permission', 'fa-key'],
+        ['user', 'fa-users'], ['account', 'fa-address-card'],
+        ['certificate', 'fa-certificate'], ['subscription', 'fa-rotate'],
+        ['gateway', 'fa-arrow-right-arrow-left'], ['app', 'fa-table-cells'],
+        ['hr', 'fa-briefcase'], ['logout', 'fa-right-from-bracket']
     ];
     foreach ($icon_rules as [$keyword, $icon]) {
-        if (strpos($title, $keyword) !== false) {
-            return $icon;
-        }
+        if (strpos($title, $keyword) !== false) return $icon;
     }
     return 'fa-layer-group';
 };
@@ -860,6 +675,7 @@ $dashboard_quick_actions = array_values(array_filter($dashboard_quick_actions, f
   </div>
 </header>
 
+<?php if (!$__is_parent_role): ?>
 <aside class="dashboard-sidebar" id="dashboardSidebar" aria-label="Main navigation">
   <nav class="dashboard-sidebar-nav">
     <label class="dashboard-sidebar-search">
@@ -875,9 +691,7 @@ $dashboard_quick_actions = array_values(array_filter($dashboard_quick_actions, f
     <div class="dashboard-nav-caption dashboard-nav-caption-spaced">MANAGEMENT</div>
     <?php foreach ($role_modules as $module_id => $module): ?>
       <?php
-      if (isset($module_parents[$module_id])) {
-          continue;
-      }
+      if (isset($module_parents[$module_id])) continue;
       $module_title = (string) ($module['title'] ?? '');
       $module_url = (string) ($module['url'] ?? '#');
       $module_children = $module['children'] ?? [];
@@ -892,13 +706,9 @@ $dashboard_quick_actions = array_values(array_filter($dashboard_quick_actions, f
           </button>
           <div class="dashboard-sidebar-submenu" id="<?php echo htmlspecialchars($module_dom_id, ENT_QUOTES, 'UTF-8'); ?>" hidden>
             <?php foreach ($module_children as $child): ?>
-              <?php
-              $child_title = (string) ($child['title'] ?? 'Untitled');
-              $child_url = (string) ($child['url'] ?? '#');
-              ?>
-              <a class="dashboard-sidebar-sublink" href="<?php echo htmlspecialchars($child_url, ENT_QUOTES, 'UTF-8'); ?>">
-                <i class="fa-solid <?php echo htmlspecialchars($dashboard_icon_for_title($child_title), ENT_QUOTES, 'UTF-8'); ?>"></i>
-                <span><?php echo htmlspecialchars($child_title, ENT_QUOTES, 'UTF-8'); ?></span>
+              <a class="dashboard-sidebar-sublink" href="<?php echo htmlspecialchars((string)($child['url'] ?? '#'), ENT_QUOTES, 'UTF-8'); ?>">
+                <i class="fa-solid <?php echo htmlspecialchars($dashboard_icon_for_title((string)($child['title'] ?? '')), ENT_QUOTES, 'UTF-8'); ?>"></i>
+                <span><?php echo htmlspecialchars((string)($child['title'] ?? 'Untitled'), ENT_QUOTES, 'UTF-8'); ?></span>
               </a>
             <?php endforeach; ?>
           </div>
@@ -919,19 +729,18 @@ $dashboard_quick_actions = array_values(array_filter($dashboard_quick_actions, f
   </div>
 </aside>
 <button type="button" class="dashboard-sidebar-backdrop" id="dashboardSidebarBackdrop" aria-label="Close navigation"></button>
+<?php endif; ?>
 
 <script>
   (function () {
     var toggle = document.getElementById('dashboardSidebarToggle');
     var backdrop = document.getElementById('dashboardSidebarBackdrop');
+    var isParent = <?php echo $__is_parent_role ? 'true' : 'false'; ?>;
 
     function syncNavigationForViewport() {
       var isMobile = window.matchMedia('(max-width: 767.98px)').matches;
-      if (isMobile) {
-        document.body.classList.remove('dashboard-sidebar-collapsed');
-      } else {
-        document.body.classList.remove('dashboard-sidebar-open');
-      }
+      if (isMobile) document.body.classList.remove('dashboard-sidebar-collapsed');
+      else document.body.classList.remove('dashboard-sidebar-open');
       if (toggle) {
         var isExpanded = isMobile
           ? document.body.classList.contains('dashboard-sidebar-open')
@@ -950,7 +759,12 @@ $dashboard_quick_actions = array_values(array_filter($dashboard_quick_actions, f
       }
     }
 
-    if (toggle) {
+    // Parents: hide the toggle button entirely
+    if (isParent && toggle) {
+      toggle.style.display = 'none';
+    }
+
+    if (toggle && !isParent) {
       toggle.addEventListener('click', function () {
         if (window.matchMedia('(max-width: 767.98px)').matches) {
           var isOpen = document.body.classList.toggle('dashboard-sidebar-open');
@@ -978,12 +792,8 @@ $dashboard_quick_actions = array_values(array_filter($dashboard_quick_actions, f
         event.stopPropagation();
         var menu = document.getElementById(menuButton.getAttribute('data-dashboard-menu'));
         var shouldOpen = menu && menu.hidden;
-        document.querySelectorAll('.dashboard-topbar-menu').forEach(function (item) {
-          item.hidden = true;
-        });
-        document.querySelectorAll('[data-dashboard-menu]').forEach(function (button) {
-          button.setAttribute('aria-expanded', 'false');
-        });
+        document.querySelectorAll('.dashboard-topbar-menu').forEach(function (item) { item.hidden = true; });
+        document.querySelectorAll('[data-dashboard-menu]').forEach(function (button) { button.setAttribute('aria-expanded', 'false'); });
         if (menu && shouldOpen) {
           menu.hidden = false;
           menuButton.setAttribute('aria-expanded', 'true');
@@ -993,12 +803,8 @@ $dashboard_quick_actions = array_values(array_filter($dashboard_quick_actions, f
 
     document.addEventListener('click', function (event) {
       if (!event.target.closest('.dashboard-topbar-menu-wrap')) {
-        document.querySelectorAll('.dashboard-topbar-menu').forEach(function (menu) {
-          menu.hidden = true;
-        });
-        document.querySelectorAll('[data-dashboard-menu]').forEach(function (button) {
-          button.setAttribute('aria-expanded', 'false');
-        });
+        document.querySelectorAll('.dashboard-topbar-menu').forEach(function (menu) { menu.hidden = true; });
+        document.querySelectorAll('[data-dashboard-menu]').forEach(function (button) { button.setAttribute('aria-expanded', 'false'); });
       }
     });
 
@@ -1009,10 +815,7 @@ $dashboard_quick_actions = array_values(array_filter($dashboard_quick_actions, f
         if (searchInput) {
           var isOpen = document.body.classList.toggle('dashboard-student-search-open');
           searchToggle.setAttribute('aria-expanded', String(isOpen));
-          if (isOpen) {
-            searchInput.focus();
-            searchInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }
+          if (isOpen) { searchInput.focus(); searchInput.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
         }
       });
     }
@@ -1038,20 +841,17 @@ $dashboard_quick_actions = array_values(array_filter($dashboard_quick_actions, f
           var submenu = group.querySelector('.dashboard-sidebar-submenu');
           var groupMatches = toggle && toggle.innerText.toLowerCase().includes(searchTerm);
           var visibleChildren = 0;
-
           group.querySelectorAll('.dashboard-sidebar-sublink').forEach(function (link) {
             var matches = !searchTerm || groupMatches || link.innerText.toLowerCase().includes(searchTerm);
             link.hidden = !matches;
             if (matches) visibleChildren += 1;
           });
-
           group.hidden = searchTerm !== '' && !groupMatches && visibleChildren === 0;
           if (searchTerm && !group.hidden && submenu && !groupMatches) {
             submenu.hidden = false;
             if (toggle) toggle.setAttribute('aria-expanded', 'true');
           }
         });
-
         document.querySelectorAll('.dashboard-sidebar-nav > .dashboard-sidebar-link').forEach(function (link) {
           link.hidden = searchTerm !== '' && !link.innerText.toLowerCase().includes(searchTerm);
         });
@@ -1063,16 +863,13 @@ $dashboard_quick_actions = array_values(array_filter($dashboard_quick_actions, f
         closeMobileSidebar();
         document.body.classList.remove('dashboard-student-search-open');
         if (searchToggle) searchToggle.setAttribute('aria-expanded', 'false');
-        document.querySelectorAll('.dashboard-topbar-menu').forEach(function (menu) {
-          menu.hidden = true;
-        });
-        document.querySelectorAll('[data-dashboard-menu]').forEach(function (button) {
-          button.setAttribute('aria-expanded', 'false');
-        });
+        document.querySelectorAll('.dashboard-topbar-menu').forEach(function (menu) { menu.hidden = true; });
+        document.querySelectorAll('[data-dashboard-menu]').forEach(function (button) { button.setAttribute('aria-expanded', 'false'); });
       }
     });
   }());
 </script>
+
 <?php else: ?>
 <?php
 $navigation_username = trim((string)($_SESSION['username'] ?? 'Account'));
@@ -1085,6 +882,12 @@ $navigation_current_page = basename($_SERVER['PHP_SELF'] ?? '');
     padding-left: 260px !important;
     transition: padding-left 0.22s ease;
   }
+
+  <?php if ($__is_parent_role): ?>
+  body:not(.dashboard-page) {
+    padding-left: 0 !important;
+  }
+  <?php endif; ?>
 
   body:not(.dashboard-page) .dashboard-topbar {
     position: fixed;
@@ -1134,10 +937,6 @@ $navigation_current_page = basename($_SERVER['PHP_SELF'] ?? '');
     letter-spacing: 0.06em;
   }
 
-  body:not(.dashboard-page) .dashboard-brand {
-    font-size: 0.95rem;
-  }
-
   body:not(.dashboard-page) .dashboard-account-name {
     margin-left: auto;
     color: #686562;
@@ -1155,9 +954,7 @@ $navigation_current_page = basename($_SERVER['PHP_SELF'] ?? '');
     font-weight: 700;
   }
 
-  body:not(.dashboard-page) .dashboard-topbar-menu-wrap {
-    position: relative;
-  }
+  body:not(.dashboard-page) .dashboard-topbar-menu-wrap { position: relative; }
 
   body:not(.dashboard-page) .dashboard-topbar-menu {
     position: absolute;
@@ -1172,9 +969,7 @@ $navigation_current_page = basename($_SERVER['PHP_SELF'] ?? '');
     box-shadow: 0 12px 30px rgba(36, 31, 27, 0.14);
   }
 
-  body:not(.dashboard-page) .dashboard-topbar-menu[hidden] {
-    display: none;
-  }
+  body:not(.dashboard-page) .dashboard-topbar-menu[hidden] { display: none; }
 
   body:not(.dashboard-page) .dashboard-menu-heading {
     padding: 0.6rem 0.7rem;
@@ -1194,9 +989,7 @@ $navigation_current_page = basename($_SERVER['PHP_SELF'] ?? '');
     text-decoration: none;
   }
 
-  body:not(.dashboard-page) .dashboard-topbar-menu a:hover {
-    background: #f3f4f8;
-  }
+  body:not(.dashboard-page) .dashboard-topbar-menu a:hover { background: #f3f4f8; }
 
   body:not(.dashboard-page) .dashboard-sidebar {
     position: fixed;
@@ -1214,9 +1007,7 @@ $navigation_current_page = basename($_SERVER['PHP_SELF'] ?? '');
     transition: width 0.22s ease, transform 0.22s ease;
   }
 
-  body:not(.dashboard-page) .dashboard-sidebar-nav {
-    padding: 1.1rem 0.8rem 0.5rem;
-  }
+  body:not(.dashboard-page) .dashboard-sidebar-nav { padding: 1.1rem 0.8rem 0.5rem; }
 
   body:not(.dashboard-page) .dashboard-sidebar-search {
     display: flex;
@@ -1249,9 +1040,7 @@ $navigation_current_page = basename($_SERVER['PHP_SELF'] ?? '');
     letter-spacing: 0.11em;
   }
 
-  body:not(.dashboard-page) .dashboard-nav-caption-spaced {
-    margin-top: 0.8rem;
-  }
+  body:not(.dashboard-page) .dashboard-nav-caption-spaced { margin-top: 0.8rem; }
 
   body:not(.dashboard-page) .dashboard-sidebar-link {
     position: relative;
@@ -1292,9 +1081,7 @@ $navigation_current_page = basename($_SERVER['PHP_SELF'] ?? '');
     font-weight: 650;
   }
 
-  body:not(.dashboard-page) .dashboard-sidebar-group-toggle {
-    appearance: none;
-  }
+  body:not(.dashboard-page) .dashboard-sidebar-group-toggle { appearance: none; }
 
   body:not(.dashboard-page) .dashboard-sidebar-chevron {
     margin-left: auto;
@@ -1306,13 +1093,8 @@ $navigation_current_page = basename($_SERVER['PHP_SELF'] ?? '');
     transform: rotate(180deg);
   }
 
-  body:not(.dashboard-page) .dashboard-sidebar-submenu {
-    padding: 0.15rem 0 0.35rem 1.1rem;
-  }
-
-  body:not(.dashboard-page) .dashboard-sidebar-submenu[hidden] {
-    display: none;
-  }
+  body:not(.dashboard-page) .dashboard-sidebar-submenu { padding: 0.15rem 0 0.35rem 1.1rem; }
+  body:not(.dashboard-page) .dashboard-sidebar-submenu[hidden] { display: none; }
 
   body:not(.dashboard-page) .dashboard-sidebar-sublink {
     display: flex;
@@ -1332,17 +1114,10 @@ $navigation_current_page = basename($_SERVER['PHP_SELF'] ?? '');
     border-top: 1px solid rgba(255, 255, 255, 0.08);
   }
 
-  body:not(.dashboard-page) .dashboard-sidebar-backdrop {
-    display: none;
-  }
+  body:not(.dashboard-page) .dashboard-sidebar-backdrop { display: none; }
 
-  body:not(.dashboard-page).dashboard-sidebar-collapsed {
-    padding-left: 76px !important;
-  }
-
-  body:not(.dashboard-page).dashboard-sidebar-collapsed .dashboard-sidebar {
-    width: 76px;
-  }
+  body:not(.dashboard-page).dashboard-sidebar-collapsed { padding-left: 76px !important; }
+  body:not(.dashboard-page).dashboard-sidebar-collapsed .dashboard-sidebar { width: 76px; }
 
   body:not(.dashboard-page).dashboard-sidebar-collapsed .dashboard-nav-caption,
   body:not(.dashboard-page).dashboard-sidebar-collapsed .dashboard-sidebar-search,
@@ -1360,18 +1135,14 @@ $navigation_current_page = basename($_SERVER['PHP_SELF'] ?? '');
   }
 
   @media (max-width: 767.98px) {
-    body:not(.dashboard-page) {
-      padding-left: 0 !important;
-    }
+    body:not(.dashboard-page) { padding-left: 0 !important; }
 
     body:not(.dashboard-page) .dashboard-sidebar {
       width: 260px;
       transform: translateX(-100%);
     }
 
-    body:not(.dashboard-page).dashboard-sidebar-open .dashboard-sidebar {
-      transform: translateX(0);
-    }
+    body:not(.dashboard-page).dashboard-sidebar-open .dashboard-sidebar { transform: translateX(0); }
 
     body:not(.dashboard-page) .dashboard-sidebar-backdrop {
       position: fixed;
@@ -1381,23 +1152,17 @@ $navigation_current_page = basename($_SERVER['PHP_SELF'] ?? '');
       background: rgba(24, 26, 33, 0.38);
     }
 
-    body:not(.dashboard-page).dashboard-sidebar-open .dashboard-sidebar-backdrop {
-      display: block;
-    }
-
-    body:not(.dashboard-page) .dashboard-topbar {
-      padding: 0 0.75rem;
-    }
-
-    body:not(.dashboard-page) .dashboard-account-name {
-      display: none;
-    }
+    body:not(.dashboard-page).dashboard-sidebar-open .dashboard-sidebar-backdrop { display: block; }
+    body:not(.dashboard-page) .dashboard-topbar { padding: 0 0.75rem; }
+    body:not(.dashboard-page) .dashboard-account-name { display: none; }
   }
 </style>
 <header class="dashboard-topbar">
+  <?php if (!$__is_parent_role): ?>
   <button type="button" class="dashboard-menu-toggle" id="dashboardSidebarToggle" aria-label="Toggle navigation" aria-expanded="false">
     <i class="fa-solid fa-bars"></i>
   </button>
+  <?php endif; ?>
   <a class="dashboard-brand" href="index.php">
     <span>School Management System</span>
   </a>
@@ -1414,6 +1179,7 @@ $navigation_current_page = basename($_SERVER['PHP_SELF'] ?? '');
   </div>
 </header>
 
+<?php if (!$__is_parent_role): ?>
 <aside class="dashboard-sidebar" id="dashboardSidebar" aria-label="Main navigation">
   <nav class="dashboard-sidebar-nav">
     <label class="dashboard-sidebar-search">
@@ -1428,14 +1194,11 @@ $navigation_current_page = basename($_SERVER['PHP_SELF'] ?? '');
     <div class="dashboard-nav-caption dashboard-nav-caption-spaced">MANAGEMENT</div>
     <?php foreach ($role_modules as $module_id => $module): ?>
       <?php
-      if (isset($module_parents[$module_id])) {
-          continue;
-      }
+      if (isset($module_parents[$module_id])) continue;
       $module_title = (string)($module['title'] ?? '');
       $module_url = (string)($module['url'] ?? '#');
       $module_children = $module['children'] ?? [];
       $module_dom_id = 'dashboard-module-' . (int)$module_id;
-      $module_icon = strtolower($module_title);
       ?>
       <?php if (!empty($module_children)): ?>
         <section class="dashboard-sidebar-group">
@@ -1475,20 +1238,19 @@ $navigation_current_page = basename($_SERVER['PHP_SELF'] ?? '');
   </div>
 </aside>
 <button type="button" class="dashboard-sidebar-backdrop" id="dashboardSidebarBackdrop" aria-label="Close navigation"></button>
+<?php endif; ?>
 
 <script>
   (function () {
     var toggle = document.getElementById('dashboardSidebarToggle');
     var backdrop = document.getElementById('dashboardSidebarBackdrop');
     var search = document.getElementById('dashboardSidebarSearch');
+    var isParent = <?php echo $__is_parent_role ? 'true' : 'false'; ?>;
 
     function syncNavigationForViewport() {
       var isMobile = window.matchMedia('(max-width: 767.98px)').matches;
-      if (isMobile) {
-        document.body.classList.remove('dashboard-sidebar-collapsed');
-      } else {
-        document.body.classList.remove('dashboard-sidebar-open');
-      }
+      if (isMobile) document.body.classList.remove('dashboard-sidebar-collapsed');
+      else document.body.classList.remove('dashboard-sidebar-open');
       if (toggle) {
         var isExpanded = isMobile
           ? document.body.classList.contains('dashboard-sidebar-open')
@@ -1507,7 +1269,7 @@ $navigation_current_page = basename($_SERVER['PHP_SELF'] ?? '');
       }
     }
 
-    if (toggle) {
+    if (toggle && !isParent) {
       toggle.addEventListener('click', function () {
         if (window.matchMedia('(max-width: 767.98px)').matches) {
           var isOpen = document.body.classList.toggle('dashboard-sidebar-open');
@@ -1526,12 +1288,8 @@ $navigation_current_page = basename($_SERVER['PHP_SELF'] ?? '');
         event.stopPropagation();
         var menu = document.getElementById(menuButton.getAttribute('data-dashboard-menu'));
         var shouldOpen = menu && menu.hidden;
-        document.querySelectorAll('.dashboard-topbar-menu').forEach(function (item) {
-          item.hidden = true;
-        });
-        document.querySelectorAll('[data-dashboard-menu]').forEach(function (button) {
-          button.setAttribute('aria-expanded', 'false');
-        });
+        document.querySelectorAll('.dashboard-topbar-menu').forEach(function (item) { item.hidden = true; });
+        document.querySelectorAll('[data-dashboard-menu]').forEach(function (button) { button.setAttribute('aria-expanded', 'false'); });
         if (menu && shouldOpen) {
           menu.hidden = false;
           menuButton.setAttribute('aria-expanded', 'true');
@@ -1541,12 +1299,8 @@ $navigation_current_page = basename($_SERVER['PHP_SELF'] ?? '');
 
     document.addEventListener('click', function (event) {
       if (!event.target.closest('.dashboard-topbar-menu-wrap')) {
-        document.querySelectorAll('.dashboard-topbar-menu').forEach(function (menu) {
-          menu.hidden = true;
-        });
-        document.querySelectorAll('[data-dashboard-menu]').forEach(function (button) {
-          button.setAttribute('aria-expanded', 'false');
-        });
+        document.querySelectorAll('.dashboard-topbar-menu').forEach(function (menu) { menu.hidden = true; });
+        document.querySelectorAll('[data-dashboard-menu]').forEach(function (button) { button.setAttribute('aria-expanded', 'false'); });
       }
     });
 

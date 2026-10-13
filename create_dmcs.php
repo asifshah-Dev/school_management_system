@@ -1,758 +1,391 @@
 <?php
 ob_start();
 require_once('security.php');
-/* ==== AUTHORIZATION GATE ==== */
 require_once('permissions.php');
 require_action($conn, __FILE__);
 $perms = current_user_perms($conn, __FILE__);
-/* ==== END AUTHORIZATION GATE ==== */
-$edit_mode = false;
-$teacher_id = $_SESSION['user_id'];
+if (session_status() === PHP_SESSION_NONE) session_start();
+if (!isset($_SESSION['csrf_token'])) $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 
-// Initialize session if not started
-if (session_status() == PHP_SESSION_NONE) {
-    session_start();
-}
-
-// Generate CSRF token if not set
-if (!isset($_SESSION['csrf_token'])) {
-    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
-}
-
-// Create database connection
 require_once('conn_inc.php');
 
-// Enable error reporting for debugging
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL);
+$csrf = $_SESSION['csrf_token'];
+$teacher_id = (int)($_SESSION['user_id'] ?? 0);
 
-// Determine user role
+/* ═══════════════════════════════════════════════════════════
+   ROLE
+   ═══════════════════════════════════════════════════════════ */
 $is_admin = false;
 $stmt = $conn->prepare("SELECT r.title FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = ?");
 $stmt->bind_param("i", $teacher_id);
 $stmt->execute();
-$result = $stmt->get_result();
-if ($result->num_rows > 0) {
-    $role = $result->fetch_assoc()['title'];
-    $is_admin = strcasecmp($role, 'admin') === 0;
+$rres = $stmt->get_result();
+if ($rres && $r = $rres->fetch_assoc()) {
+    $is_admin = (strcasecmp($r['title'], 'admin') === 0);
 }
 $stmt->close();
 
-// Get filter parameters
-$filter_class = isset($_GET['filter_class']) ? intval($_GET['filter_class']) : 0;
-$filter_exam_type = isset($_GET['filter_exam_type']) ? intval($_GET['filter_exam_type']) : 0;
+/* ═══════════════════════════════════════════════════════════
+   FILTERS
+   ═══════════════════════════════════════════════════════════ */
+$f_session = (int)($_GET['session_id'] ?? 0);
+$f_type    = (int)($_GET['exam_type_id'] ?? 0);
+$f_class   = (int)($_GET['class_id'] ?? 0);
+$f_kind    = in_array($_GET['kind'] ?? '', array('test','term'), true) ? $_GET['kind'] : '';
+$f_search  = trim($_GET['q'] ?? '');
+$f_sort    = in_array($_GET['sort'] ?? '', array('newest','oldest','class','type'), true) ? $_GET['sort'] : 'newest';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // Verify CSRF token
-    if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
-        die("Invalid CSRF token: " . ($_POST['csrf_token'] ?? 'not set') . " vs " . $_SESSION['csrf_token']);
-    }
+$PAGE   = max(1, (int)($_GET['page'] ?? 1));
+$LIMIT  = 20;
+$OFFSET = ($PAGE - 1) * $LIMIT;
 
-    // Sanitize and validate input
-    $class_id = intval($_POST['class_id']);
-    $exam_type_id = intval($_POST['exam_type_id']);
-    $dated = $_POST['dated'];
-    $id = isset($_POST['id']) ? intval($_POST['id']) : 0;
+/* ═══════════════════════════════════════════════════════════
+   DROPDOWNS
+   ═══════════════════════════════════════════════════════════ */
+$sessions = array();
+$q = $conn->query("SELECT id, title FROM sessions WHERE status = 0 ORDER BY id DESC");
+if ($q) while ($r = $q->fetch_assoc()) $sessions[] = $r;
 
-    // Validate inputs
-    if ($class_id <= 0 || $exam_type_id <= 0 || empty($dated)) {
-        $_SESSION['message'] = "Invalid input: Please fill all fields correctly.";
-        $_SESSION['message_type'] = 'danger';
-        header("Location: " . $_SERVER['PHP_SELF']);
-        exit();
-    }
-
-    // Ensure date format
-    $dated = date('Y-m-d', strtotime($dated));
-
-    if ($id > 0) {
-        // Update existing record
-        $stmt = $conn->prepare("UPDATE arrange_exam SET class_id = ?, exam_type_id = ?, start_date = ? WHERE id = ?");
-        $stmt->bind_param("iisi", $class_id, $exam_type_id, $dated, $id);
-    } else {
-        // Insert new record
-        $stmt = $conn->prepare("INSERT INTO arrange_exam (exam_type_id, class_id, start_date) VALUES (?, ?, ?)");
-        $stmt->bind_param("iis", $exam_type_id, $class_id, $dated);
-    }
-
-    if (!$stmt->execute()) {
-        $_SESSION['message'] = "Error: " . $stmt->error;
-        $_SESSION['message_type'] = 'danger';
-        error_log("SQL Error: " . $stmt->error, 3, 'errors.log');
-    } else {
-        $_SESSION['message'] = $id > 0 ? "Record updated successfully." : "Record added successfully.";
-        $_SESSION['message_type'] = 'success';
-    }
-
-    $stmt->close();
-    header("Location: " . $_SERVER['PHP_SELF']);
-    exit();
+$exam_types = array('test' => array(), 'term' => array());
+$q = $conn->query("SELECT id, title, exam_kind FROM exam_types WHERE status = 0 ORDER BY exam_kind, title");
+if ($q) while ($r = $q->fetch_assoc()) {
+    $k = $r['exam_kind'] === 'test' ? 'test' : 'term';
+    $exam_types[$k][] = $r;
 }
 
-// Handle exam deletion
-if (isset($_GET['delete'])) {
-    $id = intval($_GET['delete']);
-    
-    $stmt = $conn->prepare("DELETE FROM arrange_exam WHERE id = ?");
-    $stmt->bind_param("i", $id);
-    
-    if ($stmt->execute()) {
-        $_SESSION['message'] = 'Exam deleted successfully!';
-        $_SESSION['message_type'] = 'success';
-    } else {
-        error_log("Database error: " . $stmt->error, 3, 'errors.log');
-        $_SESSION['message'] = 'Error: An unexpected error occurred.';
-        $_SESSION['message_type'] = 'danger';
-    }
-    
-    $stmt->close();
-    header("Location: " . $_SERVER['PHP_SELF']);
-    exit();
-}
-
-// Get dropdown options for filters
-$classes = [];
+/* Classes — scoped by teacher if not admin */
+$classes = array();
 if ($is_admin) {
-    // Admin can see all classes
-    $course_result = $conn->query("SELECT id, title FROM classes ORDER BY title");
+    $q = $conn->query("SELECT id, title FROM classes WHERE status = 0 OR status IS NULL ORDER BY title");
+    if ($q) while ($r = $q->fetch_assoc()) $classes[] = $r;
 } else {
-    // Non-admin can only see classes they teach
-    $stmt = $conn->prepare("SELECT c.id, c.title 
-                           FROM classes c 
-                           JOIN teacher_classes tc ON c.id = tc.class_section_id 
-                           WHERE tc.teacher_id = ? 
-                           ORDER BY c.title");
+    $stmt = $conn->prepare("
+        SELECT DISTINCT c.id, c.title
+        FROM classes c
+        INNER JOIN teacher_classes tc ON tc.class_id = c.id
+        WHERE tc.teacher_id = ?
+        ORDER BY c.title
+    ");
     $stmt->bind_param("i", $teacher_id);
     $stmt->execute();
-    $course_result = $stmt->get_result();
-}
-
-while ($row = $course_result->fetch_assoc()) {
-    $classes[$row['id']] = $row['title'];
-}
-if (!$is_admin) {
+    $rs = $stmt->get_result();
+    while ($r = $rs->fetch_assoc()) $classes[] = $r;
     $stmt->close();
-} else {
-    $course_result->close();
 }
 
-$exam_types = [];
-$types_result = $conn->query("SELECT id, title FROM exam_types ORDER BY title");
-while ($row2 = $types_result->fetch_assoc()) {
-    $exam_types[$row2['id']] = $row2['title'];
+/* ═══════════════════════════════════════════════════════════
+   WHERE + SORT
+   ═══════════════════════════════════════════════════════════ */
+$where = array("1=1");
+if ($f_session > 0) $where[] = "ae.session_id = " . (int)$f_session;
+if ($f_type > 0)    $where[] = "ae.exam_type_id = " . (int)$f_type;
+if ($f_class > 0)   $where[] = "ae.class_id = " . (int)$f_class;
+if ($f_kind !== '') $where[] = "ae.exam_kind = '" . $conn->real_escape_string($f_kind) . "'";
+if ($f_search !== '') {
+    $s = $conn->real_escape_string($f_search);
+    $where[] = "(c.title LIKE '%$s%' OR et.title LIKE '%$s%')";
 }
-$types_result->close();
-
-// Build WHERE clause for filtering
-$where_conditions = [];
-$params = [];
-$param_types = "";
-
-// Add teacher filter if not admin (must be first for non-admin)
+/* Non-admin scope */
 if (!$is_admin) {
-    $where_conditions[] = "tc.teacher_id = ?";
-    $params[] = $teacher_id;
-    $param_types .= "i";
+    $allowed_ids = array();
+    foreach ($classes as $c) $allowed_ids[] = (int)$c['id'];
+    if (empty($allowed_ids)) {
+        $where[] = "0=1";
+    } else {
+        $where[] = "ae.class_id IN (" . implode(',', $allowed_ids) . ")";
+    }
 }
+$where_sql = implode(' AND ', $where);
 
-if ($filter_class > 0) {
-    $where_conditions[] = "es.class_id = ?";
-    $params[] = $filter_class;
-    $param_types .= "i";
-}
+$order_sql = "ae.start_date DESC, ae.id DESC";
+if ($f_sort === 'oldest') $order_sql = "ae.start_date ASC, ae.id ASC";
+elseif ($f_sort === 'class') $order_sql = "c.title ASC, ae.start_date DESC";
+elseif ($f_sort === 'type') $order_sql = "et.title ASC, ae.start_date DESC";
 
-if ($filter_exam_type > 0) {
-    $where_conditions[] = "es.exam_type_id = ?";
-    $params[] = $filter_exam_type;
-    $param_types .= "i";
-}
+/* Count */
+$total_rows = 0;
+$q = $conn->query("SELECT COUNT(*) AS c FROM arrange_exam ae INNER JOIN classes c ON c.id = ae.class_id INNER JOIN exam_types et ON et.id = ae.exam_type_id WHERE $where_sql");
+if ($q) $total_rows = (int)$q->fetch_assoc()['c'];
+$total_pages = max(1, (int)ceil($total_rows / $LIMIT));
 
-// Build the query
-if ($is_admin) {
-    $sql = "
-        SELECT es.id, es.class_id, es.exam_type_id, es.start_date, 
-               c.title AS class_title, et.title AS exam_type_title
-        FROM arrange_exam es
-        JOIN classes c ON es.class_id = c.id
-        JOIN exam_types et ON es.exam_type_id = et.id
-    ";
-} else {
-    $sql = "
-        SELECT es.id, es.class_id, es.exam_type_id, es.start_date, 
-               c.title AS class_title, et.title AS exam_type_title
-        FROM arrange_exam es
-        JOIN classes c ON es.class_id = c.id
-        JOIN exam_types et ON es.exam_type_id = et.id
-        JOIN teacher_classes tc ON c.id = tc.class_section_id
-    ";
-}
+/* Fetch */
+$exam_list = array();
+$sql = "SELECT ae.id, ae.class_id, ae.exam_type_id, ae.start_date, ae.exam_kind, ae.session_id,
+               c.title AS class_title, et.title AS exam_type_title,
+               (SELECT COUNT(*) FROM arrange_exam_subjects WHERE arrange_exam_id = ae.id) AS subject_count,
+               (SELECT COUNT(*) FROM results WHERE arrange_exam_id = ae.id) AS result_count
+        FROM arrange_exam ae
+        INNER JOIN classes c ON c.id = ae.class_id
+        INNER JOIN exam_types et ON et.id = ae.exam_type_id
+        WHERE $where_sql
+        ORDER BY $order_sql
+        LIMIT $LIMIT OFFSET $OFFSET";
+$q = $conn->query($sql);
+if ($q) while ($r = $q->fetch_assoc()) $exam_list[] = $r;
 
-// Add WHERE conditions if any
-if (!empty($where_conditions)) {
-    $sql .= " WHERE " . implode(' AND ', $where_conditions);
-}
-
-// Add ORDER BY
-$sql .= " ORDER BY es.start_date ASC, c.title ASC";
-
-// Prepare and execute query with parameters
-$stmt = $conn->prepare($sql);
-
-// Bind parameters if any
-if (!empty($params)) {
-    $stmt->bind_param($param_types, ...$params);
-}
-
-$stmt->execute();
-$result = $stmt->get_result();
-$exam_list = [];
-while ($row = $result->fetch_assoc()) {
-    $exam_list[] = $row;
-}
-$stmt->close();
-
-// Define color palette
-$colors = [
-    '#e6f3ff', '#e6ffe6', '#fff3e6', '#ffe6e6', 
-    '#f3e6ff', '#e6fff3', '#ffffe6', '#f0f0f0'
-];
+/* Query string helper */
+$qstr = function($overrides = array()) {
+    $base = array(
+        'session_id'   => $_GET['session_id']   ?? '',
+        'exam_type_id' => $_GET['exam_type_id'] ?? '',
+        'class_id'     => $_GET['class_id']     ?? '',
+        'kind'         => $_GET['kind']         ?? '',
+        'q'            => $_GET['q']            ?? '',
+        'sort'         => $_GET['sort']         ?? '',
+        'page'         => $_GET['page']         ?? '',
+    );
+    foreach ($overrides as $k => $v) $base[$k] = $v;
+    return http_build_query(array_filter($base, function($v){ return $v !== '' && $v !== null; }));
+};
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>Exam Management - Create DMCs</title>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/css/select2.min.css" rel="stylesheet" />
-    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/js/select2.min.js"></script>
-</head>
+<meta charset="utf-8">
+<title>Create DMCs</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
-    .table th,
-    .table td {
-        text-align: left;
-        vertical-align: middle;
-    }
-
-    .alert {
-        margin-bottom: 20px;
-    }
-
-    .select2-container {
-        width: 100% !important;
-    }
-
-    .select2-container--disabled .select2-selection {
-        background-color: #f5f5f5;
-    }
-
-    .marks-input {
-        width: 80px;
-    }
-
-    .action-btn {
-        margin: 0 5px;
-    }
-
-    .popup-alert {
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        z-index: 1050;
-        min-width: 300px;
-    }
-
-    .filter-section {
-        background-color: #f8f9fa;
-        padding: 15px;
-        border-radius: 5px;
-        margin-bottom: 20px;
-        border: 1px solid #dee2e6;
-    }
-
-    .filter-section h4 {
-        margin-top: 0;
-        margin-bottom: 15px;
-        color: #495057;
-    }
-
-    .filter-group {
-        margin-bottom: 10px;
-    }
-
-    .filter-group label {
-        font-weight: 600;
-        margin-bottom: 5px;
-        display: block;
-        color: #495057;
-    }
-
-    .filter-btn-group {
-        margin-top: 15px;
-        text-align: right;
-    }
-
-    .clear-filters {
-        margin-right: 10px;
-    }
-
-    /* Mobile-specific styles for screens smaller than 768px */
-    @media (max-width: 768px) {
-        body {
-            padding: 15px;
-            font-size: 1.1rem;
-            line-height: 1.6;
-            background-color: #f8f9fa;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            color: #2c3e50;
-        }
-
-        .container {
-            max-width: 100%;
-            padding: 20px;
-            margin: 0 auto;
-            background: #ffffff;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-            border-radius: 10px;
-        }
-
-        h1, .panel-title {
-            font-size: 1.8rem;
-            text-align: center;
-            margin-bottom: 20px;
-            color: white;
-        }
-
-        h2 {
-            font-size: 1.4rem;
-            margin-bottom: 15px;
-        }
-
-        /* Filter section mobile styles */
-        .filter-section {
-            padding: 12px;
-            margin-bottom: 15px;
-        }
-
-        .filter-group {
-            margin-bottom: 12px;
-        }
-
-        .filter-group label {
-            font-size: 1rem;
-            margin-bottom: 8px;
-        }
-
-        .filter-btn-group {
-            text-align: center;
-            margin-top: 20px;
-        }
-
-        .filter-btn-group .btn {
-            width: 48%;
-            margin: 1%;
-            padding: 10px;
-            font-size: 1rem;
-        }
-
-        .clear-filters {
-            margin-right: 2%;
-        }
-
-        /* Card view for table */
-        .table-responsive {
-            overflow-x: hidden;
-            -webkit-overflow-scrolling: touch;
-            margin-bottom: 20px;
-        }
-
-        .table {
-            width: 100%;
-            background: transparent;
-        }
-
-        thead {
-            display: none;
-        }
-
-        tbody {
-            display: block;
-        }
-
-        tr {
-            display: block;
-            margin-bottom: 20px;
-            background: #ffffff;
-            border: 1px solid #dfe4ea;
-            border-radius: 10px;
-            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
-            padding: 15px;
-        }
-
-        td {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 10px 15px;
-            border-bottom: 1px solid #eceff1;
-            font-size: 0.95rem;
-            color: #2c3e50;
-        }
-
-        td:last-child {
-            border-bottom: none;
-        }
-
-        td::before {
-            content: attr(data-label);
-            font-weight: 600;
-            font-size: 1rem;
-            color: #1a252f;
-            flex: 0 0 45%;
-            text-align: left;
-        }
-
-        td > *:not(:first-child) {
-            flex: 0 0 50%;
-            text-align: right;
-        }
-
-        /* Marks display, inputs, and buttons */
-        .marks-display {
-            font-size: 0.95rem;
-            color: #2c3e50;
-        }
-
-        .marks-input {
-            width: 100%;
-            padding: 10px;
-            font-size: 1rem;
-            border: 1px solid #ced4da;
-            border-radius: 6px;
-            background-color: #f9fbfc;
-        }
-
-        .action-btn {
-            display: inline-block;
-            width: 100%;
-            padding: 10px;
-            font-size: 1rem;
-            border-radius: 6px;
-            margin: 5px 0;
-            text-align: center;
-            transition: background-color 0.2s ease-in-out;
-        }
-
-        .btn-warning {
-            background-color: #f39c12;
-            color: #ffffff;
-        }
-
-        .btn-warning:hover {
-            background-color: #e67e22;
-        }
-
-        .btn-danger {
-            background-color: #e74c3c;
-            color: #ffffff;
-        }
-
-        .btn-danger:hover {
-            background-color: #c0392b;
-        }
-
-        /* Alert styling */
-        .alert {
-            padding: 15px;
-            margin-bottom: 20px;
-            font-size: 1rem;
-            border-radius: 8px;
-            line-height: 1.5;
-            background-color: #ffffff;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        }
-
-        .alert-success {
-            background-color: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-
-        .alert-danger {
-            background-color: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-
-        .alert-warning {
-            background-color: #fff3cd;
-            color: #856404;
-            border: 1px solid #ffeeba;
-        }
-
-        .select2-container .select2-selection {
-            font-size: 1rem;
-            padding: 1px;
-            border-radius: 6px;
-            border: 1px solid #ced4da;
-            background-color: #f9fbfc;
-        }
-
-        .popup-alert {
-            min-width: 85%;
-            right: 15px;
-            top: 15px;
-            padding: 15px;
-            font-size: 1rem;
-            border-radius: 8px;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-        }
-    }
-
-    /* Extra small screens (mobiles < 576px) */
-    @media (max-width: 576px) {
-        body {
-            padding: 10px;
-            font-size: 1rem;
-        }
-
-        .container {
-            padding: 15px;
-        }
-
-        h1, .panel-title {
-            color: white;
-            font-size: 1.6rem;
-        }
-
-        h2 {
-            font-size: 1.3rem;
-        }
-
-        .filter-section {
-            padding: 10px;
-        }
-
-        .filter-group label {
-            font-size: 0.95rem;
-        }
-
-        .filter-btn-group .btn {
-            width: 100%;
-            margin: 5px 0;
-            padding: 8px;
-            font-size: 0.95rem;
-        }
-
-        tr {
-            margin-bottom: 15px;
-            padding: 12px;
-        }
-
-        td {
-            font-size: 0.9rem;
-            padding: 8px 12px;
-        }
-
-        td::before {
-            font-size: 0.95rem;
-            flex: 0 0 50%;
-        }
-
-        .marks-input {
-            font-size: 0.95rem;
-            padding: 8px;
-        }
-
-        .action-btn {
-            font-size: 0.95rem;
-            padding: 8px;
-        }
-
-        .alert {
-            font-size: 0.95rem;
-            padding: 12px;
-        }
-
-        .select2-container .select2-selection {
-            font-size: 0.95rem;
-            padding: 1px;
-        }
-
-        .popup-alert {
-            min-width: 90%;
-            right: 10px;
-            top: 10px;
-        }
-    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #eef1f5; font-family: 'Inter', sans-serif; color: #1e293b; }
+    .wrap { max-width: 1400px; margin: 30px auto; padding: 0 20px; }
+    .head { background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%); color: #fff; padding: 26px 32px; border-radius: 12px 12px 0 0; }
+    .head h1 { font-size: 24px; font-weight: 700; }
+    .head .sub { font-size: 13px; opacity: 0.9; margin-top: 6px; }
+    .card { background: #fff; padding: 24px 28px 30px 28px; border-radius: 0 0 12px 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .filter-panel { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px 18px; margin-bottom: 20px; }
+    .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+    .field label { display: block; font-size: 11px; font-weight: 700; color: #334155; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; }
+    .field select, .field input { width: 100%; height: 40px; padding: 0 12px; border: 1px solid #cbd5e1; border-radius: 10px; font-size: 13px; font-family: inherit; background: #fff; }
+    .field select:focus, .field input:focus { outline: none; border-color: #1e40af; box-shadow: 0 0 0 4px rgba(30,64,175,0.1); }
+    .filter-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; padding-top: 14px; border-top: 1px solid #e2e8f0; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 40px; padding: 0 16px; border-radius: 10px; font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; border: 1px solid; text-decoration: none; }
+    .btn-primary { background: #1e40af; color: #fff; border-color: #1e40af; }
+    .btn-primary:hover { background: #1e3a8a; color: #fff; text-decoration: none; }
+    .btn-ghost { background: #fff; color: #334155; border-color: #cbd5e1; }
+    .btn-ghost:hover { background: #f1f5f9; color: #1e293b; text-decoration: none; }
+    .btn-sm { height: 32px; padding: 0 12px; font-size: 12px; }
+    .list-head { font-size: 12px; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 2px; margin: 0 0 12px 0; padding-bottom: 8px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+    .list-head .count { font-size: 11px; color: #94a3b8; font-weight: 600; letter-spacing: 0; text-transform: none; }
+    table.g { width: 100%; border-collapse: collapse; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
+    table.g thead th { background: #1e3a8a; color: #fff; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; padding: 12px 14px; text-align: left; }
+    table.g tbody td { padding: 12px 14px; font-size: 13px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+    table.g tbody tr:last-child td { border-bottom: none; }
+    table.g tbody tr:hover td { background: #f8fafc; }
+    .pill { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; }
+    .pill.term { background: #dbeafe; color: #1e40af; }
+    .pill.test { background: #fef3c7; color: #92400e; }
+    .pill.muted { background: #f1f5f9; color: #64748b; }
+    .pagination { display: flex; justify-content: center; align-items: center; gap: 6px; margin-top: 20px; padding-top: 18px; border-top: 1px solid #e2e8f0; flex-wrap: wrap; }
+    .pagination a, .pagination span { display: inline-flex; align-items: center; justify-content: center; min-width: 36px; height: 36px; padding: 0 10px; border-radius: 8px; font-size: 13px; font-weight: 700; text-decoration: none; border: 1px solid #cbd5e1; background: #fff; color: #334155; }
+    .pagination a:hover { background: #eff6ff; border-color: #1e40af; color: #1e40af; text-decoration: none; }
+    .pagination .current { background: #1e40af; color: #fff; border-color: #1e40af; }
+    .pagination .disabled { opacity: 0.4; pointer-events: none; }
+    .pagination .dots { border: none; background: transparent; color: #94a3b8; }
+    .empty { padding: 60px 20px; text-align: center; color: #94a3b8; }
+    .empty .big { font-size: 44px; opacity: 0.4; margin-bottom: 10px; }
+    .empty h3 { font-size: 17px; color: #475569; font-weight: 600; }
 </style>
+</head>
 <body>
 
 <?php require_once('navbar.php'); ?>
 
-<!-- Dashboard -->
-<div class="container">
-    <div class="row">
-        <div class="col-md-12">          
-            
-            <?php
-            // Display session messages
-            if (isset($_SESSION['message'])) {
-                echo '<div class="alert alert-' . $_SESSION['message_type'] . ' alert-dismissible fade in">';
-                echo '<button type="button" class="close" data-dismiss="alert">&times;</button>';
-                echo $_SESSION['message'];
-                echo '</div>';
-                unset($_SESSION['message']);
-                unset($_SESSION['message_type']);
-            }
-            ?>
-
-            <!-- Filter Section -->
-            <div class="panel panel-default">
-                <div class="panel-heading">
-                    <h4 class="panel-title text-white">Filter Exams</h4>
-                </div>
-                <div class="panel-body">
-                    <form method="GET" action="" id="filterForm">
-                        <div class="row">
-                            <div class="col-md-6 col-sm-12">
-                                <div class="form-group filter-group">
-                                    <label for="filter_class">Class:</label>
-                                    <select class="form-control select2" id="filter_class" name="filter_class">
-                                        <option value="0">All Classes</option>
-                                        <?php foreach ($classes as $id => $title): ?>
-                                            <option value="<?php echo $id; ?>" <?php echo $filter_class == $id ? 'selected' : ''; ?>>
-                                                <?php echo htmlspecialchars($title); ?>
-                                            </option>
-                                        <?php endforeach; ?>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="col-md-6 col-sm-12">
-                                <div class="form-group filter-group">
-                                    <label for="filter_exam_type">Exam Type:</label>
-                                    <select class="form-control select2" id="filter_exam_type" name="filter_exam_type">
-                                        <option value="0">All Exam Types</option>
-                                        <?php foreach ($exam_types as $id => $title): ?>
-                                            <option value="<?php echo $id; ?>" <?php echo $filter_exam_type == $id ? 'selected' : ''; ?>>
-                                                <?php echo htmlspecialchars($title); ?>
-                                            </option>
-                                        <?php endforeach; ?>
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="filter-btn-group">
-                            <a href="<?php echo $_SERVER['PHP_SELF']; ?>" class="btn btn-default clear-filters">
-                                <span class="glyphicon glyphicon-refresh"></span> Clear Filters
-                            </a>
-                            <button type="submit" class="btn btn-primary">
-                                <span class="glyphicon glyphicon-filter"></span> Apply Filters
-                            </button>
-                        </div>
-                    </form>
-                </div>
-            </div>
-
-            <!-- Panel for Exam List -->
-            <div class="panel panel-danger">
-                <div class="panel-heading">
-                    <h3 class="panel-title fs-4">Exam List 
-                        <span class="badge" style="background-color: #d9534f; color: white;">
-                            <?php echo count($exam_list); ?> exams found
-                        </span>
-                    </h3>
-                </div>
-                <div class="panel-body">
-                    <?php if (!empty($exam_list)): ?>
-                        <div class="table-responsive">
-                            <table class="table table-bordered table-hover">
-                                <thead>
-                                    <tr>
-                                        <th class="fs-6">#</th>
-                                        <th class="fs-6">Class Title</th>
-                                        <th class="fs-6">Exam Type</th>
-                                        <th class="fs-6">Start Date</th>
-                                        <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
-<th class="fs-6">Actions</th>
-<?php endif; ?>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php $counter = 1; ?>
-                                    <?php foreach ($exam_list as $row): ?>
-                                        <tr class="course-<?php echo $counter % count($colors); ?>">
-                                            <td><?php echo $counter++; ?></td>
-                                            <td class="fs-5"><?php echo htmlspecialchars($row['class_title']); ?></td>
-                                            <td class="fs-5"><?php echo htmlspecialchars($row['exam_type_title']); ?></td>
-                                            <td class="fs-5"><?php echo date('d M Y', strtotime($row['start_date'])); ?></td>
-                                            <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
-                                            <td>
-                                                <?php if (!empty($perms['can_add'])): ?>
-                                                <a href="result_entry.php?exam_id=<?php echo $row['id']; ?>&class_id=<?php echo $row['class_id']; ?>&exam_type_id=<?php echo $row['exam_type_id']; ?>" class="btn btn-xs btn-primary">
-                                                    <span class="glyphicon glyphicon-list-alt"></span> Create DMC's
-                                                </a>
-                                                <?php endif; ?>
-                                            </td>
-                                            <?php endif; ?>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
-                        </div>
-                    <?php else: ?>
-                        <div class="alert alert-info text-center">
-                            No Exams found. 
-                            <?php if ($filter_class > 0 || $filter_exam_type > 0): ?>
-                                Try changing your filter criteria.
-                            <?php endif; ?>
-                        </div>
-                    <?php endif; ?>
-                </div>
-            </div>
-
+<div class="wrap">
+    <div class="head">
+        <h1><i class="fas fa-award"></i> Create DMCs</h1>
+        <div class="sub">
+            <?php if ($is_admin): ?>
+                All classes — pick an arrangement to start entering marks
+            <?php else: ?>
+                Your assigned classes only
+            <?php endif; ?>
         </div>
+    </div>
+
+    <div class="card">
+
+        <?php if (isset($_SESSION['message'])): ?>
+            <div class="alert alert-<?= htmlspecialchars($_SESSION['message_type']) ?>" style="padding:12px 16px;border-radius:8px;margin-bottom:18px;border-left:4px solid;">
+                <?= htmlspecialchars($_SESSION['message']) ?>
+            </div>
+            <?php unset($_SESSION['message'], $_SESSION['message_type']); ?>
+        <?php endif; ?>
+
+        <form method="get" class="filter-panel">
+            <div class="filter-grid">
+                <div class="field">
+                    <label>Session</label>
+                    <select name="session_id" onchange="this.form.submit()">
+                        <option value="0">All Sessions</option>
+                        <?php foreach ($sessions as $s): ?>
+                            <option value="<?= (int)$s['id'] ?>" <?= (int)$s['id'] === $f_session ? 'selected' : '' ?>>
+                                <?= htmlspecialchars($s['title']) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="field">
+                    <label>Kind</label>
+                    <select name="kind" onchange="this.form.submit()">
+                        <option value="">All</option>
+                        <option value="term" <?= $f_kind === 'term' ? 'selected' : '' ?>>Term Exams</option>
+                        <option value="test" <?= $f_kind === 'test' ? 'selected' : '' ?>>Tests</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label>Exam Type</label>
+                    <select name="exam_type_id" onchange="this.form.submit()">
+                        <option value="0">All Exam Types</option>
+                        <?php foreach (array('test','term') as $k): ?>
+                            <?php if (empty($exam_types[$k])) continue; ?>
+                            <optgroup label="<?= $k === 'test' ? 'Tests' : 'Term Exams' ?>">
+                                <?php foreach ($exam_types[$k] as $et): ?>
+                                    <option value="<?= (int)$et['id'] ?>" <?= (int)$et['id'] === $f_type ? 'selected' : '' ?>>
+                                        <?= htmlspecialchars($et['title']) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </optgroup>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="field">
+                    <label>Class</label>
+                    <select name="class_id" onchange="this.form.submit()">
+                        <option value="0">All Classes</option>
+                        <?php foreach ($classes as $c): ?>
+                            <option value="<?= (int)$c['id'] ?>" <?= (int)$c['id'] === $f_class ? 'selected' : '' ?>>
+                                <?= htmlspecialchars($c['title']) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="field">
+                    <label>Sort</label>
+                    <select name="sort" onchange="this.form.submit()">
+                        <option value="newest" <?= $f_sort === 'newest' ? 'selected' : '' ?>>Newest first</option>
+                        <option value="oldest" <?= $f_sort === 'oldest' ? 'selected' : '' ?>>Oldest first</option>
+                        <option value="class"  <?= $f_sort === 'class'  ? 'selected' : '' ?>>By class</option>
+                        <option value="type"   <?= $f_sort === 'type'   ? 'selected' : '' ?>>By exam type</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label>Search</label>
+                    <input type="text" name="q" value="<?= htmlspecialchars($f_search) ?>" placeholder="Class or exam name...">
+                </div>
+            </div>
+            <div class="filter-actions">
+                <a href="create_dmcs.php" class="btn btn-ghost"><i class="fas fa-times"></i> Clear</a>
+                <button type="submit" class="btn btn-primary"><i class="fas fa-search"></i> Apply</button>
+            </div>
+        </form>
+
+        <div class="list-head">
+            <span>Arrangements</span>
+            <span class="count">
+                <?= number_format($total_rows) ?> total
+                <?php if ($total_pages > 1): ?>
+                    &middot; page <?= $PAGE ?> of <?= $total_pages ?>
+                <?php endif; ?>
+            </span>
+        </div>
+
+        <?php if (empty($exam_list)): ?>
+            <div class="empty">
+                <div class="big">&#128203;</div>
+                <h3>No arrangements match your filters</h3>
+                <p style="margin-top:8px;font-size:13px;">
+                    <?php if (!$is_admin): ?>
+                        Only exams for your assigned classes appear here.
+                    <?php else: ?>
+                        Try clearing filters or arrange a new exam.
+                    <?php endif; ?>
+                </p>
+            </div>
+        <?php else: ?>
+            <table class="g">
+                <thead>
+                    <tr>
+                        <th style="width:5%;">#</th>
+                        <th>Class</th>
+                        <th>Exam Type</th>
+                        <th>Start Date</th>
+                        <th style="text-align:center;">Subjects</th>
+                        <th style="text-align:center;">Results</th>
+                        <th style="text-align:right;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                <?php $i = $OFFSET + 1; foreach ($exam_list as $row): ?>
+                    <tr>
+                        <td><?= $i++ ?></td>
+                        <td><strong><?= htmlspecialchars($row['class_title']) ?></strong></td>
+                        <td><span class="pill <?= htmlspecialchars($row['exam_kind']) ?>"><?= htmlspecialchars($row['exam_type_title']) ?></span></td>
+                        <td><?= date('d M Y', strtotime($row['start_date'])) ?></td>
+                        <td style="text-align:center;">
+                            <?php if ((int)$row['subject_count'] > 0): ?>
+                                <span class="pill term"><?= (int)$row['subject_count'] ?></span>
+                            <?php else: ?>
+                                <span class="pill muted">none</span>
+                            <?php endif; ?>
+                        </td>
+                        <td style="text-align:center;">
+                            <?php if ((int)$row['result_count'] > 0): ?>
+                                <span class="pill term"><?= (int)$row['result_count'] ?></span>
+                            <?php else: ?>
+                                <span class="pill muted">0</span>
+                            <?php endif; ?>
+                        </td>
+                        <td style="text-align:right; white-space:nowrap;">
+                            <?php if (!empty($perms['can_add']) || !empty($perms['can_edit'])): ?>
+                                <a href="result_entry.php?exam_id=<?= (int)$row['id'] ?>"
+                                   class="btn btn-sm btn-primary"
+                                   title="Enter or edit marks">
+                                    <i class="fas fa-pen-to-square"></i> Enter Marks
+                                </a>
+                                <a href="dmc_list.php?arrange_exam_id=<?= (int)$row['id'] ?>"
+                                   class="btn btn-sm btn-ghost"
+                                   style="margin-left:4px;"
+                                   title="View students and print DMCs">
+                                    <i class="fas fa-file-lines"></i> DMC List
+                                </a>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+
+            <?php if ($total_pages > 1): ?>
+                <div class="pagination">
+                    <a href="?<?= $qstr(['page' => 1]) ?>" class="<?= $PAGE <= 1 ? 'disabled' : '' ?>"><i class="fas fa-angles-left"></i></a>
+                    <a href="?<?= $qstr(['page' => max(1, $PAGE - 1)]) ?>" class="<?= $PAGE <= 1 ? 'disabled' : '' ?>"><i class="fas fa-angle-left"></i></a>
+                    <?php
+                    $start = max(1, $PAGE - 2);
+                    $end   = min($total_pages, $PAGE + 2);
+                    if ($start > 1) {
+                        echo '<a href="?' . $qstr(['page' => 1]) . '">1</a>';
+                        if ($start > 2) echo '<span class="dots">...</span>';
+                    }
+                    for ($p = $start; $p <= $end; $p++) {
+                        if ($p === $PAGE) echo '<span class="current">' . $p . '</span>';
+                        else echo '<a href="?' . $qstr(['page' => $p]) . '">' . $p . '</a>';
+                    }
+                    if ($end < $total_pages) {
+                        if ($end < $total_pages - 1) echo '<span class="dots">...</span>';
+                        echo '<a href="?' . $qstr(['page' => $total_pages]) . '">' . $total_pages . '</a>';
+                    }
+                    ?>
+                    <a href="?<?= $qstr(['page' => min($total_pages, $PAGE + 1)]) ?>" class="<?= $PAGE >= $total_pages ? 'disabled' : '' ?>"><i class="fas fa-angle-right"></i></a>
+                    <a href="?<?= $qstr(['page' => $total_pages]) ?>" class="<?= $PAGE >= $total_pages ? 'disabled' : '' ?>"><i class="fas fa-angles-right"></i></a>
+                </div>
+            <?php endif; ?>
+        <?php endif; ?>
+
     </div>
 </div>
 
-<script>
-$(document).ready(function() {
-    // Initialize Select2
-    $('.select2').select2({
-        placeholder: "Select option",
-        allowClear: true
-    });
-
-    // Auto-dismiss alerts after 5 seconds
-    setTimeout(function() {
-        $('.alert').fadeOut('slow');
-    }, 5000);
-
-    // Mobile responsive adjustments
-    function adjustForMobile() {
-        if ($(window).width() <= 768) {
-            // Convert table to card view on mobile
-            $('.table-responsive table tbody tr').each(function() {
-                var $tr = $(this);
-                $tr.find('td').each(function(index) {
-                    var headerText = $tr.closest('table').find('th').eq(index).text();
-                    $(this).attr('data-label', headerText);
-                });
-            });
-        }
-    }
-
-    // Call on load and resize
-    adjustForMobile();
-    $(window).resize(adjustForMobile);
-});
-</script>
-
 </body>
 </html>
-<?php
-// Close database connection
-$conn->close();
-?>
+<?php $conn->close(); ob_end_flush(); ?>

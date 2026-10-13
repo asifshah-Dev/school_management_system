@@ -19,7 +19,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['promote_students'])) 
         $students_to_promote = $_POST['student_ids'];
     } else {
         // Get all students from current class
-        $stmt = $conn->prepare("SELECT id FROM student_class WHERE session_id = ? AND class_id = ? AND status = 0");
+        $stmt = $conn->prepare("SELECT id FROM student_class WHERE session_id = ? AND class_id = ? ");
         $stmt->bind_param("ii", $current_session_id, $current_class_id);
         $stmt->execute();
         $result = $stmt->get_result();

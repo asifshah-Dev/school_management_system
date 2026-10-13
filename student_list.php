@@ -55,6 +55,7 @@ $translations = [
         'current_status' => 'Current Status',
         'reset_button' => 'Reset',
         'search_button' => 'Search',
+        'close' => 'Close',
     ]
 ];
 
@@ -103,7 +104,6 @@ if (isset($_GET['delete']) && !empty($perms['can_delete'])) {
 }
 
 // Filters
-$classes = [];
 $class_filter_query = $conn->query("
     SELECT
         COALESCE(cs.id, 0) AS class_section_id,
@@ -125,11 +125,11 @@ $village_councils = [];
 $vc_q = $conn->query("SELECT id, title FROM village_councils ORDER BY title");
 while ($row = $vc_q->fetch_assoc()) $village_councils[$row['id']] = $row['title'];
 
-$search            = isset($_GET['search']) ? mysqli_real_escape_string($conn, $_GET['search']) : '';
-$class_filter      = isset($_GET['class_filter']) ? intval($_GET['class_filter']) : 0;
+$search               = isset($_GET['search']) ? mysqli_real_escape_string($conn, $_GET['search']) : '';
+$class_filter         = isset($_GET['class_filter']) ? intval($_GET['class_filter']) : 0;
 $class_section_filter = isset($_GET['class_section_filter']) ? intval($_GET['class_section_filter']) : 0;
-$village_filter    = isset($_GET['village_filter']) ? intval($_GET['village_filter']) : 0;
-$status_filter     = isset($_GET['status_filter']) ? $_GET['status_filter'] : '0';
+$village_filter       = isset($_GET['village_filter']) ? intval($_GET['village_filter']) : 0;
+$status_filter        = isset($_GET['status_filter']) ? $_GET['status_filter'] : '0';
 
 $where = [];
 if (!empty($search)) {
@@ -217,7 +217,6 @@ var lang = <?php echo json_encode($js_translations, JSON_HEX_TAG | JSON_HEX_APOS
     .panel-title { margin: 0; font-weight: 600; font-size: 1.05rem; }
     .panel-body { padding: 18px; }
 
-    /* ── Search icon + slide-down search bar ── */
     .search-toggle-btn {
         display: inline-flex; align-items: center; gap: 8px;
         background: rgba(255,255,255,0.18); color: #fff;
@@ -246,7 +245,7 @@ var lang = <?php echo json_encode($js_translations, JSON_HEX_TAG | JSON_HEX_APOS
         background: #f8fafc;
         border-bottom: 1px solid #e2e8f0;
     }
-    .search-drawer.open { max-height: 120px; }
+    .search-drawer.open { max-height: 140px; }
     .search-drawer .inner { padding: 14px 18px; display: flex; gap: 10px; flex-wrap: wrap; }
     .search-drawer input {
         flex: 1; min-width: 220px;
@@ -255,16 +254,34 @@ var lang = <?php echo json_encode($js_translations, JSON_HEX_TAG | JSON_HEX_APOS
         font-size: 14px; font-family: inherit;
     }
     .search-drawer input:focus { outline: none; border-color: #1e40af; box-shadow: 0 0 0 3px rgba(30,64,175,0.12); }
-    .search-drawer button {
+    .search-drawer .search-submit {
         height: 42px; padding: 0 20px;
         background: #1e40af; color: #fff;
         border: 1px solid #1e40af; border-radius: 8px;
         font-size: 13px; font-weight: 700;
         cursor: pointer; line-height: 1;
     }
-    .search-drawer button:hover { background: #1e3a8a; border-color: #1e3a8a; }
+    .search-drawer .search-submit:hover { background: #1e3a8a; border-color: #1e3a8a; }
+    .search-drawer .search-clear {
+        height: 42px; padding: 0 20px;
+        background: #fff; color: #334155;
+        border: 1px solid #cbd5e1; border-radius: 8px;
+        font-size: 13px; font-weight: 600;
+        cursor: pointer; line-height: 1;
+        text-decoration: none;
+        display: inline-flex; align-items: center; gap: 6px;
+    }
+    .search-drawer .search-clear:hover { background: #f1f5f9; text-decoration: none; color: #334155; }
+    .search-drawer .search-close {
+        height: 42px; padding: 0 16px;
+        background: #fff; color: #64748b;
+        border: 1px solid #cbd5e1; border-radius: 8px;
+        font-size: 13px; font-weight: 600;
+        cursor: pointer; line-height: 1;
+        display: inline-flex; align-items: center; gap: 6px;
+    }
+    .search-drawer .search-close:hover { background: #f1f5f9; }
 
-    /* ── Filter row ── */
     .filter-row {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -287,7 +304,6 @@ var lang = <?php echo json_encode($js_translations, JSON_HEX_TAG | JSON_HEX_APOS
     }
     .filter-row select:focus { outline: none; border-color: #1e40af; box-shadow: 0 0 0 3px rgba(30,64,175,0.12); }
 
-    /* ── Results bar ── */
     .results-bar {
         display: flex; justify-content: space-between; align-items: center;
         padding: 10px 18px; background: #eff6ff;
@@ -300,7 +316,6 @@ var lang = <?php echo json_encode($js_translations, JSON_HEX_TAG | JSON_HEX_APOS
         font-size: 11px; font-weight: 600; margin-left: 6px;
     }
 
-    /* ── Excel table ── */
     .excel-wrap {
         overflow: auto;
         max-height: 72vh;
@@ -337,7 +352,6 @@ var lang = <?php echo json_encode($js_translations, JSON_HEX_TAG | JSON_HEX_APOS
     table.excel tbody tr:nth-child(even) td { background: #f8fafc; }
     table.excel tbody tr:hover td { background: #eff6ff; }
 
-    /* Sticky first column (#) and second column (ID) */
     table.excel thead th.sticky-col,
     table.excel tbody td.sticky-col {
         position: sticky; left: 0; z-index: 2;
@@ -353,7 +367,6 @@ var lang = <?php echo json_encode($js_translations, JSON_HEX_TAG | JSON_HEX_APOS
     .num-cell { text-align: right; font-variant-numeric: tabular-nums; }
     .center-cell { text-align: center; }
 
-    /* Status pills */
     .status-pill {
         display: inline-block; padding: 3px 10px;
         border-radius: 12px; font-size: 10px; font-weight: 700;
@@ -363,7 +376,6 @@ var lang = <?php echo json_encode($js_translations, JSON_HEX_TAG | JSON_HEX_APOS
     .status-pill.leave  { background: #fef3c7; color: #92400e; }
     .status-pill.struck { background: #fee2e2; color: #991b1b; }
 
-    /* Row action buttons */
     .row-btn {
         display: inline-flex; align-items: center; justify-content: center;
         width: 30px; height: 30px;
@@ -384,15 +396,25 @@ var lang = <?php echo json_encode($js_translations, JSON_HEX_TAG | JSON_HEX_APOS
     .row-btn-delete  { background: #fef2f2; color: #991b1b; border-color: #fecaca; }
     .row-btn-delete:hover  { background: #fee2e2; color: #991b1b; text-decoration: none; }
 
-    /* Status modal */
     .modal-header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; border-bottom: none; }
-    .modal-header .close { color: #fff; opacity: 0.8; }
+    .modal-header .close {
+        color: #fff; opacity: 0.9;
+        background: rgba(255,255,255,0.15);
+        border: 1px solid rgba(255,255,255,0.3);
+        width: 32px; height: 32px;
+        border-radius: 8px;
+        font-size: 20px; line-height: 1;
+        display: flex; align-items: center; justify-content: center;
+        padding: 0 0 3px 0;
+        text-shadow: none;
+    }
+    .modal-header .close:hover { background: #fff; color: #764ba2; opacity: 1; }
+
     .status-option { padding: 10px 14px; margin-bottom: 8px; border: 1px solid #e2e8f0; border-radius: 8px; cursor: pointer; transition: all 0.15s; }
     .status-option:hover { background: #f8fafc; border-color: #667eea; }
     .status-option input[type="radio"] { margin-right: 10px; }
     .current-status-info { background: #f1f5f9; padding: 10px 14px; border-radius: 6px; margin-bottom: 14px; font-size: 13px; }
 
-    /* Empty state */
     .empty-state { padding: 50px 20px; text-align: center; color: #94a3b8; }
     .empty-state .big { font-size: 44px; opacity: 0.4; margin-bottom: 10px; }
 </style>
@@ -435,13 +457,16 @@ var lang = <?php echo json_encode($js_translations, JSON_HEX_TAG | JSON_HEX_APOS
                     placeholder="<?php echo $translations[$lang]['search_placeholder']; ?>"
                     value="<?php echo htmlspecialchars($search); ?>"
                     autocomplete="off">
-                <button type="submit"><i class="fas fa-search"></i> Search</button>
+                <button type="submit" class="search-submit"><i class="fas fa-search"></i> Search</button>
                 <?php if ($search): ?>
                     <a href="?<?php echo http_build_query(array_filter(['class_filter'=>$_GET['class_filter'] ?? null,'village_filter'=>$_GET['village_filter'] ?? null,'status_filter'=>$_GET['status_filter'] ?? null])); ?>"
-                       class="btn btn-outline-secondary" style="height:42px; padding:0 18px; line-height:42px; border:1px solid #cbd5e1; border-radius:8px; color:#334155; text-decoration:none;">
-                        Clear
+                       class="search-clear">
+                        <i class="fas fa-times"></i> Clear
                     </a>
                 <?php endif; ?>
+                <button type="button" class="search-close" id="closeSearchDrawer">
+                    <i class="fas fa-chevron-up"></i> Close
+                </button>
             </form>
         </div>
 
@@ -611,12 +636,14 @@ var lang = <?php echo json_encode($js_translations, JSON_HEX_TAG | JSON_HEX_APOS
 </div>
 
 <!-- Status Update Modal -->
-<div class="modal fade" id="statusModal" tabindex="-1" role="dialog">
+<div class="modal fade" id="statusModal" tabindex="-1" role="dialog" aria-hidden="true">
     <div class="modal-dialog" role="document">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title"><i class="fas fa-exchange-alt"></i> <?php echo $translations[$lang]['update_status']; ?></h5>
-                <button type="button" class="close" data-dismiss="modal"><span>&times;</span></button>
+                <button type="button" class="close" id="statusModalCloseBtn" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
             </div>
             <form method="POST" action="" id="statusForm">
                 <div class="modal-body">
@@ -653,7 +680,7 @@ var lang = <?php echo json_encode($js_translations, JSON_HEX_TAG | JSON_HEX_APOS
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-secondary" id="statusModalCancelBtn">Cancel</button>
                     <button type="submit" class="btn btn-primary" id="updateStatusBtn">Update Status</button>
                 </div>
             </form>
@@ -665,31 +692,38 @@ var lang = <?php echo json_encode($js_translations, JSON_HEX_TAG | JSON_HEX_APOS
 $(document).ready(function() {
     $('[data-toggle="tooltip"]').tooltip();
 
-    // Search drawer toggle
+    // ─────────────────────────────────────────────
+    // Search drawer — toggle + close button
+    // ─────────────────────────────────────────────
     $('#searchToggle').on('click', function() {
         $('#searchDrawer').toggleClass('open');
         if ($('#searchDrawer').hasClass('open')) {
             setTimeout(function() { $('#searchInput').focus(); }, 200);
         }
     });
+    $('#closeSearchDrawer').on('click', function() {
+        $('#searchDrawer').removeClass('open');
+    });
     <?php if (!empty($search)): ?>
     $('#searchDrawer').addClass('open');
     <?php endif; ?>
 
-    // Combine class combo into hidden fields on submit
+    // ─────────────────────────────────────────────
+    // Filters
+    // ─────────────────────────────────────────────
     $('#filterForm').on('submit', function() {
         var val = $('#class_combo_filter').val() || '0|0';
         var parts = val.split('|');
         $('#class_filter_hidden').val(parts[0] || 0);
         $('#class_section_filter_hidden').val(parts[1] || 0);
     });
-
-    // Auto-submit on filter change
     $('#class_combo_filter, #village_filter, #status_filter').change(function() {
         $('#filterForm').submit();
     });
 
-    // Status update modal
+    // ─────────────────────────────────────────────
+    // Status modal — open
+    // ─────────────────────────────────────────────
     $(document).on('click', '.status-update-btn', function(e) {
         e.preventDefault();
         var studentId = $(this).data('student-id');
@@ -712,12 +746,36 @@ $(document).ready(function() {
         $('#statusModal').modal('show');
     });
 
-    // Delete confirmation
+    // ─────────────────────────────────────────────
+    // Status modal — CLOSE (three ways, all jQuery — no data-dismiss)
+    // ─────────────────────────────────────────────
+    $('#statusModalCloseBtn').on('click', function(e) {
+        e.preventDefault();
+        $('#statusModal').modal('hide');
+    });
+    $('#statusModalCancelBtn').on('click', function(e) {
+        e.preventDefault();
+        $('#statusModal').modal('hide');
+    });
+    // Click outside modal to close
+    $('#statusModal').on('click', function(e) {
+        if ($(e.target).hasClass('modal')) {
+            $(this).modal('hide');
+        }
+    });
+    // ESC key to close
+    $(document).on('keydown', function(e) {
+        if (e.key === 'Escape' && $('#statusModal').hasClass('show')) {
+            $('#statusModal').modal('hide');
+        }
+    });
+
+    // ─────────────────────────────────────────────
+    // Delete + status confirmations
+    // ─────────────────────────────────────────────
     $(document).on('click', '.delete-btn', function(e) {
         if (!confirm(lang.delete_confirm)) { e.preventDefault(); return false; }
     });
-
-    // Status update confirmation
     $('#updateStatusBtn').on('click', function(e) {
         var selectedStatus = $('input[name="new_status"]:checked').val();
         if (selectedStatus === undefined) {
@@ -729,6 +787,14 @@ $(document).ready(function() {
             e.preventDefault();
             return false;
         }
+    });
+
+    // ─────────────────────────────────────────────
+    // Cleanup: remove leftover modal backdrop if modal was force-closed
+    // ─────────────────────────────────────────────
+    $('#statusModal').on('hidden.bs.modal', function() {
+        $('.modal-backdrop').remove();
+        $('body').removeClass('modal-open').css('padding-right', '');
     });
 });
 
