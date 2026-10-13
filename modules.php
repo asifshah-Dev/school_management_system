@@ -81,19 +81,12 @@ $modules = [];
 $children = [];
 
 while ($row = $modules_result->fetch_assoc()) {
-
-    if ($row['parent_id'] === null) {
-
+    if ($row['type'] === 'Parent') {
         $modules[$row['id']] = $row;
-
         $modules[$row['id']]['children'] = [];
-
-    } else {
-
+    } elseif ($row['type'] === 'Child' && !empty($row['parent_id'])) {
         $children[$row['parent_id']][] = $row;
-
     }
-
 }
 
 foreach ($children as $parent_id => $child_list) {

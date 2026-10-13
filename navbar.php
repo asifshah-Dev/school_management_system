@@ -3,56 +3,73 @@
 require_once('security.php');
 require_once('conn_inc.php');
 
-// Fetch role modules for current user
-$user_id = $_SESSION['user_id'] ?? 0; 
-
+// Load modules using the user's effective view permission: user override,
+// then role default, with unconfigured modules remaining available by default.
+$user_id = (int)($_SESSION['user_id'] ?? 0);
 $role_modules = [];
 $module_parents = [];
 
-if ($user_id) {
+if ($user_id > 0) {
     $qry = "
-        SELECT m.id, m.parent_id, m.title, m.url 
-        FROM role_modules rm
-        INNER JOIN modules m ON rm.module_id = m.id
-        INNER JOIN users u ON rm.role_id = u.role_id
-        WHERE u.id = ?
+        SELECT m.id, m.parent_id, m.title, m.url,
+               CASE
+                   WHEN u.role_id = " . ADMIN_ROLE_ID . " THEN 1
+                   ELSE COALESCE(um.can_view, rm.can_view, 1)
+               END AS can_view
+        FROM users u
+        CROSS JOIN modules m
+        LEFT JOIN role_modules rm
+            ON rm.role_id = u.role_id AND rm.module_id = m.id
+        LEFT JOIN user_modules um
+            ON um.user_id = u.id AND um.module_id = m.id
+        WHERE u.id = ? AND m.status = 1
         ORDER BY m.parent_id, m.title
     ";
     $stmt = $conn->prepare($qry);
     $stmt->bind_param("i", $user_id);
     $stmt->execute();
     $res = $stmt->get_result();
-    
-    // Group modules by parent_id
-    while ($row = $res->fetch_assoc()) {
-        $parent_id = $row['parent_id'] ?? 0;
-        if ($parent_id == 0) {
-            // This is a parent module
-            if (!isset($role_modules[$row['id']])) {
-                $role_modules[$row['id']] = [
-                    'title' => $row['title'],
-                    'url' => $row['url'] ?? '#',
-                    'children' => []
-                ];
-            }
-        } else {
-            // This is a child module - ensure parent exists
-            if (!isset($role_modules[$parent_id])) {
-                // Create parent if it doesn't exist (shouldn't happen but as fallback)
-                $role_modules[$parent_id] = [
-                    'title' => 'Parent Module',
-                    'url' => '#',
-                    'children' => []
-                ];
-            }
-            $module_parents[$row['id']] = $parent_id;
-            $role_modules[$parent_id]['children'][] = [
-                'title' => $row['title'],
-                'url' => $row['url'] ?? '#'
+    $modules = $res->fetch_all(MYSQLI_ASSOC);
+    $stmt->close();
+
+    $modules_by_id = [];
+    foreach ($modules as $row) {
+        $modules_by_id[(int)$row['id']] = $row;
+    }
+
+    foreach ($modules as $row) {
+        if (!(int)$row['can_view'] || !empty($row['parent_id'])) {
+            continue;
+        }
+
+        $role_modules[(int)$row['id']] = [
+            'title' => $row['title'],
+            'url' => $row['url'] ?? '#',
+            'children' => []
+        ];
+    }
+
+    foreach ($modules as $row) {
+        $parent_id = (int)($row['parent_id'] ?? 0);
+        if (!(int)$row['can_view'] || $parent_id === 0) {
+            continue;
+        }
+
+        if (!isset($role_modules[$parent_id])) {
+            $parent = $modules_by_id[$parent_id] ?? null;
+            $role_modules[$parent_id] = [
+                'title' => $parent['title'] ?? 'Parent Module',
+                'url' => $parent['url'] ?? '#',
+                'children' => []
             ];
         }
+
+        $module_parents[(int)$row['id']] = $parent_id;
+        $role_modules[$parent_id]['children'][] = [
+            'title' => $row['title'],
+            'url' => $row['url'] ?? '#'
+        ];
     }
-    $stmt->close();
 }
 ?>
 
@@ -779,8 +796,7 @@ $dashboard_quick_actions = array_values(array_filter($dashboard_quick_actions, f
     <i class="fa-solid fa-bars"></i>
   </button>
   <a class="dashboard-brand" href="index.php">
-    <img src="logo2.png" alt="">
-    <span>DAR-E-ARQAM <small>SCHOOL AND COLLEGE</small></span>
+    <span>School Management System</span>
   </a>
   <div class="dashboard-topbar-actions">
     <button type="button" class="dashboard-topbar-icon" id="dashboardSearchToggle" aria-label="Search students" aria-expanded="false">
@@ -837,6 +853,7 @@ $dashboard_quick_actions = array_values(array_filter($dashboard_quick_actions, f
       </button>
       <div class="dashboard-topbar-menu dashboard-user-menu" id="userMenu" hidden>
         <div class="dashboard-menu-heading"><?php echo htmlspecialchars($dashboard_username, ENT_QUOTES, 'UTF-8'); ?></div>
+        <a href="profile.php"><i class="fa-solid fa-user"></i> Profile</a>
         <a href="logout.php"><i class="fa-solid fa-right-from-bracket"></i> Logout</a>
       </div>
     </div>
@@ -1057,106 +1074,517 @@ $dashboard_quick_actions = array_values(array_filter($dashboard_quick_actions, f
   }());
 </script>
 <?php else: ?>
-<!-- Top Quick Links Bar -->
-<div class="top-quick-bar" style="background-color: #3b3a85 !important;">
-  <div class="quick-links-horizontal">
-    <a href="student_registration.php" class="quick-link-horizontal-btn">
-      New Registration
-    </a>
-    <a href="student_list.php" class="quick-link-horizontal-btn">
-      Student List
-    </a>
-    <a href="create_dmcs.php" class="quick-link-horizontal-btn">
-      Create DMC
-    </a>
-    <a href="dmc_list.php" class="quick-link-horizontal-btn">
-      DMC List
-    </a>
-    <a href="attendance_class.php" class="quick-link-horizontal-btn">
-      Attendance
-    </a>
-    <a href="users_attendance.php" class="quick-link-horizontal-btn">
-      Teacher Attendance
-    </a>
-    <a href="fee_card_create_monthly.php" class="quick-link-horizontal-btn">
-      Fee Cards
-    </a>
-    <a href="student_feecards.php" class="quick-link-horizontal-btn">
-      Print Fee Card
-    </a>
-    <a href="arrange_exam.php" class="quick-link-horizontal-btn">
-      Arrange Exam
-    </a>
-    <a href="expense.php" class="quick-link-horizontal-btn">
-      Expense
-    </a>
-  </div>
-</div>
+<?php
+$navigation_username = trim((string)($_SESSION['username'] ?? 'Account'));
+$navigation_initials = strtoupper(substr($navigation_username, 0, 2));
+$navigation_current_page = basename($_SERVER['PHP_SELF'] ?? '');
+?>
+<style>
+  body:not(.dashboard-page) {
+    padding-top: 64px !important;
+    padding-left: 260px !important;
+    transition: padding-left 0.22s ease;
+  }
 
-<!-- Main Navbar -->
-<nav class="navbar navbar-expand-lg navbar-light sticky-top">
-  <div class="container-fluid">
-    <div class="navbar-main-content">
-      <a class="navbar-brand" href="index.php">
-        <img src="logo2.png" alt="Logo">
-        <div class="brand-text"><span style="font-size:20px;color: #16253e !important;">DAR-E-ARQAM <small>SCHOOL AND COLLEGE</small></span> </div>
-      </a>
+  body:not(.dashboard-page) .dashboard-topbar {
+    position: fixed;
+    z-index: 1040;
+    inset: 0 0 auto;
+    display: flex;
+    align-items: center;
+    height: 64px;
+    padding: 0 1.35rem;
+    background: #fff;
+    border-bottom: 1px solid #ebe9e7;
+    box-shadow: 0 2px 8px rgba(36, 31, 27, 0.035);
+  }
 
-      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNavbar" aria-controls="mainNavbar" aria-expanded="false" aria-label="Toggle navigation">
-        <span class="navbar-toggler-icon"></span>
-      </button>
+  body:not(.dashboard-page) .dashboard-menu-toggle,
+  body:not(.dashboard-page) .dashboard-user-avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    flex: 0 0 40px;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: #6f6c69;
+    cursor: pointer;
+    font-size: 1rem;
+  }
 
-      <div class="collapse navbar-collapse" id="mainNavbar">
-        <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-          <?php foreach ($role_modules as $module_id => $module): ?>
-            <?php
-            // Skip if this is a child module (handled under parent)
-            if (isset($module_parents[$module_id])) continue;
-            
-            // Determine if this is a single link or dropdown
-            $is_dropdown = !empty($module['children']);
-            
-            // Safely get the title with a fallback
-            $module_title = isset($module['title']) ? $module['title'] : '';
-            $module_url = isset($module['url']) ? $module['url'] : '#';
-            ?>
-            <li class="nav-item <?php echo $is_dropdown ? 'dropdown' : ''; ?>">
-              <?php if (!$is_dropdown && !empty($module_title) && !empty($module_url) && $module_url != '#'): ?>
-                <!-- Single link -->
-                <a class="nav-link <?php echo $module_url === 'index.php' ? 'active' : ''; ?>" href="<?php echo htmlspecialchars($module_url); ?>">
-                  <?php echo htmlspecialchars($module_title); ?>
-                </a>
-              <?php elseif ($is_dropdown && !empty($module_title)): ?>
-                <!-- Dropdown -->
-                <a class="nav-link dropdown-toggle" href="#" id="<?php echo htmlspecialchars(strtolower(str_replace(' ', '', $module_title))); ?>Dropdown" role="button" data-bs-toggle="dropdown">
-                  <?php echo htmlspecialchars($module_title); ?>
-                </a>
-                <ul class="dropdown-menu" aria-labelledby="<?php echo htmlspecialchars(strtolower(str_replace(' ', '', $module_title))); ?>Dropdown">
-                  <?php foreach ($module['children'] as $child): ?>
-                    <li>
-                      <a class="dropdown-item" href="<?php echo isset($child['url']) ? htmlspecialchars($child['url']) : '#'; ?>">
-                        <?php echo isset($child['title']) ? htmlspecialchars($child['title']) : 'Untitled'; ?>
-                      </a>
-                    </li>
-                  <?php endforeach; ?>
-                </ul>
-              <?php endif; ?>
-            </li>
-          <?php endforeach; ?>
-        </ul>
+  body:not(.dashboard-page) .dashboard-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.65rem;
+    margin-left: 0.8rem;
+    color: #302c29;
+    font-size: 0.95rem;
+    font-weight: 750;
+    text-decoration: none;
+  }
 
-        <ul class="navbar-nav ms-auto">
-          <li class="nav-item">
-            <a class="nav-link btn btn-logout rounded-5" href="logout.php">
-              <i class="fa-solid fa-right-from-bracket me-2"></i>
-              Logout
-            </a>
-          </li>
-        </ul>
-      </div>
+  body:not(.dashboard-page) .dashboard-brand small {
+    display: block;
+    color: #77736f;
+    font-size: 0.55rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+  }
+
+  body:not(.dashboard-page) .dashboard-brand {
+    font-size: 0.95rem;
+  }
+
+  body:not(.dashboard-page) .dashboard-account-name {
+    margin-left: auto;
+    color: #686562;
+    font-size: 0.85rem;
+  }
+
+  body:not(.dashboard-page) .dashboard-user-avatar {
+    margin-left: 0.75rem;
+    border: 3px solid #fff;
+    border-radius: 50%;
+    background: #ed8b43;
+    box-shadow: 0 1px 6px rgba(36, 31, 27, 0.2);
+    color: #fff;
+    font-size: 0.74rem;
+    font-weight: 700;
+  }
+
+  body:not(.dashboard-page) .dashboard-topbar-menu-wrap {
+    position: relative;
+  }
+
+  body:not(.dashboard-page) .dashboard-topbar-menu {
+    position: absolute;
+    z-index: 1050;
+    top: calc(100% + 0.65rem);
+    right: 0;
+    min-width: 190px;
+    padding: 0.45rem;
+    border: 1px solid #ebe9e7;
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: 0 12px 30px rgba(36, 31, 27, 0.14);
+  }
+
+  body:not(.dashboard-page) .dashboard-topbar-menu[hidden] {
+    display: none;
+  }
+
+  body:not(.dashboard-page) .dashboard-menu-heading {
+    padding: 0.6rem 0.7rem;
+    color: #77736f;
+    font-size: 0.76rem;
+    font-weight: 650;
+  }
+
+  body:not(.dashboard-page) .dashboard-topbar-menu a {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.65rem 0.7rem;
+    border-radius: 8px;
+    color: #302c29;
+    font-size: 0.82rem;
+    text-decoration: none;
+  }
+
+  body:not(.dashboard-page) .dashboard-topbar-menu a:hover {
+    background: #f3f4f8;
+  }
+
+  body:not(.dashboard-page) .dashboard-sidebar {
+    position: fixed;
+    z-index: 1035;
+    top: 64px;
+    bottom: 0;
+    left: 0;
+    display: flex;
+    flex-direction: column;
+    width: 260px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    background: #292d39;
+    color: #e6e7eb;
+    transition: width 0.22s ease, transform 0.22s ease;
+  }
+
+  body:not(.dashboard-page) .dashboard-sidebar-nav {
+    padding: 1.1rem 0.8rem 0.5rem;
+  }
+
+  body:not(.dashboard-page) .dashboard-sidebar-search {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    height: 40px;
+    margin: 0 0.1rem 1rem;
+    padding: 0 0.7rem;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.07);
+    color: #aeb1bb;
+  }
+
+  body:not(.dashboard-page) .dashboard-sidebar-search input {
+    width: 100%;
+    min-width: 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: #f4f4f6;
+    font-size: 0.76rem;
+  }
+
+  body:not(.dashboard-page) .dashboard-nav-caption {
+    padding: 0.35rem 0.8rem 0.55rem;
+    color: #989ba5;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.11em;
+  }
+
+  body:not(.dashboard-page) .dashboard-nav-caption-spaced {
+    margin-top: 0.8rem;
+  }
+
+  body:not(.dashboard-page) .dashboard-sidebar-link {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    width: 100%;
+    min-height: 43px;
+    margin: 0.15rem 0;
+    padding: 0.65rem 0.8rem;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    color: #d1d2d8;
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.83rem;
+    text-align: left;
+    text-decoration: none;
+  }
+
+  body:not(.dashboard-page) .dashboard-sidebar-link > i:first-child {
+    width: 19px;
+    color: #a8abb5;
+    font-size: 0.94rem;
+    text-align: center;
+  }
+
+  body:not(.dashboard-page) .dashboard-sidebar-link:hover,
+  body:not(.dashboard-page) .dashboard-sidebar-sublink:hover {
+    background: #353a48;
+    color: #fff;
+  }
+
+  body:not(.dashboard-page) .dashboard-sidebar-link.active {
+    background: #f09a50;
+    color: #fff;
+    font-weight: 650;
+  }
+
+  body:not(.dashboard-page) .dashboard-sidebar-group-toggle {
+    appearance: none;
+  }
+
+  body:not(.dashboard-page) .dashboard-sidebar-chevron {
+    margin-left: auto;
+    font-size: 0.65rem;
+    transition: transform 0.18s ease;
+  }
+
+  body:not(.dashboard-page) .dashboard-sidebar-group-toggle[aria-expanded="true"] .dashboard-sidebar-chevron {
+    transform: rotate(180deg);
+  }
+
+  body:not(.dashboard-page) .dashboard-sidebar-submenu {
+    padding: 0.15rem 0 0.35rem 1.1rem;
+  }
+
+  body:not(.dashboard-page) .dashboard-sidebar-submenu[hidden] {
+    display: none;
+  }
+
+  body:not(.dashboard-page) .dashboard-sidebar-sublink {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    min-height: 36px;
+    padding: 0.45rem 0.7rem 0.45rem 1.45rem;
+    border-radius: 8px;
+    color: #bfc1c9;
+    font-size: 0.78rem;
+    text-decoration: none;
+  }
+
+  body:not(.dashboard-page) .dashboard-sidebar-footer {
+    margin-top: auto;
+    padding: 0.6rem 0.8rem 0.9rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  body:not(.dashboard-page) .dashboard-sidebar-backdrop {
+    display: none;
+  }
+
+  body:not(.dashboard-page).dashboard-sidebar-collapsed {
+    padding-left: 76px !important;
+  }
+
+  body:not(.dashboard-page).dashboard-sidebar-collapsed .dashboard-sidebar {
+    width: 76px;
+  }
+
+  body:not(.dashboard-page).dashboard-sidebar-collapsed .dashboard-nav-caption,
+  body:not(.dashboard-page).dashboard-sidebar-collapsed .dashboard-sidebar-search,
+  body:not(.dashboard-page).dashboard-sidebar-collapsed .dashboard-sidebar-link span,
+  body:not(.dashboard-page).dashboard-sidebar-collapsed .dashboard-sidebar-chevron,
+  body:not(.dashboard-page).dashboard-sidebar-collapsed .dashboard-sidebar-submenu,
+  body:not(.dashboard-page).dashboard-sidebar-collapsed .dashboard-sidebar-footer span {
+    display: none;
+  }
+
+  body:not(.dashboard-page).dashboard-sidebar-collapsed .dashboard-sidebar-link {
+    justify-content: center;
+    padding-right: 0.5rem;
+    padding-left: 0.5rem;
+  }
+
+  @media (max-width: 767.98px) {
+    body:not(.dashboard-page) {
+      padding-left: 0 !important;
+    }
+
+    body:not(.dashboard-page) .dashboard-sidebar {
+      width: 260px;
+      transform: translateX(-100%);
+    }
+
+    body:not(.dashboard-page).dashboard-sidebar-open .dashboard-sidebar {
+      transform: translateX(0);
+    }
+
+    body:not(.dashboard-page) .dashboard-sidebar-backdrop {
+      position: fixed;
+      z-index: 1030;
+      inset: 64px 0 0;
+      border: 0;
+      background: rgba(24, 26, 33, 0.38);
+    }
+
+    body:not(.dashboard-page).dashboard-sidebar-open .dashboard-sidebar-backdrop {
+      display: block;
+    }
+
+    body:not(.dashboard-page) .dashboard-topbar {
+      padding: 0 0.75rem;
+    }
+
+    body:not(.dashboard-page) .dashboard-account-name {
+      display: none;
+    }
+  }
+</style>
+<header class="dashboard-topbar">
+  <button type="button" class="dashboard-menu-toggle" id="dashboardSidebarToggle" aria-label="Toggle navigation" aria-expanded="false">
+    <i class="fa-solid fa-bars"></i>
+  </button>
+  <a class="dashboard-brand" href="index.php">
+    <span>School Management System</span>
+  </a>
+  <span class="dashboard-account-name"><?php echo htmlspecialchars($navigation_username, ENT_QUOTES, 'UTF-8'); ?></span>
+  <div class="dashboard-topbar-menu-wrap">
+    <button type="button" class="dashboard-user-avatar" data-dashboard-menu="userMenu" aria-label="Account options" aria-expanded="false" title="<?php echo htmlspecialchars($navigation_username, ENT_QUOTES, 'UTF-8'); ?>">
+      <?php echo htmlspecialchars($navigation_initials, ENT_QUOTES, 'UTF-8'); ?>
+    </button>
+    <div class="dashboard-topbar-menu dashboard-user-menu" id="userMenu" hidden>
+      <div class="dashboard-menu-heading"><?php echo htmlspecialchars($navigation_username, ENT_QUOTES, 'UTF-8'); ?></div>
+      <a href="profile.php"><i class="fa-solid fa-user"></i> Profile</a>
+      <a href="logout.php"><i class="fa-solid fa-right-from-bracket"></i> Logout</a>
     </div>
   </div>
-</nav>
+</header>
+
+<aside class="dashboard-sidebar" id="dashboardSidebar" aria-label="Main navigation">
+  <nav class="dashboard-sidebar-nav">
+    <label class="dashboard-sidebar-search">
+      <i class="fa-solid fa-magnifying-glass"></i>
+      <input type="search" id="dashboardSidebarSearch" placeholder="Search menu" autocomplete="off">
+    </label>
+    <div class="dashboard-nav-caption">MAIN NAVIGATION</div>
+    <a class="dashboard-sidebar-link<?php echo $navigation_current_page === 'index.php' ? ' active' : ''; ?>" href="index.php">
+      <i class="fa-solid fa-gauge-high"></i>
+      <span>Dashboard</span>
+    </a>
+    <div class="dashboard-nav-caption dashboard-nav-caption-spaced">MANAGEMENT</div>
+    <?php foreach ($role_modules as $module_id => $module): ?>
+      <?php
+      if (isset($module_parents[$module_id])) {
+          continue;
+      }
+      $module_title = (string)($module['title'] ?? '');
+      $module_url = (string)($module['url'] ?? '#');
+      $module_children = $module['children'] ?? [];
+      $module_dom_id = 'dashboard-module-' . (int)$module_id;
+      $module_icon = strtolower($module_title);
+      ?>
+      <?php if (!empty($module_children)): ?>
+        <section class="dashboard-sidebar-group">
+          <button type="button" class="dashboard-sidebar-link dashboard-sidebar-group-toggle" aria-expanded="false" aria-controls="<?php echo htmlspecialchars($module_dom_id, ENT_QUOTES, 'UTF-8'); ?>">
+            <i class="fa-solid fa-layer-group"></i>
+            <span><?php echo htmlspecialchars($module_title, ENT_QUOTES, 'UTF-8'); ?></span>
+            <i class="fa-solid fa-chevron-down dashboard-sidebar-chevron"></i>
+          </button>
+          <div class="dashboard-sidebar-submenu" id="<?php echo htmlspecialchars($module_dom_id, ENT_QUOTES, 'UTF-8'); ?>" hidden>
+            <?php foreach ($module_children as $child): ?>
+              <?php
+              $child_title = (string)($child['title'] ?? 'Untitled');
+              $child_url = (string)($child['url'] ?? '#');
+              $child_is_active = basename(parse_url($child_url, PHP_URL_PATH) ?: $child_url) === $navigation_current_page;
+              ?>
+              <a class="dashboard-sidebar-sublink<?php echo $child_is_active ? ' active' : ''; ?>" href="<?php echo htmlspecialchars($child_url, ENT_QUOTES, 'UTF-8'); ?>">
+                <i class="fa-solid fa-circle"></i>
+                <span><?php echo htmlspecialchars($child_title, ENT_QUOTES, 'UTF-8'); ?></span>
+              </a>
+            <?php endforeach; ?>
+          </div>
+        </section>
+      <?php elseif ($module_url !== '#'): ?>
+        <?php $module_is_active = basename(parse_url($module_url, PHP_URL_PATH) ?: $module_url) === $navigation_current_page; ?>
+        <a class="dashboard-sidebar-link<?php echo $module_is_active ? ' active' : ''; ?>" href="<?php echo htmlspecialchars($module_url, ENT_QUOTES, 'UTF-8'); ?>">
+          <i class="fa-solid fa-layer-group"></i>
+          <span><?php echo htmlspecialchars($module_title, ENT_QUOTES, 'UTF-8'); ?></span>
+        </a>
+      <?php endif; ?>
+    <?php endforeach; ?>
+  </nav>
+  <div class="dashboard-sidebar-footer">
+    <a class="dashboard-sidebar-link" href="logout.php">
+      <i class="fa-solid fa-right-from-bracket"></i>
+      <span>Logout</span>
+    </a>
+  </div>
+</aside>
+<button type="button" class="dashboard-sidebar-backdrop" id="dashboardSidebarBackdrop" aria-label="Close navigation"></button>
+
+<script>
+  (function () {
+    var toggle = document.getElementById('dashboardSidebarToggle');
+    var backdrop = document.getElementById('dashboardSidebarBackdrop');
+    var search = document.getElementById('dashboardSidebarSearch');
+
+    function syncNavigationForViewport() {
+      var isMobile = window.matchMedia('(max-width: 767.98px)').matches;
+      if (isMobile) {
+        document.body.classList.remove('dashboard-sidebar-collapsed');
+      } else {
+        document.body.classList.remove('dashboard-sidebar-open');
+      }
+      if (toggle) {
+        var isExpanded = isMobile
+          ? document.body.classList.contains('dashboard-sidebar-open')
+          : !document.body.classList.contains('dashboard-sidebar-collapsed');
+        toggle.setAttribute('aria-expanded', String(isExpanded));
+      }
+    }
+
+    syncNavigationForViewport();
+    window.addEventListener('resize', syncNavigationForViewport);
+
+    function closeMobileSidebar() {
+      document.body.classList.remove('dashboard-sidebar-open');
+      if (toggle && window.matchMedia('(max-width: 767.98px)').matches) {
+        toggle.setAttribute('aria-expanded', 'false');
+      }
+    }
+
+    if (toggle) {
+      toggle.addEventListener('click', function () {
+        if (window.matchMedia('(max-width: 767.98px)').matches) {
+          var isOpen = document.body.classList.toggle('dashboard-sidebar-open');
+          toggle.setAttribute('aria-expanded', String(isOpen));
+        } else {
+          var isCollapsed = document.body.classList.toggle('dashboard-sidebar-collapsed');
+          toggle.setAttribute('aria-expanded', String(!isCollapsed));
+        }
+      });
+    }
+
+    if (backdrop) backdrop.addEventListener('click', closeMobileSidebar);
+
+    document.querySelectorAll('[data-dashboard-menu]').forEach(function (menuButton) {
+      menuButton.addEventListener('click', function (event) {
+        event.stopPropagation();
+        var menu = document.getElementById(menuButton.getAttribute('data-dashboard-menu'));
+        var shouldOpen = menu && menu.hidden;
+        document.querySelectorAll('.dashboard-topbar-menu').forEach(function (item) {
+          item.hidden = true;
+        });
+        document.querySelectorAll('[data-dashboard-menu]').forEach(function (button) {
+          button.setAttribute('aria-expanded', 'false');
+        });
+        if (menu && shouldOpen) {
+          menu.hidden = false;
+          menuButton.setAttribute('aria-expanded', 'true');
+        }
+      });
+    });
+
+    document.addEventListener('click', function (event) {
+      if (!event.target.closest('.dashboard-topbar-menu-wrap')) {
+        document.querySelectorAll('.dashboard-topbar-menu').forEach(function (menu) {
+          menu.hidden = true;
+        });
+        document.querySelectorAll('[data-dashboard-menu]').forEach(function (button) {
+          button.setAttribute('aria-expanded', 'false');
+        });
+      }
+    });
+
+    document.querySelectorAll('.dashboard-sidebar-group-toggle').forEach(function (groupToggle) {
+      groupToggle.addEventListener('click', function () {
+        var submenu = document.getElementById(groupToggle.getAttribute('aria-controls'));
+        var isExpanded = groupToggle.getAttribute('aria-expanded') === 'true';
+        groupToggle.setAttribute('aria-expanded', String(!isExpanded));
+        if (submenu) submenu.hidden = isExpanded;
+      });
+    });
+
+    if (search) {
+      search.addEventListener('input', function () {
+        var searchTerm = search.value.trim().toLowerCase();
+        document.querySelectorAll('.dashboard-sidebar-group').forEach(function (group) {
+          var groupToggle = group.querySelector('.dashboard-sidebar-group-toggle');
+          var submenu = group.querySelector('.dashboard-sidebar-submenu');
+          var groupMatches = groupToggle && groupToggle.innerText.toLowerCase().includes(searchTerm);
+          var visibleChildren = 0;
+          group.querySelectorAll('.dashboard-sidebar-sublink').forEach(function (link) {
+            var matches = !searchTerm || groupMatches || link.innerText.toLowerCase().includes(searchTerm);
+            link.hidden = !matches;
+            if (matches) visibleChildren++;
+          });
+          group.hidden = searchTerm !== '' && !groupMatches && visibleChildren === 0;
+          if (searchTerm && !group.hidden && submenu && !groupMatches) {
+            submenu.hidden = false;
+            groupToggle.setAttribute('aria-expanded', 'true');
+          }
+        });
+        document.querySelectorAll('.dashboard-sidebar-nav > .dashboard-sidebar-link').forEach(function (link) {
+          link.hidden = searchTerm !== '' && !link.innerText.toLowerCase().includes(searchTerm);
+        });
+      });
+    }
+  }());
+</script>
 <?php endif; ?>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
