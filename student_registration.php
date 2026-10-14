@@ -44,7 +44,7 @@ $translations = [
 // ---------- Dropdowns ----------
 $branches = []; $village_councils = []; $sessions = []; $class_options = []; $fee_types = [];
 
-$branch_result = $conn->query("SELECT id, title FROM branches ORDER BY title");
+$branch_result = $conn->query("SELECT id, title FROM branches WHERE status = 0 OR status IS NULL ORDER BY title");
 if ($branch_result) {
     while ($row = $branch_result->fetch_assoc()) $branches[$row['id']] = $row['title'];
 }
@@ -168,8 +168,10 @@ function generate_reg_no($conn) {
 }
 
 // ---------- Edit mode Data Loading ----------
+$default_branch_id = !empty($branches) ? array_key_first($branches) : 1;
+
 $student_data = [
-    'id' => '', 'branch_id' => '1', 'village_council_id' => '', 'reg_no' => '',
+    'id' => '', 'branch_id' => $default_branch_id, 'village_council_id' => '', 'reg_no' => '',
     'admission_no' => '', 'admission_date' => '', 'roll_no' => '',
     'session_id' => '', 'class_id' => '', 'class_section_id' => '',
     'name' => '', 'dob_day' => '', 'dob_month' => '', 'dob_year' => '',
@@ -209,6 +211,9 @@ if (isset($_GET['edit']) && is_numeric($_GET['edit'])) {
             }
             if (!isset($student_data['gender_other'])) $student_data['gender_other'] = '';
             if (!isset($student_data['guardian_relation'])) $student_data['guardian_relation'] = '';
+            if (!isset($student_data['branch_id']) || empty($student_data['branch_id'])) {
+                $student_data['branch_id'] = $default_branch_id;
+            }
 
             $c_stmt = $conn->prepare("SELECT class_id, class_section_id, session_id FROM student_class WHERE student_registration_id = ? ORDER BY id DESC LIMIT 1");
             if ($c_stmt) {
@@ -274,7 +279,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['student_id']) && isset
     }
 
     $student_id = intval($_POST['student_id']);
-    $branch_id = 1;
+    $branch_id = intval($_POST['branch_id'] ?? 0);
+    if ($branch_id <= 0) {
+        $first_b = array_key_first($branches);
+        $branch_id = $first_b ? intval($first_b) : 1;
+    }
     $village_council_id = intval($_POST['village_council_id'] ?? 0);
     $reg_no = clean($conn, 'reg_no');
     $session_id = intval($_POST['session_id'] ?? 0);
@@ -296,16 +305,18 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['student_id']) && isset
     }
     if ($class_section_id === 0) $class_section_id = null;
 
-    /* ═══════════════════════════════════════════════════
-       SAME AS CURRENT ADDRESS: mirror on server side too
-       ═══════════════════════════════════════════════════ */
+    /* SAME AS CURRENT ADDRESS */
     $current_address = clean($conn, 'current_address');
     $permanent_address = clean($conn, 'permanent_address');
     if (!empty($_POST['permanent_same_as_current'])) {
         $permanent_address = $current_address;
     }
 
+    $religion_val = clean($conn, 'religion');
+    $house_val = clean($conn, 'house');
+
     $fields = [
+        'branch_id' => $branch_id,
         'admission_no' => clean($conn, 'admission_no'),
         'admission_date' => clean($conn, 'admission_date') ?: null,
         'roll_no' => clean($conn, 'roll_no'),
@@ -313,8 +324,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['student_id']) && isset
         'gender' => $gender,
         'b_form_no' => clean($conn, 'b_form_no'),
         'student_mobile' => clean($conn, 'student_mobile'),
-        'religion' => clean($conn, 'religion'),
-        'house' => clean($conn, 'house'),
+        'religion' => $religion_val,
+        'house' => $house_val,
         'father_name' => clean($conn, 'father_name'),
         'father_occupation' => clean($conn, 'father_occupation'),
         'father_qualification' => clean($conn, 'father_qualification'),
@@ -519,7 +530,6 @@ if (isset($_GET['step']) && is_numeric($_GET['step'])) {
     if ($initial_step > 4) $initial_step = 4;
 }
 
-/* Determine if permanent == current on load (for auto-tick) */
 $permanent_same_as_current_default = false;
 if ($edit_mode && !empty($student_data['current_address']) && $student_data['current_address'] === $student_data['permanent_address']) {
     $permanent_same_as_current_default = true;
@@ -596,6 +606,42 @@ if ($edit_mode && !empty($student_data['current_address']) && $student_data['cur
         .dob-month { width: 100px !important; }
         .dob-year { width: 90px !important; }
 
+        /* AGE DISPLAY */
+        .age-display {
+            margin-top: 8px;
+            padding: 8px 12px;
+            background: #f0fdf4;
+            border: 1px solid #bbf7d0;
+            border-radius: 6px;
+            font-size: 13px;
+            color: #166534;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .age-display i { color: #16a34a; }
+        .age-display .age-value {
+            font-weight: 700;
+            color: #14532d;
+            font-size: 14px;
+        }
+        .age-display .age-detail {
+            color: #15803d;
+            font-size: 12px;
+        }
+        .age-display.age-empty {
+            background: #f8fafc;
+            border-color: #e2e8f0;
+            color: #94a3b8;
+        }
+        .age-display.age-empty i { color: #cbd5e1; }
+        .age-display.age-invalid {
+            background: #fef2f2;
+            border-color: #fecaca;
+            color: #991b1b;
+        }
+        .age-display.age-invalid i { color: #dc2626; }
+
         .image-upload-card {
             background: #f8fafc;
             border: 1px dashed #cbd5e1;
@@ -619,7 +665,6 @@ if ($edit_mode && !empty($student_data['current_address']) && $student_data['cur
         .image-upload-card input[type="file"] { display: block; margin: 8px auto 0 auto; font-size: 12px; }
         .image-upload-card .remove-wrap { margin-top: 10px; font-size: 12px; color: #64748b; }
 
-        /* SAME AS CURRENT ADDRESS CHECKBOX */
         .same-address-toggle {
             display: flex; align-items: center; gap: 8px;
             margin: 8px 0 0 0;
@@ -692,13 +737,11 @@ if ($edit_mode && !empty($student_data['current_address']) && $student_data['cur
                         Editing <strong><?php echo htmlspecialchars($student_data['name'] ?: 'Student'); ?></strong>
                         <?php if (!empty($student_data['reg_no'])): ?> &middot; <?php echo htmlspecialchars($student_data['reg_no']); ?><?php endif; ?>
                     <?php else: ?>
-                        Register a new student &middot; Auto Reg No: <strong><?php echo htmlspecialchars($student_data['reg_no']); ?></strong>
+                        Register a new student </strong>
                     <?php endif; ?>
                 </div>
             </div>
-            <a href="student_list.php" class="btn btn-outline-secondary btn-sm" style="padding: 8px 18px;">
-                <i class="fas fa-list"></i> View Students
-            </a>
+          
         </div>
 
         <?php if (isset($_SESSION['message'])): ?>
@@ -751,7 +794,7 @@ if ($edit_mode && !empty($student_data['current_address']) && $student_data['cur
                                                 <div class="form-group">
                                                     <label>Date of Birth</label>
                                                     <div class="dob-group">
-                                                        <select class="form-control dob-day" name="dob_day">
+                                                        <select class="form-control dob-day" name="dob_day" id="dob_day">
                                                             <option value="">Day</option>
                                                             <?php for ($d = 1; $d <= 31; $d++):
                                                                 $dVal = str_pad($d, 2, '0', STR_PAD_LEFT);
@@ -759,13 +802,13 @@ if ($edit_mode && !empty($student_data['current_address']) && $student_data['cur
                                                                 <option value="<?php echo $dVal; ?>" <?php echo ((string)$student_data['dob_day'] === $dVal) ? 'selected' : ''; ?>><?php echo $d; ?></option>
                                                             <?php endfor; ?>
                                                         </select>
-                                                        <select class="form-control dob-month" name="dob_month">
+                                                        <select class="form-control dob-month" name="dob_month" id="dob_month">
                                                             <option value="">Month</option>
                                                             <?php foreach(['01'=>'Jan','02'=>'Feb','03'=>'Mar','04'=>'Apr','05'=>'May','06'=>'Jun','07'=>'Jul','08'=>'Aug','09'=>'Sep','10'=>'Oct','11'=>'Nov','12'=>'Dec'] as $k=>$v): ?>
                                                                 <option value="<?=$k?>" <?=($student_data['dob_month']==$k)?'selected':''?>><?=$v?></option>
                                                             <?php endforeach; ?>
                                                         </select>
-                                                        <select class="form-control dob-year" name="dob_year">
+                                                        <select class="form-control dob-year" name="dob_year" id="dob_year">
                                                             <option value="">Year</option>
                                                             <?php
                                                             $current_year = intval(date('Y'));
@@ -774,6 +817,13 @@ if ($edit_mode && !empty($student_data['current_address']) && $student_data['cur
                                                                 <option value="<?php echo $y; ?>" <?php echo ((string)$student_data['dob_year'] === (string)$y) ? 'selected' : ''; ?>><?php echo $y; ?></option>
                                                             <?php endfor; ?>
                                                         </select>
+                                                    </div>
+                                                    <!-- AGE DISPLAY -->
+                                                    <div class="age-display age-empty" id="ageDisplay">
+                                                        <i class="fas fa-birthday-cake"></i>
+                                                        <span>Age:</span>
+                                                        <span class="age-value" id="ageValue">—</span>
+                                                        <span class="age-detail" id="ageDetail"></span>
                                                     </div>
                                                 </div>
                                             </div>
@@ -795,6 +845,17 @@ if ($edit_mode && !empty($student_data['current_address']) && $student_data['cur
                                 <div class="col-md-6">
                                     <div class="form-section">
                                         <h5>Admission Details</h5>
+                                        <div class="form-group">
+                                            <label>Branch <span class="text-danger">*</span></label>
+                                            <select class="form-control" name="branch_id" required>
+                                                <option value="">-- Select Branch --</option>
+                                                <?php foreach ($branches as $bid => $bname): ?>
+                                                    <option value="<?php echo (int)$bid; ?>" <?php echo ((int)$student_data['branch_id'] === (int)$bid) ? 'selected' : ''; ?>>
+                                                        <?php echo htmlspecialchars($bname); ?>
+                                                    </option>
+                                                <?php endforeach; ?>
+                                            </select>
+                                        </div>
                                         <div class="form-row">
                                             <div class="col-6">
                                                 <div class="form-group">
@@ -837,11 +898,19 @@ if ($edit_mode && !empty($student_data['current_address']) && $student_data['cur
                                         <h5>Additional Info</h5>
                                         <div class="form-group">
                                             <label>Religion</label>
-                                            <input type="text" class="form-control" name="religion" value="<?php echo htmlspecialchars($student_data['religion']); ?>">
+                                            <select class="form-control" name="religion">
+                                                <option value="">-- Select --</option>
+                                                <option value="Muslim" <?php echo ($student_data['religion']=='Muslim')?'selected':''; ?>>Muslim</option>
+                                                <option value="Non-Muslim" <?php echo ($student_data['religion']=='Non-Muslim')?'selected':''; ?>>Non-Muslim</option>
+                                            </select>
                                         </div>
                                         <div class="form-group">
                                             <label>House</label>
-                                            <input type="text" class="form-control" name="house" value="<?php echo htmlspecialchars($student_data['house']); ?>">
+                                            <select class="form-control" name="house">
+                                                <option value="">-- Select --</option>
+                                                <option value="Rent" <?php echo ($student_data['house']=='Rent')?'selected':''; ?>>Rent</option>
+                                                <option value="Not Rent" <?php echo ($student_data['house']=='Not Rent')?'selected':''; ?>>Not Rent</option>
+                                            </select>
                                         </div>
                                         <div class="form-group">
                                             <label>Medical History</label>
@@ -950,7 +1019,7 @@ if ($edit_mode && !empty($student_data['current_address']) && $student_data['cur
                             </div>
                         </div>
 
-                        <!-- TAB 3: ADDRESS (with Same as Current) -->
+                        <!-- TAB 3: ADDRESS -->
                         <div class="tab-pane fade" id="address" role="tabpanel">
                             <div class="row">
                                 <div class="col-md-12">
@@ -1022,9 +1091,9 @@ if ($edit_mode && !empty($student_data['current_address']) && $student_data['cur
                                 </div>
                                 <div class="col-md-6">
                                     <div class="form-section">
-                                        <h5>Village & Transport</h5>
+                                        <h5>Transportation</h5>
                                         <div class="form-group">
-                                            <label>Village Council</label>
+                                            <label>Town</label>
                                             <select class="form-control" id="village_council_id" name="village_council_id">
                                                 <option value="">Select</option>
                                                 <?php foreach ($village_councils as $id => $data): ?>
@@ -1293,8 +1362,82 @@ if ($edit_mode && !empty($student_data['current_address']) && $student_data['cur
         });
 
         /* ═══════════════════════════════════════════════════
-           SAME AS CURRENT ADDRESS LOGIC
+           AGE AUTO-CALCULATION
            ═══════════════════════════════════════════════════ */
+        function calcAge() {
+            var d = parseInt($('#dob_day').val(), 10);
+            var m = parseInt($('#dob_month').val(), 10);
+            var y = parseInt($('#dob_year').val(), 10);
+
+            var $box = $('#ageDisplay');
+            var $val = $('#ageValue');
+            var $detail = $('#ageDetail');
+
+            // Reset classes
+            $box.removeClass('age-empty age-invalid');
+
+            // If any field empty
+            if (!d || !m || !y) {
+                $box.addClass('age-empty');
+                $val.text('—');
+                $detail.text('');
+                return;
+            }
+
+            // Validate the date
+            var dob = new Date(y, m - 1, d);
+            if (dob.getFullYear() !== y || dob.getMonth() !== (m - 1) || dob.getDate() !== d) {
+                $box.addClass('age-invalid');
+                $val.text('Invalid date');
+                $detail.text('');
+                return;
+            }
+
+            // Future date check
+            var today = new Date();
+            today.setHours(0, 0, 0, 0);
+            if (dob > today) {
+                $box.addClass('age-invalid');
+                $val.text('Future date');
+                $detail.text('');
+                return;
+            }
+
+            // Compute years, months, days
+            var years = today.getFullYear() - dob.getFullYear();
+            var months = today.getMonth() - dob.getMonth();
+            var days = today.getDate() - dob.getDate();
+
+            if (days < 0) {
+                months--;
+                var prevMonth = new Date(today.getFullYear(), today.getMonth(), 0);
+                days += prevMonth.getDate();
+            }
+            if (months < 0) {
+                years--;
+                months += 12;
+            }
+
+            // Decimal age (approximate)
+            var msPerYear = 365.25 * 24 * 60 * 60 * 1000;
+            var decimalAge = (today.getTime() - dob.getTime()) / msPerYear;
+            var decimalAgeStr = decimalAge.toFixed(1);
+
+            // Build display
+            var yrLabel = years === 1 ? 'year' : 'years';
+            var moLabel = months === 1 ? 'month' : 'months';
+            var dyLabel = days === 1 ? 'day' : 'days';
+
+            $val.text(years + ' ' + yrLabel);
+            $detail.text('(' + months + ' ' + moLabel + ', ' + days + ' ' + dyLabel + ' • ' + decimalAgeStr + ' yrs)');
+        }
+
+        // Attach listeners
+        $('#dob_day, #dob_month, #dob_year').on('change', calcAge);
+        // Initial calc on page load (important for edit mode)
+        calcAge();
+
+        /* SAME AS CURRENT ADDRESS */
         function syncPermanentAddress() {
             if ($('#permanent_same_as_current').is(':checked')) {
                 $('#permanent_address')
@@ -1307,18 +1450,8 @@ if ($edit_mode && !empty($student_data['current_address']) && $student_data['cur
                     .css('background-color', '');
             }
         }
-
-        // On page load: if checkbox is already checked, sync
-        if ($('#permanent_same_as_current').is(':checked')) {
-            syncPermanentAddress();
-        }
-
-        // When checkbox changes
-        $('#permanent_same_as_current').on('change', function() {
-            syncPermanentAddress();
-        });
-
-        // Live sync while typing in current address
+        if ($('#permanent_same_as_current').is(':checked')) syncPermanentAddress();
+        $('#permanent_same_as_current').on('change', function() { syncPermanentAddress(); });
         $('#current_address').on('input keyup', function() {
             if ($('#permanent_same_as_current').is(':checked')) {
                 $('#permanent_address').val($(this).val());

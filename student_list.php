@@ -27,6 +27,7 @@ $translations = [
         'all_classes' => 'All Classes',
         'all_villages' => 'All Village Councils',
         'all_status' => 'All Students',
+        'all_branches' => 'All Branches',
         'status_active' => 'Active',
         'status_leave' => 'Leave',
         'status_struck_off' => 'Struck Off',
@@ -39,11 +40,10 @@ $translations = [
 ];
 
 /* ═══════════════════════════════════════════════════════════
-   ALL COLUMNS — full student_registration schema
+   ALL COLUMNS
    ═══════════════════════════════════════════════════════════ */
 $all_columns = [
     'id'                          => 'ID',
-    'branch_id'                   => 'Branch ID',
     'village_council_id'          => 'Village Council ID',
     'village_council_title'       => 'Village Council',
     'reg_no'                      => 'Reg No',
@@ -92,30 +92,29 @@ $all_columns = [
     'branch_title'                => 'Branch',
 ];
 
-/* Sort columns ascending by display label for the config drawer */
 $all_columns_sorted = $all_columns;
 asort($all_columns_sorted, SORT_NATURAL | SORT_FLAG_CASE);
 
 /* ═══════════════════════════════════════════════════════════
-   ALL FILTERS — dynamically generated from ALL columns
+   ALL FILTERS
    ═══════════════════════════════════════════════════════════ */
 $all_filters = [
+    'branch'  => 'Branch Filter',
     'class'   => 'Class Filter',
     'village' => 'Village Council Filter',
     'status'  => 'Status Filter',
 ];
 foreach ($all_columns as $key => $label) {
-    if (in_array($key, ['class_title', 'village_council_title', 'status', 'id'])) {
+    if (in_array($key, ['class_title', 'village_council_title', 'status', 'id', 'branch_id', 'branch_title'], true)) {
         continue;
     }
     $all_filters[$key] = $label . ' Filter';
 }
 
-/* Sort filters ascending by display label for the config drawer */
 $all_filters_sorted = $all_filters;
 asort($all_filters_sorted, SORT_NATURAL | SORT_FLAG_CASE);
 
-/* By default, every column is visible in the table */
+/* Default layout */
 $default_columns = array_keys($all_columns);
 $default_filters = [];
 
@@ -126,6 +125,11 @@ if (!isset($_SESSION['student_filters_visible']) || !is_array($_SESSION['student
     $_SESSION['student_filters_visible'] = $default_filters;
 }
 
+/* Purge stale branch_id */
+if (in_array('branch_id', $_SESSION['student_columns_visible'], true)) {
+    $_SESSION['student_columns_visible'] = array_values(array_diff($_SESSION['student_columns_visible'], ['branch_id']));
+}
+
 if (isset($_GET['reset_layout'])) {
     $_SESSION['student_columns_visible'] = $default_columns;
     $_SESSION['student_filters_visible'] = $default_filters;
@@ -133,23 +137,58 @@ if (isset($_GET['reset_layout'])) {
     exit;
 }
 
+/* ═══════════════════════════════════════════════════════════
+   SAVE FILTERS / COLUMNS  —  FIXED
+   ═══════════════════════════════════════════════════════════
+   The fix: each form now submits a hidden "columns_submitted"
+   or "filters_submitted" flag so we KNOW when the user actually
+   submitted a form. Empty submission = empty array (not "keep
+   old session value").
+   ═══════════════════════════════════════════════════════════ */
 if (isset($_GET['save_filters'])) {
-    $vis_cols = isset($_GET['visible_columns']) && is_array($_GET['visible_columns'])
-        ? array_values(array_intersect(array_keys($all_columns), $_GET['visible_columns']))
-        : $_SESSION['student_columns_visible'];
 
-    $vis_filters = isset($_GET['visible_filters']) && is_array($_GET['visible_filters'])
-        ? array_values(array_intersect(array_keys($all_filters), $_GET['visible_filters']))
-        : $_SESSION['student_filters_visible'];
+    $filters_submitted = isset($_GET['filters_submitted']) && $_GET['filters_submitted'] === '1';
+    $columns_submitted = isset($_GET['columns_submitted']) && $_GET['columns_submitted'] === '1';
 
-    $_SESSION['student_columns_visible'] = $vis_cols;
-    $_SESSION['student_filters_visible'] = $vis_filters;
+    // ---- COLUMNS ----
+    if ($columns_submitted) {
+        // User actually submitted the Columns form.
+        // If no visible_columns[] sent → that means "uncheck everything" → empty array.
+        if (isset($_GET['visible_columns']) && is_array($_GET['visible_columns'])) {
+            $vis_cols = array_values(array_intersect(array_keys($all_columns), $_GET['visible_columns']));
+        } else {
+            $vis_cols = [];
+        }
+        $_SESSION['student_columns_visible'] = $vis_cols;
+    }
+    // else: columns not submitted — keep existing session value untouched.
 
+    // ---- FILTERS ----
+    if ($filters_submitted) {
+        // User actually submitted the Filters form.
+        // If no visible_filters[] sent → that means "uncheck everything" → empty array.
+        if (isset($_GET['visible_filters']) && is_array($_GET['visible_filters'])) {
+            $vis_filters = array_values(array_intersect(array_keys($all_filters), $_GET['visible_filters']));
+        } else {
+            $vis_filters = [];
+        }
+        $_SESSION['student_filters_visible'] = $vis_filters;
+    }
+    // else: filters not submitted — keep existing session value untouched.
+
+    // Remove our control flags from the redirect URL
     $back = $_GET;
-    unset($back['save_filters'], $back['visible_columns'], $back['visible_filters']);
+    unset(
+        $back['save_filters'],
+        $back['visible_columns'],
+        $back['visible_filters'],
+        $back['filters_submitted'],
+        $back['columns_submitted']
+    );
     header('Location: student_list.php' . (!empty($back) ? '?' . http_build_query($back) : ''));
     exit;
 }
+
 $columns_visible = $_SESSION['student_columns_visible'];
 $filters_visible = $_SESSION['student_filters_visible'];
 
@@ -248,6 +287,12 @@ $village_councils = [];
 $vc_q = $conn->query("SELECT id, title FROM village_councils ORDER BY title");
 while ($row = $vc_q->fetch_assoc()) $village_councils[$row['id']] = $row['title'];
 
+$branches_list = [];
+$br_q = $conn->query("SELECT id, title FROM branches WHERE status = 0 OR status IS NULL ORDER BY title");
+if ($br_q) {
+    while ($row = $br_q->fetch_assoc()) $branches_list[$row['id']] = $row['title'];
+}
+
 /* ═══════════════════════════════════════════════════════════
    DYNAMIC FILTER PROCESSING
    ═══════════════════════════════════════════════════════════ */
@@ -256,10 +301,11 @@ $class_filter = isset($_GET['class_filter']) ? intval($_GET['class_filter']) : 0
 $class_section_filter = isset($_GET['class_section_filter']) ? intval($_GET['class_section_filter']) : 0;
 $village_filter = isset($_GET['village_filter']) ? intval($_GET['village_filter']) : 0;
 $status_filter = isset($_GET['status_filter']) ? $_GET['status_filter'] : '';
+$branch_filter = isset($_GET['branch_filter']) ? intval($_GET['branch_filter']) : 0;
 
 $active_filters = [];
 foreach ($filters_visible as $fkey) {
-    if (in_array($fkey, ['class', 'village', 'status'])) {
+    if (in_array($fkey, ['class', 'village', 'status', 'branch'])) {
         continue;
     }
     $get_key = $fkey . '_filter';
@@ -274,7 +320,7 @@ $where = [];
 if (!empty($search)) {
     $search_safe = $conn->real_escape_string($search);
     $search_columns = [
-        'id', 'branch_id', 'village_council_id', 'reg_no', 'admission_no', 'admission_date', 'roll_no', 'name',
+        'id', 'village_council_id', 'reg_no', 'admission_no', 'admission_date', 'roll_no', 'name',
         'dob', 'gender', 'father_name', 'father_occupation', 'father_qualification', 'father_income', 'father_phone',
         'mobile', 'cnic', 'b_form_no', 'student_mobile', 'religion', 'house', 'mname', 'mcnic', 'current_address',
         'permanent_address', 'guardian_name', 'guardian_mobile', 'guardian_address', 'guardian_cnic', 'emergency_name',
@@ -307,6 +353,9 @@ if (in_array('village', $filters_visible, true) && $village_filter > 0) {
 if (in_array('status', $filters_visible, true) && $status_filter !== '' && $status_filter !== 'all') {
     $where[] = "sr.status = '" . $conn->real_escape_string($status_filter) . "'";
 }
+if (in_array('branch', $filters_visible, true) && $branch_filter > 0) {
+    $where[] = "sr.branch_id = $branch_filter";
+}
 
 /* 3. DYNAMIC COLUMN FILTERS */
 foreach ($active_filters as $fkey => $fval) {
@@ -332,7 +381,6 @@ foreach ($active_filters as $fkey => $fval) {
     elseif ($fkey === 'branch_title') $table_prefix = 'b.';
     elseif ($fkey === 'village_council_title') $table_prefix = 'vc.';
 
-    /* GENDER: exact match instead of LIKE — the dropdown sends the exact value */
     if ($fkey === 'gender') {
         $where[] = "sr.gender = '$safe_val'";
         continue;
@@ -376,7 +424,6 @@ $total_students = $result ? $result->num_rows : 0;
 $students = [];
 if ($result) while ($r = $result->fetch_assoc()) $students[] = $r;
 
-/* Format any cell value for display */
 function student_cell_value($row, $key) {
     switch ($key) {
         case 'is_transport':
@@ -717,6 +764,8 @@ var studentsData = <?php echo json_encode($students, JSON_HEX_TAG | JSON_HEX_APO
                 }
                 ?>
                 <input type="hidden" name="save_filters" value="1">
+                <!-- FLAG: tells server the Filters form was actually submitted -->
+                <input type="hidden" name="filters_submitted" value="1">
 
                 <h6><i class="fas fa-filter"></i> Filter dropdowns to show above the table (ALL COLUMNS)</h6>
                 <div class="col-grid">
@@ -752,6 +801,8 @@ var studentsData = <?php echo json_encode($students, JSON_HEX_TAG | JSON_HEX_APO
                 }
                 ?>
                 <input type="hidden" name="save_filters" value="1">
+                <!-- FLAG: tells server the Columns form was actually submitted -->
+                <input type="hidden" name="columns_submitted" value="1">
 
                 <h6><i class="fas fa-columns"></i> Table columns — <?= count($all_columns) ?> available</h6>
                 <div class="col-grid">
@@ -822,9 +873,9 @@ var studentsData = <?php echo json_encode($students, JSON_HEX_TAG | JSON_HEX_APO
             <?php if (!empty($filters_visible)): ?>
             <div class="filter-row">
                 <?php foreach ($filters_visible as $fkey):
-                    if (!isset($all_columns[$fkey]) && !in_array($fkey, ['class', 'village', 'status'])) continue;
+                    if (!isset($all_columns[$fkey]) && !in_array($fkey, ['class', 'village', 'status', 'branch'])) continue;
 
-                    $flabel = in_array($fkey, ['class', 'village', 'status']) ? $all_filters[$fkey] : $all_columns[$fkey];
+                    $flabel = in_array($fkey, ['class', 'village', 'status', 'branch']) ? $all_filters[$fkey] : $all_columns[$fkey];
                     $get_key = $fkey . '_filter';
                     $fval = isset($_GET[$get_key]) ? htmlspecialchars($_GET[$get_key]) : '';
                 ?>
@@ -851,6 +902,13 @@ var studentsData = <?php echo json_encode($students, JSON_HEX_TAG | JSON_HEX_APO
                                 <option value="<?php echo $id; ?>" <?php echo ($village_filter == $id) ? 'selected' : ''; ?>><?php echo htmlspecialchars($name); ?></option>
                             <?php endforeach; ?>
                         </select>
+                    <?php elseif ($fkey === 'branch'): ?>
+                        <select name="branch_filter" id="branch_filter">
+                            <option value="0"><?php echo $translations[$lang]['all_branches']; ?></option>
+                            <?php foreach ($branches_list as $id => $name): ?>
+                                <option value="<?php echo $id; ?>" <?php echo ($branch_filter == $id) ? 'selected' : ''; ?>><?php echo htmlspecialchars($name); ?></option>
+                            <?php endforeach; ?>
+                        </select>
                     <?php elseif ($fkey === 'status'): ?>
                         <select name="status_filter" id="status_filter">
                             <option value="all" <?php echo ($status_filter === '' || $status_filter === 'all') ? 'selected' : ''; ?>><?php echo $translations[$lang]['all_status']; ?></option>
@@ -859,7 +917,6 @@ var studentsData = <?php echo json_encode($students, JSON_HEX_TAG | JSON_HEX_APO
                             <option value="2"   <?php echo ($status_filter === '2')   ? 'selected' : ''; ?>><?php echo $translations[$lang]['status_struck_off']; ?></option>
                         </select>
                     <?php elseif ($fkey === 'gender'): ?>
-                        <!-- GENDER: Render as selectbox -->
                         <select name="gender_filter" id="gender_filter">
                             <option value="">-- All --</option>
                             <option value="Male"   <?php echo ($fval === 'Male')   ? 'selected' : ''; ?>>Male</option>
@@ -878,7 +935,7 @@ var studentsData = <?php echo json_encode($students, JSON_HEX_TAG | JSON_HEX_APO
         </form>
 
         <?php
-        $has_active_filters = !empty($search) || $class_filter > 0 || $village_filter > 0 || ($status_filter !== '' && $status_filter !== 'all') || !empty($active_filters);
+        $has_active_filters = !empty($search) || $class_filter > 0 || $village_filter > 0 || $branch_filter > 0 || ($status_filter !== '' && $status_filter !== 'all') || !empty($active_filters);
         if ($has_active_filters):
         ?>
         <div class="results-bar">
@@ -1178,12 +1235,10 @@ $(document).ready(function() {
         }
     });
 
-    $('#class_combo_filter, #village_filter, #status_filter').change(function() { $('#filterForm').submit(); });
+    $('#class_combo_filter, #village_filter, #status_filter, #branch_filter').change(function() { $('#filterForm').submit(); });
 
-    // GENDER selectbox auto-submit
     $(document).on('change', '#gender_filter', function() { $('#filterForm').submit(); });
 
-    // DYNAMIC DEBOUNCE for text filters only
     var filterDebounce = null;
     $(document).on('keyup', '.filter-row input[type="text"]', function(e) {
         if (e.key === 'Enter') { $('#filterForm').submit(); return; }
