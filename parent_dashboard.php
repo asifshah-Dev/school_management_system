@@ -101,6 +101,29 @@ function att_pct($present, $total) {
     if ($total <= 0) return null;
     return round(($present / $total) * 100, 1);
 }
+
+/* ─────────── Notices for the parent ─────────── */
+require_once('notice_helper.php');
+$parent_notices = [];
+$parent_notice_unread = 0;
+
+if ($isParent || $isAdmin) {
+    $audience_sql = notice_audience_sql_for_user($conn);
+    $active_sql   = notice_active_sql();
+    $parent_notice_unread = notice_unread_count($conn);
+
+    $q = $conn->query("
+        SELECT n.id, n.title, n.body, n.priority, n.publish_from,
+               u.username AS author,
+               (SELECT COUNT(*) FROM notice_reads r WHERE r.notice_id = n.id AND r.user_id = $userId) AS is_read
+        FROM notices n
+        LEFT JOIN users u ON u.id = n.created_by
+        WHERE $active_sql AND $audience_sql
+        ORDER BY n.publish_from DESC, n.id DESC
+        LIMIT 5
+    ");
+    if ($q) while ($r = $q->fetch_assoc()) $parent_notices[] = $r;
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -196,6 +219,39 @@ function att_pct($present, $total) {
     }
     .empty-state .big { font-size: 48px; opacity: 0.4; margin-bottom: 12px; }
     .empty-state h3 { font-size: 18px; color: #475569; font-weight: 600; }
+
+        /* Notices panel */
+    .notices-panel { background: #fff; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.06); margin-bottom: 24px; overflow: hidden; }
+    .notices-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 22px; border-bottom: 1px solid #e2e8f0; flex-wrap: wrap; }
+    .notices-head h2 { font-size: 17px; font-weight: 700; color: #0f172a; margin: 0; }
+    .notices-head h2 i { color: #1e40af; margin-right: 6px; }
+    .notices-sub { font-size: 13px; color: #64748b; margin-top: 3px; }
+    .notices-unread-badge { display: inline-block; padding: 2px 9px; border-radius: 20px; background: #dc2626; color: #fff; font-size: 11px; font-weight: 800; margin-left: 6px; }
+    .notices-view-all { font-size: 13px; font-weight: 700; color: #1e40af; text-decoration: none; }
+    .notices-view-all:hover { text-decoration: underline; }
+    .notices-list { display: flex; flex-direction: column; }
+    .notice-row { display: flex; align-items: flex-start; gap: 12px; padding: 14px 22px; border-bottom: 1px solid #f1f5f9; text-decoration: none; color: inherit; transition: background 0.12s; }
+    .notice-row:last-child { border-bottom: none; }
+    .notice-row:hover { background: #f8fafc; text-decoration: none; color: inherit; }
+    .notice-row.unread { background: #f0f5ff; }
+    .notice-row.unread:hover { background: #e5edfd; }
+    .notice-row.priority-high   { border-left: 4px solid #d97706; }
+    .notice-row.priority-urgent { border-left: 4px solid #dc2626; }
+    .notice-row-icon { width: 38px; height: 38px; flex-shrink: 0; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 15px; }
+    .notice-row-icon.normal { background: #dbeafe; color: #1e40af; }
+    .notice-row-icon.high   { background: #fef3c7; color: #92400e; }
+    .notice-row-icon.urgent { background: #fee2e2; color: #991b1b; }
+    .notice-row-body { flex: 1; min-width: 0; }
+    .notice-row-title { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 3px; }
+    .notice-row.unread .notice-row-title { font-weight: 800; }
+    .notice-row-snippet { font-size: 12px; color: #64748b; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 4px; }
+    .notice-row-meta { display: flex; align-items: center; gap: 10px; font-size: 11px; color: #94a3b8; flex-wrap: wrap; }
+    .notice-row-meta i { color: #cbd5e1; }
+    .priority-tag { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 8px; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.3px; }
+    .priority-tag.high   { background: #fef3c7; color: #92400e; }
+    .priority-tag.urgent { background: #fee2e2; color: #991b1b; }
+    .priority-tag.normal { background: #dbeafe; color: #1e40af; }
+    .notice-row-dot { width: 8px; height: 8px; border-radius: 50%; background: #3b6fe0; margin-top: 8px; flex-shrink: 0; }
 </style>
 </head>
 <body>
@@ -203,10 +259,50 @@ function att_pct($present, $total) {
 
 <div class="container" style="padding: 20px; max-width: 1100px; margin: 0 auto;">
 
-    <div class="pd-header">
-        <h1>Parent Dashboard</h1>
-        <div class="sub"><?= htmlspecialchars($_SESSION['username'] ?? '') ?> · <?= date('l, F j, Y') ?></div>
+    <!-- NOTICES PANEL -->
+    <?php if (!empty($parent_notices)): ?>
+    <div class="notices-panel">
+        <div class="notices-head">
+            <div>
+                <h2><i class="fas fa-bullhorn"></i> Notices &amp; Announcements</h2>
+                <div class="notices-sub">
+                    Latest updates from the school
+                    <?php if ($parent_notice_unread > 0): ?>
+                        <span class="notices-unread-badge"><?= (int)$parent_notice_unread ?> unread</span>
+                    <?php endif; ?>
+                </div>
+            </div>
+            <a href="parent_notices.php" class="notices-view-all">View all →</a>
+        </div>
+        <div class="notices-list">
+            <?php foreach ($parent_notices as $pn):
+                $unread = ((int)$pn['is_read'] === 0);
+                $p = $pn['priority'];
+                $snippet = mb_substr(preg_replace('/\s+/', ' ', $pn['body']), 0, 120);
+                $priorityClass = $p !== 'normal' ? 'priority-' . $p : '';
+                $iconClass = $p;
+            ?>
+                <a class="notice-row <?= $unread ? 'unread' : '' ?> <?= $priorityClass ?>"
+                   href="parent_notice_view.php?id=<?= (int)$pn['id'] ?>">
+                    <span class="notice-row-icon <?= htmlspecialchars($iconClass) ?>">
+                        <i class="fas fa-bullhorn"></i>
+                    </span>
+                    <span class="notice-row-body">
+                        <div class="notice-row-title"><?= htmlspecialchars($pn['title']) ?></div>
+                        <div class="notice-row-snippet"><?= htmlspecialchars($snippet) ?>…</div>
+                        <div class="notice-row-meta">
+                            <span><i class="fas fa-clock"></i> <?= date('d M · h:i A', strtotime($pn['publish_from'])) ?></span>
+                            <?php if ($p !== 'normal'): ?>
+                                <span class="priority-tag <?= htmlspecialchars($p) ?>"><?= htmlspecialchars(ucfirst($p)) ?></span>
+                            <?php endif; ?>
+                        </div>
+                    </span>
+                    <?php if ($unread): ?><span class="notice-row-dot"></span><?php endif; ?>
+                </a>
+            <?php endforeach; ?>
+        </div>
     </div>
+    <?php endif; ?>
 
     <?php if (empty($children)): ?>
         <div class="empty-state">

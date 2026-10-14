@@ -36,6 +36,11 @@ if ($__roleId === 6) {
         'permissions.php',
         'conn_inc.php',
         'navbar.php',
+        'notice_hub.php',
+'notice_list.php',
+'notice_view.php',
+'parent_notices.php',
+'parent_notice_view.php',
     ];
     if (!in_array($__current, $__parent_whitelist, true)) {
         header("Location: 403.php");
