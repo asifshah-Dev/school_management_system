@@ -1,483 +1,746 @@
 <?php
-ob_start();
-require_once("conn_inc.php");
-$date = $_GET['date'] ?? date('Y-m-d');
+header('Content-Type: text/html; charset=utf-8');
+require_once('security.php');
+require_once('conn_inc.php');
+require_once('permissions.php');
 
-// Flags
-$attendanceSaved = false;
-$attendanceExists = false;
+require_action($conn, __FILE__);
+$perms = current_user_perms($conn, __FILE__);
 
-// Counters
-$presentCount = 0;
-$absentCount = 0;
-$leaveCount = 0;
-$totalCount = 0;
-
-// Process form
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $attendanceSaved = true;
-    $class_id = intval($_POST['class_id']);
-    $statuses = $_POST['status'] ?? [];
-    $remarks = $_POST['remarks'] ?? [];
-
-    foreach ($statuses as $student_id => $status) {
-        $remark = trim($remarks[$student_id] ?? '');
-
-        if ($status === 'P') {
-            $stmt = $conn->prepare("
-                INSERT INTO attendance (student_id, date, status, remarks)
-                VALUES (?, ?, 'P', ?)
-                ON DUPLICATE KEY UPDATE status='P', remarks=VALUES(remarks)
-            ");
-            $stmt->bind_param("iss", $student_id, $date, $remark);
-            $stmt->execute();
-        } elseif ($status === 'L') {
-            if ($remark === '') $remark = 'Leave';
-            $stmt = $conn->prepare("
-                INSERT INTO attendance (student_id, date, status, remarks)
-                VALUES (?, ?, 'L', ?)
-                ON DUPLICATE KEY UPDATE status='L', remarks=VALUES(remarks)
-            ");
-            $stmt->bind_param("iss", $student_id, $date, $remark);
-            $stmt->execute();
-        } elseif ($status === 'A') {
-            $stmt = $conn->prepare("DELETE FROM attendance WHERE student_id=? AND date=?");
-            $stmt->bind_param("is", $student_id, $date);
-            $stmt->execute();
-        }
-    }
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
 }
 
-// Load students
-$students = [];
-$class_id = $_GET['class_id'] ?? ($_POST['class_id'] ?? null);
+$can_edit = !empty($perms['can_edit']);
 
-if ($class_id) {
-    // Check if attendance already exists for this class and date
-    $stmtCheck = $conn->prepare("
-        SELECT COUNT(*) as cnt
-        FROM attendance a
-        JOIN student_class sc ON sc.student_registration_id = a.student_id
-        WHERE sc.class_id = ? AND a.date = ?
-    ");
-    $stmtCheck->bind_param("is", $class_id, $date);
-    $stmtCheck->execute();
-    $resultCheck = $stmtCheck->get_result()->fetch_assoc();
-    $attendanceExists = ($resultCheck['cnt'] > 0);
+/* ============================================================
+   POST — save attendance
+   Rule: P and L are stored. A and unmarked both delete the row
+         (implicit absent). Whatever the form shows is the truth.
+   ============================================================ */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
+    $class_id   = intval($_POST['class_id'] ?? 0);
+    $session_id = intval($_POST['session_id'] ?? 0);
+    $date       = trim($_POST['date'] ?? date('Y-m-d'));
+    $statuses   = $_POST['status'] ?? [];
+    $remarks    = $_POST['remarks'] ?? [];
+    $remarks_other = $_POST['remarks_other'] ?? [];
+    $all_student_ids = $_POST['all_student_ids'] ?? [];
 
-    // Load student list - UPDATED: filter by class_id instead of class_section_id
-    $stmt = $conn->prepare("
-        SELECT sr.id, sr.reg_no, sr.name,
-               COALESCE(a.status, 'P') AS status, a.remarks
-        FROM student_class sc
-        JOIN student_registration sr ON sr.id = sc.student_registration_id
-        LEFT JOIN attendance a ON a.student_id = sr.id AND a.date = ?
-        WHERE sc.class_id = ? and sc.status = 0 and sr.status = 0
-        ORDER BY sr.reg_no
-    ");
-    $stmt->bind_param("si", $date, $class_id);
-    $stmt->execute();
-    $students = $stmt->get_result();
-    
-    // Calculate counters
-    if ($students && $students->num_rows > 0) {
-        $students->data_seek(0);
-        while($s = $students->fetch_assoc()) {
-            $totalCount++;
-            if ($s['status'] == 'P') {
-                $presentCount++;
-            } elseif ($s['status'] == 'L') {
-                $leaveCount++;
-            } elseif ($s['status'] == 'A') {
-                $absentCount++;
+    if ($class_id > 0 && is_array($all_student_ids) && !empty($all_student_ids)) {
+
+        $ins = $conn->prepare("INSERT INTO attendance (student_id, date, status, remarks) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE status = VALUES(status), remarks = VALUES(remarks)");
+        $del = $conn->prepare("DELETE FROM attendance WHERE student_id = ? AND date = ?");
+
+        $saved = 0;
+        $cleared = 0;
+
+        foreach ($all_student_ids as $sid_raw) {
+            $sid = intval($sid_raw);
+            if ($sid <= 0) continue;
+
+            $st = isset($statuses[$sid]) ? trim($statuses[$sid]) : '';
+
+            if ($st === 'P') {
+                $remark = '';
+                if ($ins) {
+                    $ins->bind_param("isss", $sid, $date, $st, $remark);
+                    if ($ins->execute()) $saved++;
+                }
+            } elseif ($st === 'L') {
+                $remark = trim($remarks[$sid] ?? '');
+                if ($remark === 'Other') {
+                    $other = trim($remarks_other[$sid] ?? '');
+                    $remark = $other !== '' ? $other : 'Other';
+                }
+                if ($remark === '') $remark = 'Leave';
+                if ($ins) {
+                    $ins->bind_param("isss", $sid, $date, $st, $remark);
+                    if ($ins->execute()) $saved++;
+                }
+            } else {
+                /* A or unmarked -> implicit absent -> no row */
+                if ($del) {
+                    $del->bind_param("is", $sid, $date);
+                    if ($del->execute()) $cleared++;
+                }
             }
         }
-        $students->data_seek(0); // Reset pointer for later use
+
+        if ($ins) $ins->close();
+        if ($del) $del->close();
+
+        $_SESSION['message'] = 'Attendance saved. ' . $saved . ' present/leave, ' . $cleared . ' absent (no record).';
+        $_SESSION['message_type'] = 'success';
+    } else {
+        $_SESSION['message'] = 'No students to save.';
+        $_SESSION['message_type'] = 'warning';
+    }
+
+    $redirect = 'attendance_class.php?class_id=' . $class_id . '&session_id=' . $session_id . '&date=' . urlencode($date);
+    header('Location: ' . $redirect);
+    exit;
+}
+
+/* ============================================================
+   LOAD DROPDOWNS
+   ============================================================ */
+$sessions = [];
+$sess_res = $conn->query("SELECT id, title FROM sessions ORDER BY from_dated DESC, id DESC");
+if ($sess_res) {
+    while ($r = $sess_res->fetch_assoc()) $sessions[$r['id']] = $r['title'];
+}
+
+$classes = [];
+$class_res = $conn->query("SELECT id, title FROM classes WHERE status = 0 OR status IS NULL ORDER BY title");
+if ($class_res) {
+    while ($r = $class_res->fetch_assoc()) $classes[$r['id']] = $r['title'];
+}
+
+$date = isset($_GET['date']) ? trim($_GET['date']) : date('Y-m-d');
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) $date = date('Y-m-d');
+
+$selected_session_id = isset($_GET['session_id']) ? intval($_GET['session_id']) : 0;
+if ($selected_session_id <= 0 && !empty($sessions)) {
+    $fk = array_key_first($sessions);
+    $selected_session_id = intval($fk);
+}
+
+$selected_class_id = isset($_GET['class_id']) ? intval($_GET['class_id']) : 0;
+
+/* ============================================================
+   LOAD STUDENTS + EXISTING ATTENDANCE + ATTENDANCE-TAKEN FLAG
+   ============================================================ */
+$students = [];
+$existing_attendance = [];
+$attendance_taken = false;
+
+if ($selected_class_id > 0 && $selected_session_id > 0) {
+    $sql = "SELECT sr.id, sr.reg_no, sr.name FROM student_class sc JOIN student_registration sr ON sr.id = sc.student_registration_id WHERE sc.class_id = ? AND sc.session_id = ? AND sr.status = 0 ORDER BY sr.reg_no, sr.name";
+    $stmt = $conn->prepare($sql);
+    if ($stmt) {
+        $stmt->bind_param("ii", $selected_class_id, $selected_session_id);
+        $stmt->execute();
+        $res = $stmt->get_result();
+        if ($res) {
+            while ($r = $res->fetch_assoc()) $students[] = $r;
+        }
+        $stmt->close();
+    }
+
+    if (!empty($students)) {
+        /* Load attendance rows for this date AND scoped to this class's students */
+        $att_sql = "SELECT a.student_id, a.status, a.remarks FROM attendance a JOIN student_class sc ON sc.student_registration_id = a.student_id WHERE a.date = ? AND sc.class_id = ? AND sc.session_id = ?";
+        $att_stmt = $conn->prepare($att_sql);
+        if ($att_stmt) {
+            $att_stmt->bind_param("sii", $date, $selected_class_id, $selected_session_id);
+            $att_stmt->execute();
+            $att_res = $att_stmt->get_result();
+            if ($att_res) {
+                while ($r = $att_res->fetch_assoc()) {
+                    $existing_attendance[intval($r['student_id'])] = [
+                        'status'  => $r['status'],
+                        'remarks' => $r['remarks']
+                    ];
+                }
+            }
+            $att_stmt->close();
+        }
+
+        /* Flag: has attendance been taken for this class+date at all? */
+        if (!empty($existing_attendance)) {
+            $attendance_taken = true;
+        }
     }
 }
-?>
 
+$leave_reasons = ['Sick', 'Leave', 'Urgent Work', 'Other'];
+
+$message = '';
+$message_type = '';
+if (isset($_SESSION['message'])) {
+    $message = $_SESSION['message'];
+    $message_type = $_SESSION['message_type'] ?? 'info';
+    unset($_SESSION['message'], $_SESSION['message_type']);
+}
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>Class-wise Attendance</title>
+    <title>Class Attendance</title>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <!-- Bootstrap 3.4.1 CSS & JS -->
-    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
-    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/js/bootstrap.min.js"></script>
-    <!-- Bootstrap Datepicker CSS & JS -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datepicker/1.9.0/css/bootstrap-datepicker.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datepicker/1.9.0/js/bootstrap-datepicker.min.js"></script>
-    <link rel="stylesheet" href="css/mystyle.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/jquery@3.6.4/dist/jquery.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/js/bootstrap.bundle.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        .table th, .table td { text-align: left; vertical-align: middle; }
-        .table-success td { background-color: #dff0d8 !important; }
-        .table-warning td { background-color: #fcf8e3 !important; }
-        .table-danger td { background-color: #f2dede !important; }
-        .remarks-select { width: 180px; font-size:20px; }
-        input[type="radio"] { margin: 0 5px; font-size:20px; }
-        .datepicker { z-index: 1151 !important; }
-        .form-group .input-group .input-group-addon { cursor: pointer; }
-        .counter-box { 
-            border-radius: 5px; 
-            padding: 15px; 
+        body { font-family: 'Inter', sans-serif; background-color: #f5f7fa; padding-bottom: 80px; }
+
+        .page-header-card {
+            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+            border-radius: 12px;
+            padding: 22px 26px;
+            color: #fff;
             margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 16px;
+            box-shadow: 0 6px 22px rgba(37, 99, 235, 0.25);
+        }
+        .page-header-card .header-left { display: flex; align-items: center; gap: 16px; }
+        .page-header-card .header-icon {
+            width: 52px; height: 52px;
+            background: rgba(255,255,255,0.18);
+            border-radius: 12px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 24px;
+        }
+        .page-header-card h1 { font-size: 21px; font-weight: 700; margin: 0; letter-spacing: -0.3px; }
+        .page-header-card .subtitle { font-size: 13px; opacity: 0.85; margin-top: 4px; }
+        .page-header-card .date-chip {
+            background: rgba(255,255,255,0.18);
+            padding: 8px 14px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .filter-card {
+            background: #fff; border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+            padding: 18px 22px; margin-bottom: 20px;
+            border-top: 4px solid #2563eb;
+        }
+        .filter-card label {
+            font-size: 12px; font-weight: 700; color: #475569;
+            text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 6px;
+        }
+        .filter-card .form-control {
+            border-radius: 8px; border: 1px solid #cbd5e1;
+            font-size: 14px; padding: 9px 12px; height: auto;
+        }
+        .filter-card .form-control:focus {
+            border-color: #2563eb;
+            box-shadow: 0 0 0 3px rgba(37,99,235,0.12);
+        }
+
+        .counter-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .counter-box {
+            background: #fff; border-radius: 10px;
+            padding: 16px 18px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            border-left: 4px solid;
+        }
+        .counter-box.total { border-left-color: #2563eb; }
+        .counter-box.present { border-left-color: #059669; }
+        .counter-box.absent { border-left-color: #dc2626; }
+        .counter-box.leave { border-left-color: #f59e0b; }
+        .counter-box.unmarked { border-left-color: #94a3b8; }
+        .counter-box .counter-number { font-size: 24px; font-weight: 700; color: #1e293b; line-height: 1; }
+        .counter-box .counter-label { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 700; margin-top: 6px; }
+        .counter-box.total .counter-number { color: #2563eb; }
+        .counter-box.present .counter-number { color: #059669; }
+        .counter-box.absent .counter-number { color: #dc2626; }
+        .counter-box.leave .counter-number { color: #d97706; }
+        .counter-box.unmarked .counter-number { color: #64748b; }
+
+        .list-card {
+            background: #fff; border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+            overflow: hidden;
+        }
+        .list-card-head {
+            padding: 16px 20px; border-bottom: 1px solid #e2e8f0;
+            display: flex; align-items: center; justify-content: space-between;
+            flex-wrap: wrap; gap: 10px;
+        }
+        .list-card-head h3 {
+            font-size: 15px; font-weight: 700; color: #1e293b; margin: 0;
+            display: flex; align-items: center; gap: 8px;
+        }
+        .list-card-head h3 i { color: #2563eb; }
+
+        .quick-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+        .btn-mini {
+            font-size: 12px; font-weight: 600;
+            padding: 6px 12px; border-radius: 6px;
+            border: 1px solid #cbd5e1; background: #fff; color: #475569;
+            display: inline-flex; align-items: center; gap: 5px;
+        }
+        .btn-mini:hover { background: #f1f5f9; color: #1e293b; }
+        .btn-mini.all-present:hover { background: #d1fae5; border-color: #6ee7b7; color: #065f46; }
+        .btn-mini.all-absent:hover { background: #fee2e2; border-color: #fca5a5; color: #991b1b; }
+        .btn-mini.clear-all:hover { background: #e2e8f0; border-color: #94a3b8; color: #1e293b; }
+
+        table.att-table { width: 100%; margin: 0; border-collapse: separate; border-spacing: 0; }
+        table.att-table thead th {
+            background: #f8fafc; color: #475569;
+            font-size: 11px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 0.4px;
+            padding: 11px 12px; border-bottom: 1px solid #e2e8f0;
+            white-space: nowrap; text-align: center;
+        }
+        table.att-table thead th.left { text-align: left; }
+        table.att-table tbody td {
+            padding: 12px 12px; border-bottom: 1px solid #f1f5f9;
+            vertical-align: middle; font-size: 14px; color: #1e293b;
             text-align: center;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
-        .present-counter { background-color: #dff0d8; border: 1px solid #d6e9c6; color: #3c763d; }
-        .absent-counter { background-color: #f2dede; border: 1px solid #ebccd1; color: #a94442; }
-        .leave-counter { background-color: #fcf8e3; border: 1px solid #faebcc; color: #8a6d3b; }
-        .total-counter { background-color: #d9edf7; border: 1px solid #bce8f1; color: #31708f; }
-        .counter-number { 
-            font-size: 24px; 
-            font-weight: bold; 
-            display: block;
-            margin-bottom: 5px;
+        table.att-table tbody td.left { text-align: left; }
+        table.att-table tbody tr:hover { background: #f8fafc; }
+        table.att-table tbody tr.row-present { background: #f0fdf4; }
+        table.att-table tbody tr.row-absent { background: #fef2f2; }
+        table.att-table tbody tr.row-leave { background: #fffbeb; }
+        table.att-table tbody tr.row-present:hover { background: #dcfce7; }
+        table.att-table tbody tr.row-absent:hover { background: #fee2e2; }
+        table.att-table tbody tr.row-leave:hover { background: #fef3c7; }
+
+        .sr-badge {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 26px; height: 26px;
+            background: #eff6ff; color: #2563eb;
+            font-weight: 700; font-size: 12px; border-radius: 6px;
         }
-        .counter-label { 
-            font-size: 14px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
+        .student-name { font-weight: 600; color: #1e293b; }
+        .student-reg { color: #94a3b8; font-size: 12px; }
+
+        .radio-pill {
+            display: inline-flex; align-items: center; gap: 6px;
+            cursor: pointer; user-select: none;
+            padding: 6px 12px; border-radius: 20px;
+            border: 1.5px solid #e2e8f0; background: #fff;
+            font-size: 12px; font-weight: 600; color: #64748b;
+            transition: all 0.15s;
         }
-        .counters-row { margin-bottom: 20px; }
+        .radio-pill input { display: none; }
+        .radio-pill:hover { border-color: #cbd5e1; background: #f8fafc; }
+
+        .radio-pill.present.checked { background: #d1fae5; border-color: #059669; color: #065f46; }
+        .radio-pill.absent.checked { background: #fee2e2; border-color: #dc2626; color: #991b1b; }
+        .radio-pill.leave.checked { background: #fef3c7; border-color: #d97706; color: #92400e; }
+
+        .remarks-wrap { display: flex; gap: 6px; align-items: center; justify-content: center; }
+        .remarks-wrap select.remark-select {
+            font-size: 12px; padding: 5px 8px; height: auto;
+            border-radius: 6px; border: 1px solid #cbd5e1;
+            min-width: 120px;
+        }
+        .remarks-wrap input.remark-other {
+            font-size: 12px; padding: 5px 8px; height: auto;
+            border-radius: 6px; border: 1px solid #cbd5e1;
+            width: 130px;
+        }
+
+        .action-bar {
+            padding: 16px 20px; border-top: 1px solid #e2e8f0;
+            display: flex; align-items: center; justify-content: space-between;
+            flex-wrap: wrap; gap: 12px; background: #fafbfc;
+        }
+
+        .btn-success-brand {
+            background: #059669; border: 1px solid #059669; color: #fff;
+            font-weight: 600; font-size: 14px; padding: 10px 22px;
+            border-radius: 8px; display: inline-flex; align-items: center; gap: 8px;
+            transition: all 0.2s;
+        }
+        .btn-success-brand:hover:not(:disabled), .btn-success-brand:focus:not(:disabled) {
+            background: #047857; border-color: #047857; color: #fff;
+            box-shadow: 0 4px 12px rgba(5,150,105,0.3);
+        }
+        .btn-success-brand:disabled { background: #94a3b8; border-color: #94a3b8; cursor: not-allowed; }
+
+        .btn-brand {
+            background: #2563eb; border: 1px solid #2563eb; color: #fff;
+            font-weight: 600; font-size: 14px; padding: 10px 22px;
+            border-radius: 8px; display: inline-flex; align-items: center; gap: 8px;
+        }
+        .btn-brand:hover, .btn-brand:focus { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
+
+        .empty-state { padding: 55px 20px; text-align: center; }
+        .empty-state .empty-icon {
+            width: 72px; height: 72px; background: #f1f5f9;
+            border-radius: 50%; display: inline-flex;
+            align-items: center; justify-content: center;
+            font-size: 30px; color: #94a3b8; margin-bottom: 14px;
+        }
+        .empty-state h5 { font-size: 15px; font-weight: 700; color: #334155; margin: 0 0 6px 0; }
+        .empty-state p { font-size: 13px; color: #64748b; margin: 0; }
+
+        .info-note {
+            border-radius: 8px; padding: 10px 14px;
+            font-size: 12px; margin-bottom: 16px;
+            display: flex; align-items: center; gap: 8px;
+        }
+        .info-note.blue { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; }
+        .info-note.amber { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+        .info-note.green { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
     </style>
-    <script>
-        function toggleRemarks(studentId, status) {
-            let remarksField = document.getElementById("remarks_" + studentId);
-            if (status === 'L') {
-                remarksField.disabled = false;
-                remarksField.required = true;
-            } else {
-                remarksField.disabled = true;
-                remarksField.required = false;
-                remarksField.value = '';
-            }
-        }
-        
-        function updateRemarksSelect(studentId) {
-            let remarksField = document.getElementById("remarks_" + studentId);
-            let leaveRadio = document.querySelector('input[name="status[' + studentId + ']"][value="L"]');
-            
-            if (leaveRadio.checked) {
-                remarksField.disabled = false;
-                remarksField.required = true;
-            } else {
-                remarksField.disabled = true;
-                remarksField.required = false;
-                remarksField.value = '';
-            }
-        }
-        
-        function updateCounters() {
-            let presentCount = 0;
-            let absentCount = 0;
-            let leaveCount = 0;
-            let totalCount = 0;
-            
-            // Count all radio buttons that are checked
-            document.querySelectorAll('input[type="radio"]:checked').forEach(function(radio) {
-                totalCount++;
-                if (radio.value === 'P') presentCount++;
-                else if (radio.value === 'A') absentCount++;
-                else if (radio.value === 'L') leaveCount++;
-            });
-            
-            // Update counter displays
-            document.getElementById('presentCount').textContent = presentCount;
-            document.getElementById('absentCount').textContent = absentCount;
-            document.getElementById('leaveCount').textContent = leaveCount;
-            document.getElementById('totalCount').textContent = totalCount;
-        }
-        
-        $(document).ready(function() {
-            // Initialize datepicker - REMOVED endDate restriction
-            $('.datepicker').datepicker({
-                format: 'yyyy-mm-dd',
-                autoclose: true,
-                todayHighlight: true
-                // Removed: endDate: '0d' - Now allows all dates including future
-            });
-            
-            <?php if ($students && $students->num_rows > 0): ?>
-                <?php $students->data_seek(0); ?>
-                <?php while($s = $students->fetch_assoc()): ?>
-                    updateRemarksSelect(<?=$s['id']?>);
-                <?php endwhile; ?>
-                <?php $students->data_seek(0); ?>
-            <?php endif; ?>
-            
-            // Add change event listeners to all radio buttons to update counters
-            document.querySelectorAll('input[type="radio"]').forEach(function(radio) {
-                radio.addEventListener('change', updateCounters);
-            });
-            
-            // Initial counter update
-            updateCounters();
-        });
-    </script>
 </head>
 <body>
+    <?php require_once('navbar.php'); ?>
 
-<?php require_once('navbar.php');
+    <div class="container" style="padding: 20px; max-width: 1200px; margin: 0 auto;">
 
-// Load all classes using the provided query
-$qry = "
-    SELECT c.id as class_id, c.title 
-    FROM `classes` c 
-    LEFT JOIN class_sections sc ON sc.class_id = c.id 
-    LEFT JOIN sections s ON s.id = sc.section_id
-    GROUP BY c.id, c.title
-    ORDER BY c.title
-";
-$stmt = $conn->prepare($qry);
-if ($stmt === false) {
-    echo "<div class='alert alert-danger'>Query preparation failed: " . htmlspecialchars($conn->error) . "</div>";
-} else {
-    $stmt->execute();
-    $classes = $stmt->get_result();
-    if ($classes->num_rows == 0) {
-        echo "<div class='alert alert-warning'>No classes found in the system.</div>";
-    }
-}
-?>
+        <div class="page-header-card">
+            <div class="header-left">
+                <div class="header-icon"><i class="fas fa-calendar-check"></i></div>
+                <div>
+                    <h1>Class Attendance</h1>
+                    <div class="subtitle">Mark daily attendance &mdash; absent students are those with no record</div>
+                </div>
+            </div>
+            <?php if ($selected_class_id > 0): ?>
+                <div class="date-chip">
+                    <i class="fas fa-calendar-day"></i>
+                    <?php echo date('d M Y', strtotime($date)); ?>
+                </div>
+            <?php endif; ?>
+        </div>
 
-<div class="container">
-    <div class="row">
-        <div class="col-md-12 ">
+        <?php if ($message !== ''): ?>
+            <div class="alert alert-<?php echo htmlspecialchars($message_type); ?> alert-dismissible fade show" role="alert">
+                <?php echo htmlspecialchars($message); ?>
+                <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+            </div>
+        <?php endif; ?>
 
-            <!-- Select Class Section -->
-            <div class="panel panel-primary">
-                <div class="panel-heading"><h3 class="panel-title">Class Attendance</h3></div>
-                <div class="panel-body">
-                    <form method="get" class="form-horizontal">
-                        <div class="form-group">
-                            <label class="col-sm-3 control-label">Select Date:</label>
-                            <div class="col-sm-9">
-                                <div class="input-group date">
-                                    <input type="text" class="form-control datepicker" name="date" value="<?= htmlspecialchars($date) ?>" required>
-                                    <span class="input-group-addon">
-                                        <span class="glyphicon glyphicon-calendar"></span>
-                                    </span>
-                                </div>
-                            </div>
+        <?php if ($selected_class_id > 0 && $selected_session_id > 0 && !empty($students)): ?>
+            <?php if ($attendance_taken): ?>
+                <div class="info-note green">
+                    <i class="fas fa-check-circle"></i>
+                    <span>Attendance has been <strong>taken</strong> for this class on this date. Students not marked Present or Leave are <strong>Absent</strong>.</span>
+                </div>
+            <?php else: ?>
+                <div class="info-note amber">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <span>Attendance has <strong>not been taken yet</strong> for this class on this date. Nobody is marked absent until you save.</span>
+                </div>
+            <?php endif; ?>
+        <?php else: ?>
+            <div class="info-note blue">
+                <i class="fas fa-info-circle"></i>
+                <span>Only <strong>Present</strong> and <strong>Leave</strong> are stored. Students without a record for the day are automatically counted as <strong>Absent</strong>.</span>
+            </div>
+        <?php endif; ?>
+
+        <div class="filter-card">
+            <form method="get" action="" id="filterForm">
+                <div class="row">
+                    <div class="col-md-3">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="date">Date</label>
+                            <input type="date" class="form-control" name="date" id="date" value="<?php echo htmlspecialchars($date); ?>" required>
                         </div>
-                        <div class="form-group">
-                            <label class="col-sm-3 control-label">Select Class:</label>
-                            <div class="col-sm-9">
-                            <select name="class_id" class="form-control" required>
-                                <option value="">-- Select Class --</option>
-                                <?php
-                                if ($classes->num_rows > 0) {
-                                    while ($fetch = $classes->fetch_assoc()) {
-                                        $class_id_val = $fetch['class_id'];
-                                        $class_title = htmlspecialchars($fetch['title']);
-                                        $selected = ($class_id == $class_id_val) ? 'selected' : '';
-                                        echo "<option value='$class_id_val' $selected>$class_title</option>";
-                                    }
-                                }
-                                ?>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="session_id">Session</label>
+                            <select class="form-control" name="session_id" id="session_id">
+                                <?php if (empty($sessions)): ?>
+                                    <option value="">No sessions</option>
+                                <?php else: ?>
+                                    <?php foreach ($sessions as $sid => $sname): ?>
+                                        <option value="<?php echo (int)$sid; ?>" <?php echo ((int)$sid === $selected_session_id) ? 'selected' : ''; ?>><?php echo htmlspecialchars($sname); ?></option>
+                                    <?php endforeach; ?>
+                                <?php endif; ?>
                             </select>
-                            </div>
                         </div>
-                        <div class="form-group">
-                            <div class="col-sm-offset-3 col-sm-9">
-                                <button type="submit" class="btn btn-primary">
-                                    <span class="glyphicon glyphicon-search"></span> Load Students
+                    </div>
+                    <div class="col-md-4">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="class_id">Class</label>
+                            <select class="form-control" name="class_id" id="class_id">
+                                <option value="">-- Select Class --</option>
+                                <?php foreach ($classes as $cid => $cname): ?>
+                                    <option value="<?php echo (int)$cid; ?>" <?php echo ((int)$cid === $selected_class_id) ? 'selected' : ''; ?>><?php echo htmlspecialchars($cname); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-md-2" style="display: flex; align-items: flex-end;">
+                        <button type="submit" class="btn-brand" style="width: 100%; justify-content: center;">
+                            <i class="fas fa-search"></i> Load
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+
+        <?php if ($selected_class_id > 0 && $selected_session_id > 0 && !empty($students)): ?>
+
+            <div class="counter-row">
+                <div class="counter-box total">
+                    <div class="counter-number" id="counterTotal"><?php echo count($students); ?></div>
+                    <div class="counter-label">Total Students</div>
+                </div>
+                <div class="counter-box present">
+                    <div class="counter-number" id="counterPresent">0</div>
+                    <div class="counter-label">Present</div>
+                </div>
+                <div class="counter-box absent">
+                    <div class="counter-number" id="counterAbsent">0</div>
+                    <div class="counter-label">Absent</div>
+                </div>
+                <div class="counter-box leave">
+                    <div class="counter-number" id="counterLeave">0</div>
+                    <div class="counter-label">On Leave</div>
+                </div>
+               
+            </div>
+
+            <form method="post" action="" id="attendanceForm">
+                <input type="hidden" name="class_id" value="<?php echo (int)$selected_class_id; ?>">
+                <input type="hidden" name="session_id" value="<?php echo (int)$selected_session_id; ?>">
+                <input type="hidden" name="date" value="<?php echo htmlspecialchars($date); ?>">
+                <?php foreach ($students as $s): ?>
+                    <input type="hidden" name="all_student_ids[]" value="<?php echo intval($s['id']); ?>">
+                <?php endforeach; ?>
+
+                <div class="list-card">
+                    <div class="list-card-head">
+                        <h3><i class="fas fa-users"></i> Mark Attendance &mdash; <?php echo htmlspecialchars($classes[$selected_class_id] ?? 'Class'); ?></h3>
+                        <?php if ($can_edit): ?>
+                            <div class="quick-actions">
+                                <button type="button" class="btn-mini all-present" id="btnAllPresent">
+                                    <i class="fas fa-check"></i> All Present
+                                </button>
+                                <button type="button" class="btn-mini all-absent" id="btnAllAbsent">
+                                    <i class="fas fa-times"></i> All Absent
+                                </button>
+                                <button type="button" class="btn-mini clear-all" id="btnClearAll">
+                                    <i class="fas fa-undo"></i> Clear
+                                </button>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+
+                    <div style="overflow-x: auto;">
+                        <table class="att-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 60px;">#</th>
+                                    <th class="left">Student</th>
+                                    <th style="width: 110px;">Present</th>
+                                    <th style="width: 110px;">Absent</th>
+                                    <th style="width: 110px;">Leave</th>
+                                    <th style="width: 260px;">Leave Reason</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php
+                                $sr = 1;
+                                foreach ($students as $s):
+                                    $sid = intval($s['id']);
+                                    $sname = $s['name'];
+                                    $sreg = $s['reg_no'];
+                                    $cur_status = '';
+                                    $cur_remark = '';
+                                    if (isset($existing_attendance[$sid])) {
+                                        $cur_status = $existing_attendance[$sid]['status'];
+                                        $cur_remark = $existing_attendance[$sid]['remarks'];
+                                    }
+
+                                    /* Row coloring:
+                                       - If a P or L record exists -> green/amber
+                                       - If attendance_taken AND no record -> red (implicit absent)
+                                       - If attendance NOT taken AND no record -> neutral (unmarked)
+                                    */
+                                    $row_class = '';
+                                    if ($cur_status === 'P') $row_class = 'row-present';
+                                    elseif ($cur_status === 'L') $row_class = 'row-leave';
+                                    elseif ($attendance_taken) $row_class = 'row-absent';
+
+                                    $remark_is_other = ($cur_status === 'L' && $cur_remark !== '' && !in_array($cur_remark, $leave_reasons));
+                                    $remark_select_val = $remark_is_other ? 'Other' : $cur_remark;
+                                    $remark_other_val = $remark_is_other ? $cur_remark : '';
+                                ?>
+                                <tr class="<?php echo $row_class; ?>" data-student-id="<?php echo $sid; ?>">
+                                    <td><span class="sr-badge"><?php echo $sr++; ?></span></td>
+                                    <td class="left">
+                                        <div class="student-name"><?php echo htmlspecialchars($sname); ?></div>
+                                        <?php if (!empty($sreg)): ?>
+                                            <div class="student-reg"><?php echo htmlspecialchars($sreg); ?></div>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <label class="radio-pill present <?php echo $cur_status === 'P' ? 'checked' : ''; ?>">
+                                            <input type="radio" name="status[<?php echo $sid; ?>]" value="P" <?php echo $cur_status === 'P' ? 'checked' : ''; ?>>
+                                            <i class="fas fa-check"></i> P
+                                        </label>
+                                    </td>
+                                    <td>
+                                        <label class="radio-pill absent <?php echo $cur_status === 'A' ? 'checked' : ''; ?>">
+                                            <input type="radio" name="status[<?php echo $sid; ?>]" value="A" <?php echo $cur_status === 'A' ? 'checked' : ''; ?>>
+                                            <i class="fas fa-times"></i> A
+                                        </label>
+                                    </td>
+                                    <td>
+                                        <label class="radio-pill leave <?php echo $cur_status === 'L' ? 'checked' : ''; ?>">
+                                            <input type="radio" name="status[<?php echo $sid; ?>]" value="L" <?php echo $cur_status === 'L' ? 'checked' : ''; ?>>
+                                            <i class="fas fa-clock"></i> L
+                                        </label>
+                                    </td>
+                                    <td>
+                                        <div class="remarks-wrap">
+                                            <select name="remarks[<?php echo $sid; ?>]" class="remark-select" <?php echo $cur_status === 'L' ? '' : 'disabled'; ?>>
+                                                <option value="">-- Reason --</option>
+                                                <?php foreach ($leave_reasons as $lr): ?>
+                                                    <option value="<?php echo htmlspecialchars($lr); ?>" <?php echo ($remark_select_val === $lr) ? 'selected' : ''; ?>><?php echo htmlspecialchars($lr); ?></option>
+                                                <?php endforeach; ?>
+                                            </select>
+                                            <input type="text" name="remarks_other[<?php echo $sid; ?>]" class="remark-other" placeholder="Specify..." value="<?php echo htmlspecialchars($remark_other_val); ?>" style="<?php echo ($cur_status === 'L' && $remark_select_val === 'Other') ? '' : 'display:none;'; ?>">
+                                        </div>
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <?php if ($can_edit): ?>
+                        <div class="action-bar">
+                            <div style="font-size: 13px; color: #64748b;">
+                                <i class="fas fa-info-circle"></i> Students left unmarked will be saved as <strong>Absent</strong>.
+                            </div>
+                            <div>
+                                <button type="submit" class="btn-success-brand" id="btnSave">
+                                    <i class="fas fa-save"></i> Save Attendance
                                 </button>
                             </div>
                         </div>
-                    </form>
+                    <?php endif; ?>
+                </div>
+            </form>
+
+        <?php elseif ($selected_class_id > 0 && $selected_session_id > 0 && empty($students)): ?>
+            <div class="list-card">
+                <div class="empty-state">
+                    <div class="empty-icon"><i class="fas fa-user-slash"></i></div>
+                    <h5>No students found</h5>
+                    <p>No active students are enrolled in this class for the selected session.</p>
                 </div>
             </div>
-
-            <!-- Attendance Counters -->
-            <?php if ($students && $students->num_rows > 0): ?>
-            <div class="row counters-row">
-                <div class="col-md-3 col-sm-6">
-                    <div class="counter-box total-counter">
-                        <span class="counter-number" id="totalCount"><?= $totalCount ?></span>
-                        <span class="counter-label">Total Students</span>
-                    </div>
-                </div>
-                <div class="col-md-3 col-sm-6">
-                    <div class="counter-box present-counter">
-                        <span class="counter-number" id="presentCount"><?= $presentCount ?></span>
-                        <span class="counter-label">Present</span>
-                    </div>
-                </div>
-                <div class="col-md-3 col-sm-6">
-                    <div class="counter-box absent-counter">
-                        <span class="counter-number" id="absentCount"><?= $absentCount ?></span>
-                        <span class="counter-label">Absent</span>
-                    </div>
-                </div>
-                <div class="col-md-3 col-sm-6">
-                    <div class="counter-box leave-counter">
-                        <span class="counter-number" id="leaveCount"><?= $leaveCount ?></span>
-                        <span class="counter-label">On Leave</span>
-                    </div>
+        <?php else: ?>
+            <div class="list-card">
+                <div class="empty-state">
+                    <div class="empty-icon"><i class="fas fa-filter"></i></div>
+                    <h5>Select a class</h5>
+                    <p>Choose a date, session, and class above to load the student list.</p>
                 </div>
             </div>
-            <?php endif; ?>
+        <?php endif; ?>
 
-            <!-- Attendance Form -->
-            <?php if ($students && $students->num_rows > 0 && !$attendanceSaved && !$attendanceExists): ?>
-            <div class="panel panel-info">
-                <div class="panel-heading">
-                    <h3 class="panel-title">Mark Attendance for <?= date('d-M-Y', strtotime($date)) ?></h3>
-                </div>
-                <div class="panel-body">
-                    <form method="post">
-                        <input type="hidden" name="class_id" value="<?=$class_id?>">
-                        <div class="table-responsive">
-                            <table class="table table-bordered table-hover">
-                                <thead>
-                                    <tr>
-                                        <th>Sr No</th>
-                                        <th>Name</th>
-                                        <th>Present</th>
-                                        <th>Absent</th>
-                                        <th>Leave</th>
-                                        <th>Remarks</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                <?php 
-                                $sr_no = 1;
-                                while($s = $students->fetch_assoc()): 
-                                ?>
-                                    <tr class="<?= $s['status']=='P'?'table-success':($s['status']=='L'?'table-warning':'table-danger') ?>">
-                                        <td><?=$sr_no?></td>
-                                        <td><?=htmlspecialchars($s['name'])?></td>
-                                        <td>
-                                            <input type="radio" class="form-check-input" name="status[<?=$s['id']?>]" value="P" 
-                                                <?=($s['status']=='P'?'checked':'')?> 
-                                                onchange="updateRemarksSelect(<?=$s['id']?>); updateCounters();">
-                                        </td>
-                                        <td>
-                                            <input type="radio" class="form-check-input" name="status[<?=$s['id']?>]" value="A" 
-                                                <?=($s['status']=='A'?'checked':'')?> 
-                                                onchange="updateRemarksSelect(<?=$s['id']?>); updateCounters();">
-                                        </td>
-                                        <td>
-                                            <input type="radio" class="form-check-input" name="status[<?=$s['id']?>]" value="L" 
-                                                <?=($s['status']=='L'?'checked':'')?> 
-                                                onchange="updateRemarksSelect(<?=$s['id']?>); updateCounters();">
-                                        </td>
-                                        <td>
-                                            <select id="remarks_<?=$s['id']?>" name="remarks[<?=$s['id']?>]" class="form-control remarks-select" 
-                                                <?=($s['status']=='L'?'':'disabled')?>>
-                                                <option value="">Select Reason</option>
-                                                <option value="Sick" <?=($s['remarks']=='Sick'?'selected':'')?>>Sick</option>
-                                                <option value="Leave" <?=($s['remarks']=='Leave'?'selected':'')?>>Leave</option>
-                                                <option value="Urgent work" <?=($s['remarks']=='Urgent work'?'selected':'')?>>Urgent work</option>
-                                                <option value="Other" <?=($s['remarks']!='' && !in_array($s['remarks'], ['Sick', 'Leave', 'Urgent work'])?'selected':'')?>>Other</option>
-                                            </select>
-                                        </td>
-                                    </tr>
-                                <?php 
-                                $sr_no++;
-                                endwhile; 
-                                ?>
-                                </tbody>
-                            </table>
-                        </div>
-                        <div class="text-right">
-                            <button type="submit" class="btn btn-success m-3">
-                                <span class="glyphicon glyphicon-floppy-disk"></span> Save Attendance
-                            </button>
-                        </div>
-                    </form>
-                </div>
-            </div>
-            <?php endif; ?>
-
-            <!-- Attendance Summary -->
-            <?php if (($attendanceSaved || $attendanceExists) && $students && $students->num_rows > 0): ?>
-            <div class="panel panel-info">
-                <div class="panel-heading">
-                    <h3 class="panel-title">Attendance Summary for <?= date('d-M-Y', strtotime($date)) ?> (Editable)</h3>
-                </div>
-                <div class="panel-body">
-                    <form method="post">
-                        <input type="hidden" name="class_id" value="<?=$class_id?>">
-                        <div class="table-responsive">
-                            <table class="table table-bordered table-hover">
-                                <thead>
-                                    <tr>
-                                        <th>Sr No</th>
-                                        <th>Name</th>
-                                        <th>Present</th>
-                                        <th>Absent</th>
-                                        <th>Leave</th>
-                                        <th>Remarks</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                <?php
-                                $students->data_seek(0);
-                                $sr_no = 1;
-                                while($s = $students->fetch_assoc()):
-                                    $stmt2 = $conn->prepare("SELECT status, remarks FROM attendance WHERE student_id=? AND date=?");
-                                    $stmt2->bind_param("is", $s['id'], $date);
-                                    $stmt2->execute();
-                                    $res = $stmt2->get_result()->fetch_assoc();
-                                    $status = $res['status'] ?? 'A';
-                                    $remarks = $res['remarks'] ?? '';
-                                ?>
-                                    <tr class="<?= $status=='P'?'table-success':($status=='L'?'table-warning':'table-danger') ?>">
-                                        <td><?=$sr_no?></td>
-                                        <td><?=htmlspecialchars($s['name'])?></td>
-                                        <td>
-                                            <input type="radio" name="status[<?=$s['id']?>]" value="P" 
-                                                <?=($status=='P'?'checked':'')?> 
-                                                onchange="updateRemarksSelect(<?=$s['id']?>); updateCounters();">
-                                        </td>
-                                        <td>
-                                            <input type="radio" name="status[<?=$s['id']?>]" value="A" 
-                                                <?=($status=='A'?'checked':'')?> 
-                                                onchange="updateRemarksSelect(<?=$s['id']?>); updateCounters();">
-                                        </td>
-                                        <td>
-                                            <input type="radio" name="status[<?=$s['id']?>]" value="L" 
-                                                <?=($status=='L'?'checked':'')?> 
-                                                onchange="updateRemarksSelect(<?=$s['id']?>); updateCounters();">
-                                        </td>
-                                        <td>
-                                            <select id="remarks_<?=$s['id']?>" name="remarks[<?=$s['id']?>]" class="form-control remarks-select" 
-                                                <?=($status=='L'?'':'disabled')?>>
-                                                <option value="">Select Reason</option>
-                                                <option value="Sick" <?=($remarks=='Sick'?'selected':'')?>>Sick</option>
-                                                <option value="Leave" <?=($remarks=='Leave'?'selected':'')?>>Leave</option>
-                                                <option value="Urgent work" <?=($remarks=='Urgent work'?'selected':'')?>>Urgent work</option>
-                                                <option value="Other" <?=($remarks!='' && !in_array($remarks, ['Sick', 'Leave', 'Urgent work'])?'selected':'')?>>Other</option>
-                                            </select>
-                                        </td>
-                                    </tr>
-                                <?php 
-                                $sr_no++;
-                                endwhile; 
-                                ?>
-                                </tbody>
-                            </table>
-                        </div>
-                        <div class="text-right">
-                            <button type="submit" class="btn btn-primary">
-                                <span class="glyphicon glyphicon-refresh"></span> Update Attendance
-                            </button>
-                        </div>
-                    </form>
-                </div>
-            </div>
-            <?php endif; ?>
-
-        </div>
     </div>
-</div>
 
-<script src="js/mobile_menu.js"></script>
+    <script>
+    var ATTENDANCE_TAKEN = <?php echo $attendance_taken ? 'true' : 'false'; ?>;
+
+    $(document).ready(function() {
+
+        function updateRowStyling($row, status) {
+            $row.removeClass('row-present row-absent row-leave');
+            if (status === 'P') $row.addClass('row-present');
+            else if (status === 'A') $row.addClass('row-absent');
+            else if (status === 'L') $row.addClass('row-leave');
+            else if (ATTENDANCE_TAKEN) $row.addClass('row-absent');
+            /* else: leave neutral */
+
+            $row.find('.radio-pill').removeClass('checked');
+            if (status === 'P') $row.find('.radio-pill.present').addClass('checked');
+            else if (status === 'A') $row.find('.radio-pill.absent').addClass('checked');
+            else if (status === 'L') $row.find('.radio-pill.leave').addClass('checked');
+
+            var $remarkSelect = $row.find('.remark-select');
+            var $remarkOther = $row.find('.remark-other');
+            if (status === 'L') {
+                $remarkSelect.prop('disabled', false);
+            } else {
+                $remarkSelect.prop('disabled', true).val('');
+                $remarkOther.val('').hide();
+            }
+        }
+
+        function updateCounters() {
+            var present = 0, absent = 0, leave = 0, unmarked = 0, total = 0;
+            $('tr[data-student-id]').each(function() {
+                total++;
+                var val = $(this).find('input[type="radio"]:checked').val();
+                if (val === 'P') present++;
+                else if (val === 'A') absent++;
+                else if (val === 'L') leave++;
+                else {
+                    unmarked++;
+                    if (ATTENDANCE_TAKEN) absent++;
+                }
+            });
+            $('#counterTotal').text(total);
+            $('#counterPresent').text(present);
+            $('#counterAbsent').text(absent);
+            $('#counterLeave').text(leave);
+            $('#counterUnmarked').text(unmarked);
+        }
+
+        $(document).on('change', 'input[type="radio"][name^="status"]', function() {
+            var $row = $(this).closest('tr');
+            var status = $(this).val();
+            updateRowStyling($row, status);
+            updateCounters();
+        });
+
+        $(document).on('change', '.remark-select', function() {
+            var $row = $(this).closest('tr');
+            var $other = $row.find('.remark-other');
+            if ($(this).val() === 'Other') {
+                $other.show().focus();
+            } else {
+                $other.val('').hide();
+            }
+        });
+
+        $('#btnAllPresent').on('click', function() {
+            $('tr[data-student-id]').each(function() {
+                var $row = $(this);
+                $row.find('input[type="radio"][value="P"]').prop('checked', true);
+                updateRowStyling($row, 'P');
+            });
+            updateCounters();
+        });
+
+        $('#btnAllAbsent').on('click', function() {
+            $('tr[data-student-id]').each(function() {
+                var $row = $(this);
+                $row.find('input[type="radio"][value="A"]').prop('checked', true);
+                updateRowStyling($row, 'A');
+            });
+            updateCounters();
+        });
+
+        $('#btnClearAll').on('click', function() {
+            $('tr[data-student-id]').each(function() {
+                var $row = $(this);
+                $row.find('input[type="radio"]').prop('checked', false);
+                updateRowStyling($row, '');
+            });
+            updateCounters();
+        });
+
+        $('tr[data-student-id]').each(function() {
+            var val = $(this).find('input[type="radio"]:checked').val() || '';
+            updateRowStyling($(this), val);
+        });
+
+        updateCounters();
+    });
+    </script>
 </body>
 </html>
 <?php $conn->close(); ?>

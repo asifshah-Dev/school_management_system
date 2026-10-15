@@ -41,8 +41,37 @@ $translations = [
     ]
 ];
 
-// ---------- Dropdowns ----------
-$branches = []; $village_councils = []; $sessions = []; $class_options = []; $fee_types = [];
+/* ============================================================
+   HELPER: Load class_sections filtered by session
+   Returns array of ['class_section_id','class_id','class_title',
+                     'section_title','display_label','value']
+   ============================================================ */
+function load_class_sections_for_session($conn, $session_id) {
+    $rows = [];
+    $session_id = intval($session_id);
+    if ($session_id <= 0) {
+        return $rows;
+    }
+    $sql = "SELECT COALESCE(cs.id, 0) AS class_section_id, c.id AS class_id, c.title AS class_title, s.title AS section_title, CASE WHEN cs.id IS NULL THEN c.title ELSE CONCAT(c.title, ' - ', s.title) END AS display_label FROM classes c LEFT JOIN class_sections cs ON cs.class_id = c.id AND cs.status = 0 AND cs.session_id = ? LEFT JOIN sections s ON s.id = cs.section_id WHERE c.status = 0 ORDER BY c.title, s.title";
+    $stmt = $conn->prepare($sql);
+    if (!$stmt) {
+        return $rows;
+    }
+    $stmt->bind_param("i", $session_id);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    if ($res) {
+        while ($row = $res->fetch_assoc()) {
+            $row['value'] = $row['class_id'] . '|' . $row['class_section_id'];
+            $rows[] = $row;
+        }
+    }
+    $stmt->close();
+    return $rows;
+}
+
+/* ---------- Dropdowns ---------- */
+$branches = []; $village_councils = []; $sessions = []; $fee_types = [];
 
 $branch_result = $conn->query("SELECT id, title FROM branches WHERE status = 0 OR status IS NULL ORDER BY title");
 if ($branch_result) {
@@ -61,18 +90,6 @@ if ($session_result) {
     while ($row = $session_result->fetch_assoc()) $sessions[$row['id']] = $row['title'];
 }
 
-$class_result = $conn->query("
-    SELECT COALESCE(cs.id, 0) AS class_section_id, c.id AS class_id, c.title AS class_title, s.title AS section_title,
-    CASE WHEN cs.id IS NULL THEN c.title ELSE CONCAT(c.title, ' - ', s.title) END AS display_label
-    FROM classes c
-    LEFT JOIN class_sections cs ON cs.class_id = c.id AND cs.status = 0
-    LEFT JOIN sections s ON s.id = cs.section_id
-    WHERE c.status = 0 ORDER BY c.title, s.title
-");
-if ($class_result) {
-    while ($row = $class_result->fetch_assoc()) $class_options[] = $row;
-}
-
 $ft_result = $conn->query("SELECT id, title, type FROM fee_types ORDER BY title");
 if ($ft_result) {
     while ($row = $ft_result->fetch_assoc()) $fee_types[$row['id']] = $row;
@@ -85,13 +102,18 @@ $month_map = [
     'oct'=>'10','october'=>'10','nov'=>'11','november'=>'11','dec'=>'12','december'=>'12'
 ];
 
-// ---------- AJAX fee handlers ----------
+/* ---------- AJAX handlers ---------- */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
     header('Content-Type: application/json');
     $action = $_POST['action'] ?? '';
     $response = ['success' => false, 'message' => ''];
 
-    if ($action === 'add_fee') {
+    if ($action === 'load_class_sections') {
+        $session_id = intval($_POST['session_id'] ?? 0);
+        $options = load_class_sections_for_session($conn, $session_id);
+        $response['success'] = true;
+        $response['options'] = $options;
+    } elseif ($action === 'add_fee') {
         $student_id = intval($_POST['student_id']);
         $fee_type_id = intval($_POST['fee_type_id']);
         $amount = floatval($_POST['amount']);
@@ -144,7 +166,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
     exit;
 }
 
-// ---------- Auto-generate Reg No ----------
+/* ---------- Auto-generate Reg No ---------- */
 function generate_reg_no($conn) {
     $year = date('Y');
     $prefix = 'REG-' . $year . '-';
@@ -167,7 +189,7 @@ function generate_reg_no($conn) {
     return $prefix . str_pad($next, 4, '0', STR_PAD_LEFT);
 }
 
-// ---------- Edit mode Data Loading ----------
+/* ---------- Edit mode Data Loading ---------- */
 $default_branch_id = !empty($branches) ? array_key_first($branches) : 1;
 
 $student_data = [
@@ -214,6 +236,9 @@ if (isset($_GET['edit']) && is_numeric($_GET['edit'])) {
             if (!isset($student_data['branch_id']) || empty($student_data['branch_id'])) {
                 $student_data['branch_id'] = $default_branch_id;
             }
+            if (empty($student_data['registration_date']) || $student_data['registration_date'] === '0000-00-00') {
+                $student_data['registration_date'] = date('Y-m-d');
+            }
 
             $c_stmt = $conn->prepare("SELECT class_id, class_section_id, session_id FROM student_class WHERE student_registration_id = ? ORDER BY id DESC LIMIT 1");
             if ($c_stmt) {
@@ -228,13 +253,7 @@ if (isset($_GET['edit']) && is_numeric($_GET['edit'])) {
                 $c_stmt->close();
             }
 
-            $p_stmt = $conn->prepare("
-                SELECT u.id, u.username, u.email, u.mobile_no, ps.relationship, ps.is_primary
-                FROM parent_students ps
-                JOIN users u ON u.id = ps.parent_user_id
-                WHERE ps.student_id = ?
-                ORDER BY ps.is_primary DESC
-            ");
+            $p_stmt = $conn->prepare("SELECT u.id, u.username, u.email, u.mobile_no, ps.relationship, ps.is_primary FROM parent_students ps JOIN users u ON u.id = ps.parent_user_id WHERE ps.student_id = ? ORDER BY ps.is_primary DESC");
             if ($p_stmt) {
                 $p_stmt->bind_param("i", $edit_id);
                 $p_stmt->execute();
@@ -255,8 +274,73 @@ if (isset($_GET['edit']) && is_numeric($_GET['edit'])) {
 
 if (!$edit_mode) {
     $student_data['reg_no'] = generate_reg_no($conn);
+    $student_data['registration_date'] = date('Y-m-d');
 }
 
+/* ---------- Determine the session to preload class sections for ---------- */
+$preload_session_id = 0;
+
+if ($edit_mode && !empty($student_data['session_id'])) {
+    $preload_session_id = intval($student_data['session_id']);
+}
+
+if ($preload_session_id <= 0) {
+    /* Latest session by from_dated DESC, fall back to sessions ordered by id DESC */
+    $ls_res = $conn->query("SELECT id FROM sessions ORDER BY from_dated DESC, id DESC LIMIT 1");
+    if ($ls_res && ($ls_row = $ls_res->fetch_assoc())) {
+        $preload_session_id = intval($ls_row['id']);
+    }
+}
+
+/* Fill session_id on add mode so the dropdown default selects it */
+if (!$edit_mode && empty($student_data['session_id']) && $preload_session_id > 0) {
+    $student_data['session_id'] = $preload_session_id;
+}
+
+$class_options = load_class_sections_for_session($conn, $preload_session_id);
+
+/* Safety: if edit mode saved class_section_id is not present in list, inject it */
+if ($edit_mode && !empty($student_data['class_id'])) {
+    $saved_val = intval($student_data['class_id']) . '|' . intval($student_data['class_section_id'] ?: 0);
+    $found = false;
+    foreach ($class_options as $opt) {
+        if ($opt['value'] === $saved_val) { $found = true; break; }
+    }
+    if (!$found) {
+        $fallback = [
+            'class_section_id' => intval($student_data['class_section_id'] ?: 0),
+            'class_id' => intval($student_data['class_id']),
+            'class_title' => '',
+            'section_title' => '',
+            'display_label' => '(Saved) Class #' . intval($student_data['class_id']) . ' Section #' . intval($student_data['class_section_id'] ?: 0),
+            'value' => $saved_val
+        ];
+        /* Try to resolve nice labels */
+        $c_stmt2 = $conn->prepare("SELECT c.title AS ct, s.title AS st FROM classes c LEFT JOIN sections s ON s.id = ? WHERE c.id = ?");
+        if ($c_stmt2) {
+            $sec_id = intval($student_data['class_section_id'] ?: 0);
+            $cls_id = intval($student_data['class_id']);
+            $c_stmt2->bind_param("ii", $sec_id, $cls_id);
+            $c_stmt2->execute();
+            $c_res2 = $c_stmt2->get_result();
+            if ($c_res2 && ($c_row2 = $c_res2->fetch_assoc())) {
+                if (!empty($c_row2['ct'])) {
+                    $fallback['class_title'] = $c_row2['ct'];
+                    $fallback['section_title'] = $c_row2['st'];
+                    if (!empty($c_row2['st'])) {
+                        $fallback['display_label'] = $c_row2['ct'] . ' - ' . $c_row2['st'] . ' (saved)';
+                    } else {
+                        $fallback['display_label'] = $c_row2['ct'] . ' (saved)';
+                    }
+                }
+            }
+            $c_stmt2->close();
+        }
+        array_unshift($class_options, $fallback);
+    }
+}
+
+/* ---------- Existing Fees ---------- */
 $existing_fees = [];
 if ($edit_mode && !empty($student_data['id'])) {
     $stmt = $conn->prepare("SELECT sfa.id, ft.title AS fee_type_title, sfa.amount, sfa.assigned_date FROM student_fee_assignments sfa JOIN fee_types ft ON sfa.fee_type_id = ft.id WHERE sfa.student_id = ? ORDER BY sfa.id DESC");
@@ -271,7 +355,7 @@ if ($edit_mode && !empty($student_data['id'])) {
     }
 }
 
-// ---------- Form Submission (Save / Save & Next) ----------
+/* ---------- Form Submission (Save / Save & Next) ---------- */
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['student_id']) && isset($_POST['save_action'])) {
 
     function clean($conn, $key, $default = '') {
@@ -315,6 +399,16 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['student_id']) && isset
     $religion_val = clean($conn, 'religion');
     $house_val = clean($conn, 'house');
 
+    /* REGISTRATION DATE */
+    $registration_date_val = clean($conn, 'registration_date');
+    if (empty($registration_date_val) || $registration_date_val === '0000-00-00') {
+        if ($edit_mode && !empty($student_data['registration_date']) && $student_data['registration_date'] !== '0000-00-00') {
+            $registration_date_val = $student_data['registration_date'];
+        } else {
+            $registration_date_val = date('Y-m-d');
+        }
+    }
+
     $fields = [
         'branch_id' => $branch_id,
         'admission_no' => clean($conn, 'admission_no'),
@@ -345,7 +439,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['student_id']) && isset
         'student_other_description' => clean($conn, 'student_other_description'),
         'transport_fee' => floatval($_POST['transport_fee'] ?? 0),
         'is_transport' => isset($_POST['is_transport']) ? 0 : 1,
-        'registration_date' => clean($conn, 'registration_date'),
+        'registration_date' => $registration_date_val,
         'is_old_dues' => isset($_POST['is_old_dues']) ? 1 : 0,
         'old_dues_amount' => floatval($_POST['old_dues_amount'] ?? 0),
     ];
@@ -687,6 +781,9 @@ if ($edit_mode && !empty($student_data['current_address']) && $student_data['cur
         .same-address-toggle:hover { background: #dbeafe; }
         .form-control[readonly] { background-color: #f1f5f9; cursor: not-allowed; }
 
+        /* Session-change loading state on combo */
+        .combo-loading { opacity: 0.6; pointer-events: none; }
+
         .wizard-bar {
             position: fixed;
             bottom: 0; left: 0; right: 0;
@@ -737,11 +834,10 @@ if ($edit_mode && !empty($student_data['current_address']) && $student_data['cur
                         Editing <strong><?php echo htmlspecialchars($student_data['name'] ?: 'Student'); ?></strong>
                         <?php if (!empty($student_data['reg_no'])): ?> &middot; <?php echo htmlspecialchars($student_data['reg_no']); ?><?php endif; ?>
                     <?php else: ?>
-                        Register a new student </strong>
+                        Register a new student
                     <?php endif; ?>
                 </div>
             </div>
-          
         </div>
 
         <?php if (isset($_SESSION['message'])): ?>
@@ -822,7 +918,7 @@ if ($edit_mode && !empty($student_data['current_address']) && $student_data['cur
                                                     <div class="age-display age-empty" id="ageDisplay">
                                                         <i class="fas fa-birthday-cake"></i>
                                                         <span>Age:</span>
-                                                        <span class="age-value" id="ageValue">—</span>
+                                                        <span class="age-value" id="ageValue">&mdash;</span>
                                                         <span class="age-detail" id="ageDetail"></span>
                                                     </div>
                                                 </div>
@@ -884,9 +980,20 @@ if ($edit_mode && !empty($student_data['current_address']) && $student_data['cur
                                                 </div>
                                             </div>
                                         </div>
-                                        <div class="form-group">
-                                            <label>Student Mobile</label>
-                                            <input type="text" class="form-control" name="student_mobile" value="<?php echo htmlspecialchars($student_data['student_mobile']); ?>">
+                                        <!-- REGISTRATION DATE -->
+                                        <div class="form-row">
+                                            <div class="col-6">
+                                                <div class="form-group">
+                                                    <label>Registration Date <span class="text-danger">*</span></label>
+                                                    <input type="date" class="form-control" name="registration_date" value="<?php echo htmlspecialchars($student_data['registration_date'] ?: date('Y-m-d')); ?>" required>
+                                                </div>
+                                            </div>
+                                            <div class="col-6">
+                                                <div class="form-group">
+                                                    <label>Student Mobile</label>
+                                                    <input type="text" class="form-control" name="student_mobile" value="<?php echo htmlspecialchars($student_data['student_mobile']); ?>">
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -1068,24 +1175,25 @@ if ($edit_mode && !empty($student_data['current_address']) && $student_data['cur
                                         <h5>Class & Session</h5>
                                         <div class="form-group">
                                             <label>Session</label>
-                                            <select class="form-control" name="session_id">
+                                            <select class="form-control" name="session_id" id="session_id">
                                                 <option value="">Select</option>
-                                                <?php foreach ($sessions as $id => $name): ?>
-                                                    <option value="<?php echo $id; ?>" <?php echo ($id==$student_data['session_id'])?'selected':''; ?>><?php echo $name; ?></option>
+                                                <?php foreach ($sessions as $sid => $sname): ?>
+                                                    <option value="<?php echo (int)$sid; ?>" <?php echo ((int)$student_data['session_id'] === (int)$sid) ? 'selected' : ''; ?>><?php echo htmlspecialchars($sname); ?></option>
                                                 <?php endforeach; ?>
                                             </select>
                                         </div>
                                         <div class="form-group">
                                             <label>Class/Section</label>
-                                            <select class="form-control" name="class_combo">
+                                            <select class="form-control" name="class_combo" id="class_combo">
                                                 <option value="">Select</option>
                                                 <?php foreach ($class_options as $opt):
-                                                    $optVal = $opt['class_id'] . '|' . $opt['class_section_id'];
-                                                    $isSel = ((int)$student_data['class_id'] === (int)$opt['class_id'] && (int)$student_data['class_section_id'] === (int)$opt['class_section_id']);
+                                                    $optVal = $opt['value'];
+                                                    $isSel = ((int)$student_data['class_id'] === (int)$opt['class_id'] && (int)($student_data['class_section_id'] ?: 0) === (int)$opt['class_section_id']);
                                                 ?>
-                                                    <option value="<?php echo $optVal; ?>" <?php echo $isSel ? 'selected' : ''; ?>><?php echo htmlspecialchars($opt['display_label']); ?></option>
+                                                    <option value="<?php echo htmlspecialchars($optVal); ?>" <?php echo $isSel ? 'selected' : ''; ?>><?php echo htmlspecialchars($opt['display_label']); ?></option>
                                                 <?php endforeach; ?>
                                             </select>
+                                            <small class="text-muted" id="comboHint" style="display:none;">Loading class sections...</small>
                                         </div>
                                     </div>
                                 </div>
@@ -1361,9 +1469,58 @@ if ($edit_mode && !empty($student_data['current_address']) && $student_data['cur
             $('#studentForm').submit();
         });
 
-        /* ═══════════════════════════════════════════════════
+        /* ============================================================
+           SESSION -> CLASS/SECTION  (Option A: server-side reload)
+           ============================================================ */
+        function renderClassOptions(options) {
+            var $combo = $('#class_combo');
+            $combo.empty();
+            $combo.append($('<option>').val('').text('Select'));
+            if (!options || options.length === 0) return;
+            $.each(options, function(i, opt) {
+                $combo.append($('<option>').val(opt.value).text(opt.display_label));
+            });
+        }
+
+        function loadClassSections(sessionId, preselectValue) {
+            if (!sessionId) {
+                renderClassOptions([]);
+                return;
+            }
+            var $combo = $('#class_combo');
+            $combo.addClass('combo-loading');
+            $('#comboHint').show();
+
+            $.ajax({
+                url: '',
+                type: 'POST',
+                dataType: 'json',
+                data: { action: 'load_class_sections', session_id: sessionId },
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            }).done(function(res) {
+                if (res && res.success) {
+                    renderClassOptions(res.options || []);
+                    if (preselectValue) {
+                        $combo.val(preselectValue);
+                    }
+                }
+            }).fail(function() {
+                /* silent — keep existing options */
+            }).always(function() {
+                $combo.removeClass('combo-loading');
+                $('#comboHint').hide();
+            });
+        }
+
+        /* On session change, wipe combo and reload. No preselect (user changed session). */
+        $('#session_id').on('change', function() {
+            var sid = $(this).val();
+            loadClassSections(sid, '');
+        });
+
+        /* ============================================================
            AGE AUTO-CALCULATION
-           ═══════════════════════════════════════════════════ */
+           ============================================================ */
         function calcAge() {
             var d = parseInt($('#dob_day').val(), 10);
             var m = parseInt($('#dob_month').val(), 10);
@@ -1373,10 +1530,8 @@ if ($edit_mode && !empty($student_data['current_address']) && $student_data['cur
             var $val = $('#ageValue');
             var $detail = $('#ageDetail');
 
-            // Reset classes
             $box.removeClass('age-empty age-invalid');
 
-            // If any field empty
             if (!d || !m || !y) {
                 $box.addClass('age-empty');
                 $val.text('—');
@@ -1384,7 +1539,6 @@ if ($edit_mode && !empty($student_data['current_address']) && $student_data['cur
                 return;
             }
 
-            // Validate the date
             var dob = new Date(y, m - 1, d);
             if (dob.getFullYear() !== y || dob.getMonth() !== (m - 1) || dob.getDate() !== d) {
                 $box.addClass('age-invalid');
@@ -1393,7 +1547,6 @@ if ($edit_mode && !empty($student_data['current_address']) && $student_data['cur
                 return;
             }
 
-            // Future date check
             var today = new Date();
             today.setHours(0, 0, 0, 0);
             if (dob > today) {
@@ -1403,7 +1556,6 @@ if ($edit_mode && !empty($student_data['current_address']) && $student_data['cur
                 return;
             }
 
-            // Compute years, months, days
             var years = today.getFullYear() - dob.getFullYear();
             var months = today.getMonth() - dob.getMonth();
             var days = today.getDate() - dob.getDate();
@@ -1418,26 +1570,24 @@ if ($edit_mode && !empty($student_data['current_address']) && $student_data['cur
                 months += 12;
             }
 
-            // Decimal age (approximate)
             var msPerYear = 365.25 * 24 * 60 * 60 * 1000;
             var decimalAge = (today.getTime() - dob.getTime()) / msPerYear;
             var decimalAgeStr = decimalAge.toFixed(1);
 
-            // Build display
             var yrLabel = years === 1 ? 'year' : 'years';
             var moLabel = months === 1 ? 'month' : 'months';
             var dyLabel = days === 1 ? 'day' : 'days';
 
             $val.text(years + ' ' + yrLabel);
-            $detail.text('(' + months + ' ' + moLabel + ', ' + days + ' ' + dyLabel + ' • ' + decimalAgeStr + ' yrs)');
+            $detail.text('(' + months + ' ' + moLabel + ', ' + days + ' ' + dyLabel + ' \u2022 ' + decimalAgeStr + ' yrs)');
         }
 
-        // Attach listeners
         $('#dob_day, #dob_month, #dob_year').on('change', calcAge);
-        // Initial calc on page load (important for edit mode)
         calcAge();
 
-        /* SAME AS CURRENT ADDRESS */
+        /* ============================================================
+           SAME AS CURRENT ADDRESS
+           ============================================================ */
         function syncPermanentAddress() {
             if ($('#permanent_same_as_current').is(':checked')) {
                 $('#permanent_address')

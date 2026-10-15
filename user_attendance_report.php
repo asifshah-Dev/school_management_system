@@ -1,501 +1,551 @@
 <?php
-ob_start();
+header('Content-Type: text/html; charset=utf-8');
+require_once('security.php');
 require_once('conn_inc.php');
-require_once('security.php'); // Include security check
-/* ==== AUTHORIZATION GATE ==== */
 require_once('permissions.php');
+
 require_action($conn, __FILE__);
 $perms = current_user_perms($conn, __FILE__);
-/* ==== END AUTHORIZATION GATE ==== */
-// --------------------
-// Get Parameters
-// --------------------
-$type = isset($_GET['type']) ? $_GET['type'] : 'daily';
-$date = isset($_GET['date']) ? $_GET['date'] : date('Y-m-d');
 
-// --------------------
-// Calculate Date Range
-// --------------------
-if ($type === 'daily') {
-    $start_date = $end_date = $date;
-    $period_title = "Daily Report - " . date('F j, Y', strtotime($date));
-} elseif ($type === 'weekly') {
-    $ts = strtotime($date);
-    $start_date = date('Y-m-d', strtotime('monday this week', $ts));
-    $end_date   = date('Y-m-d', strtotime('sunday this week', $ts));
-    $period_title = "Weekly Report - " . date('M j', strtotime($start_date)) . " to " . date('M j, Y', strtotime($end_date));
-} elseif ($type === 'monthly') {
-    $ts = strtotime($date);
-    $start_date = date('Y-m-01', $ts);
-    $end_date   = date('Y-m-t', $ts);
-    $period_title = "Monthly Report - " . date('F Y', strtotime($date));
-} else {
-    die("Invalid report type");
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
 }
 
-// --------------------
-// SQL Query - FIXED for monthly report
-// --------------------
-$sql = "
-SELECT 
-    u.id AS user_id,
-    u.username,
-    c.dated,
-    COALESCE(ua.status, 'A') AS status
-FROM users u
-CROSS JOIN (
-    SELECT DATE(?) + INTERVAL (a.a + (10 * b.a)) DAY AS dated
-    FROM 
-        (SELECT 0 AS a UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 
-         UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL 
-         SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9) AS a
-    CROSS JOIN 
-        (SELECT 0 AS a UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 
-         UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL 
-         SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9) AS b
-) c
-LEFT JOIN user_attendance ua ON ua.user_id = u.id AND ua.dated = c.dated
-WHERE c.dated BETWEEN ? AND ?
-ORDER BY u.username, c.dated
-";
+/* ============================================================
+   REPORT BUILDER
+   ============================================================ */
+function build_user_report($conn, $from, $to, $username_search = '') {
+    $rows = [];
 
-$stmt = $conn->prepare($sql);
-$stmt->bind_param("sss", $start_date, $start_date, $end_date);
-$stmt->execute();
-$result = $stmt->get_result();
-
-// --------------------
-// Organize Data
-// --------------------
-$attendance = [];
-$dates = [];
-$total_teachers = 0;
-
-// Calculate overall totals
-$total_present = 0;
-$total_leave = 0;
-$total_absent = 0;
-
-while ($row = $result->fetch_assoc()) {
-    // Remove extra spaces from teacher names
-    $teacher_name = trim(preg_replace('/\s+/', ' ', $row['username']));
-    $attendance[$row['user_id']]['name'] = $teacher_name;
-    $attendance[$row['user_id']]['records'][$row['dated']] = $row['status'];
-    $dates[$row['dated']] = true;
-}
-
-$dates = array_keys($dates);
-sort($dates);
-$total_teachers = count($attendance);
-$total_days = count($dates);
-
-// Calculate totals for each teacher and overall
-foreach ($attendance as $user_id => $data) {
-    $teacher_present = 0;
-    $teacher_leave = 0;
-    $teacher_absent = 0;
-    
-    foreach ($dates as $d) {
-        $status = $data['records'][$d] ?? 'A';
-        switch ($status) {
-            case 'P': 
-                $teacher_present++;
-                $total_present++;
-                break;
-            case 'L': 
-                $teacher_leave++;
-                $total_leave++;
-                break;
-            case 'A': 
-                $teacher_absent++;
-                $total_absent++;
-                break;
-        }
+    $dt_from = new DateTime($from);
+    $dt_to = new DateTime($to);
+    $dt_today = new DateTime(date('Y-m-d'));
+    if ($dt_to > $dt_today) $dt_to = clone $dt_today;
+    if ($dt_to < $dt_from) {
+        return ['rows' => [], 'total_days' => 0];
     }
-    
-    $attendance[$user_id]['present'] = $teacher_present;
-    $attendance[$user_id]['leave'] = $teacher_leave;
-    $attendance[$user_id]['absent'] = $teacher_absent;
+    $total_days = $dt_from->diff($dt_to)->days + 1;
+
+    $sql = "SELECT id, username FROM users WHERE 1=1";
+    $params = [];
+    $types = '';
+    if ($username_search !== '') {
+        $sql .= " AND username LIKE ?";
+        $params[] = '%' . $username_search . '%';
+        $types .= 's';
+    }
+    $sql .= " ORDER BY username ASC";
+
+    $stmt = $conn->prepare($sql);
+    $users = [];
+    if ($stmt) {
+        if (!empty($params)) $stmt->bind_param($types, ...$params);
+        $stmt->execute();
+        $res = $stmt->get_result();
+        if ($res) while ($r = $res->fetch_assoc()) $users[] = $r;
+        $stmt->close();
+    }
+
+    if (empty($users)) return ['rows' => [], 'total_days' => $total_days];
+
+    $attendance = [];
+    $att_sql = "SELECT user_id, dated, status FROM user_attendance WHERE dated >= ? AND dated <= ?";
+    $att_stmt = $conn->prepare($att_sql);
+    if ($att_stmt) {
+        $att_stmt->bind_param("ss", $from, $to);
+        $att_stmt->execute();
+        $att_res = $att_stmt->get_result();
+        if ($att_res) {
+            while ($r = $att_res->fetch_assoc()) {
+                $uid = intval($r['user_id']);
+                if (!isset($attendance[$uid])) $attendance[$uid] = [];
+                $attendance[$uid][$r['dated']] = $r['status'];
+            }
+        }
+        $att_stmt->close();
+    }
+
+    foreach ($users as $u) {
+        $uid = intval($u['id']);
+        $present = 0;
+        $leave = 0;
+
+        if (isset($attendance[$uid])) {
+            foreach ($attendance[$uid] as $date => $status) {
+                if ($status === 'P') $present++;
+                elseif ($status === 'L') $leave++;
+            }
+        }
+
+        $absent = $total_days - $present - $leave;
+        if ($absent < 0) $absent = 0;
+        $pct = 0;
+        if ($total_days > 0) {
+            $pct = round((($present + $leave) / $total_days) * 100, 1);
+        }
+
+        $rows[] = [
+            'username' => $u['username'],
+            'present' => $present,
+            'leave' => $leave,
+            'absent' => $absent,
+            'percentage' => $pct
+        ];
+    }
+
+    return ['rows' => $rows, 'total_days' => $total_days];
 }
 
-$stmt->close();
-?>
+/* ============================================================
+   READ FILTERS
+   ============================================================ */
+$from = isset($_GET['from']) ? trim($_GET['from']) : '';
+$to   = isset($_GET['to']) ? trim($_GET['to']) : '';
+$username_search = isset($_GET['q']) ? trim($_GET['q']) : '';
+$submitted = isset($_GET['generate']) && $_GET['generate'] === '1';
 
+$date_ok = true;
+if ($submitted) {
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) $date_ok = false;
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $to)) $date_ok = false;
+}
+
+/* ============================================================
+   EXPORT
+   ============================================================ */
+if ($submitted && $date_ok && isset($_GET['export']) && in_array($_GET['export'], ['csv', 'excel'])) {
+    $data = build_user_report($conn, $from, $to, $username_search);
+    $export_type = $_GET['export'];
+    $filename_base = 'teacher_attendance_report_' . $from . '_to_' . $to;
+
+    if ($export_type === 'csv') {
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="' . $filename_base . '.csv"');
+        $out = fopen('php://output', 'w');
+        fputcsv($out, ['Username', 'Days in Range', 'Present', 'Leave', 'Absent', 'Attendance %']);
+        foreach ($data['rows'] as $r) {
+            fputcsv($out, [$r['username'], $data['total_days'], $r['present'], $r['leave'], $r['absent'], $r['percentage'] . '%']);
+        }
+        fclose($out);
+        exit;
+    }
+
+    if ($export_type === 'excel') {
+        header('Content-Type: application/vnd.ms-excel; charset=utf-8');
+        header('Content-Disposition: attachment; filename="' . $filename_base . '.xls"');
+        echo "\xEF\xBB\xBF";
+        echo '<html><head><meta charset="utf-8"></head><body>';
+        echo '<table border="1" cellpadding="4" cellspacing="0">';
+        echo '<tr style="background:#f1f5f9; font-weight:bold;">';
+        echo '<th>Username</th><th>Days in Range</th><th>Present</th><th>Leave</th><th>Absent</th><th>Attendance %</th>';
+        echo '</tr>';
+        foreach ($data['rows'] as $r) {
+            echo '<tr>';
+            echo '<td>' . htmlspecialchars($r['username']) . '</td>';
+            echo '<td align="center">' . $data['total_days'] . '</td>';
+            echo '<td align="center">' . $r['present'] . '</td>';
+            echo '<td align="center">' . $r['leave'] . '</td>';
+            echo '<td align="center">' . $r['absent'] . '</td>';
+            echo '<td align="center">' . $r['percentage'] . '%</td>';
+            echo '</tr>';
+        }
+        echo '</table></body></html>';
+        exit;
+    }
+}
+
+/* ============================================================
+   RUN REPORT
+   ============================================================ */
+$rows = [];
+$total_days = 0;
+$sum_present = 0;
+$sum_leave = 0;
+$sum_absent = 0;
+$overall_pct = 0;
+
+if ($submitted && $date_ok) {
+    $report = build_user_report($conn, $from, $to, $username_search);
+    $rows = $report['rows'];
+    $total_days = $report['total_days'];
+
+    foreach ($rows as $r) {
+        $sum_present += $r['present'];
+        $sum_leave += $r['leave'];
+        $sum_absent += $r['absent'];
+    }
+    $users_count = count($rows);
+    if ($users_count > 0 && $total_days > 0) {
+        $overall_pct = round((($sum_present + $sum_leave) / ($users_count * $total_days)) * 100, 1);
+    }
+}
+
+$export_url = '?from=' . urlencode($from) . '&to=' . urlencode($to) . '&q=' . urlencode($username_search) . '&generate=1';
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <title>Teacher Attendance Report</title>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="stylesheet" href="css/mystyle.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/jquery@3.6.4/dist/jquery.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/js/bootstrap.bundle.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-       
-        
-        
-        
-        /* Improved Table Styles */
-        .attendance-table { 
-            width: 100%; 
-            border-collapse: collapse;
-            font-size: 12px;
-            background: white;
-        }
-        
-        .attendance-table th { 
-            background: #2c3e50; 
-            color: white; 
-            padding: 10px 5px;
-            text-align: center;
-            border: 1px solid #34495e;
-            font-weight: bold;
-            font-size: 11px;
-        }
-        
-        .attendance-table td {
-            padding: 8px 4px;
-            text-align: center;
-            border: 1px solid #ddd;
-            font-weight: bold;
-        }
-        
-        /* Status Colors */
-        .present { background: #27ae60; color: white; }
-        .leave { background: #f39c12; color: white; }
-        .absent { background: #e74c3c; color: white; }
-        
-        /* Teacher name column */
-        .teacher-col { 
-            background: #34495e; 
-            color: white;
-            font-weight: bold; 
-            text-align: left !important;
-            padding: 10px 12px !important;
-            position: sticky;
-            left: 0;
-            z-index: 2;
-            min-width: 160px;
-            font-size: 12px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        
-        /* Date headers - FIXED: No rotation, no italic */
-        .date-header { 
-            height: 60px;
-            white-space: normal;
-            padding: 5px 3px !important;
-            font-size: 10px;
-            font-weight: bold;
-            font-style: normal;
-            line-height: 1.2;
-            vertical-align: bottom;
-        }
-        
-        .date-header .day {
-            display: block;
-            font-size: 11px;
-            font-weight: bold;
-        }
-        
-        .date-header .month {
-            display: block;
-            font-size: 9px;
-            opacity: 0.8;
-        }
-        
-        /* Summary boxes */
-        .summary-box { 
-            padding: 15px; 
-            border-radius: 5px; 
-            color: white;
-            text-align: center;
-            margin: 5px;
-        }
-        
-        .present-summary { background: #27ae60; }
-        .leave-summary { background: #f39c12; }
-        .absent-summary { background: #e74c3c; }
-        .total-summary { background: #3498db; }
-        
-        .summary-number { 
-            font-size: 22px; 
-            font-weight: bold; 
-            display: block;
-            margin-bottom: 5px;
-        }
-        
-        .summary-label { 
-            font-size: 12px; 
-        }
-        
-        /* Scrollable table container */
-        .table-container {
-            overflow-x: auto;
-            margin-bottom: 20px;
-            border: 1px solid #ddd;
-        }
-        
-        .btn {
-            font-weight: 500;
-        }
-        
-        .well {
-            background: #f8f9fa;
-            border: 1px solid #e1e5e9;
-            border-radius: 4px;
-            padding: 12px;
-        }
+        body { font-family: 'Inter', sans-serif; background-color: #f5f7fa; padding-bottom: 60px; }
 
-        /* Print-specific styling */
-        .no-print { }
-        .print-only { display: none; }
-        .print-header {
-            text-align: center; 
-            margin-bottom: 15px;
+        .page-header-card {
+            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+            border-radius: 12px; padding: 22px 26px; color: #fff;
+            margin-bottom: 20px; display: flex; align-items: center;
+            justify-content: space-between; flex-wrap: wrap; gap: 16px;
+            box-shadow: 0 6px 22px rgba(37, 99, 235, 0.25);
         }
-        .print-meta {
-            text-align: center; 
-            margin-bottom: 15px; 
-            font-size: 12px;
+        .page-header-card .header-left { display: flex; align-items: center; gap: 16px; }
+        .page-header-card .header-icon { width: 52px; height: 52px; background: rgba(255,255,255,0.18); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+        .page-header-card h1 { font-size: 21px; font-weight: 700; margin: 0; }
+        .page-header-card .subtitle { font-size: 13px; opacity: 0.85; margin-top: 4px; }
+        .page-header-card .header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+        .btn-white { background: #fff; color: #2563eb; border: 1px solid #fff; font-weight: 600; font-size: 13px; padding: 9px 16px; border-radius: 8px; display: inline-flex; align-items: center; gap: 7px; }
+        .btn-white:hover, .btn-white:focus { background: #f1f5f9; color: #1d4ed8; }
+        .btn-white-ghost { background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.3); font-weight: 600; font-size: 13px; padding: 9px 16px; border-radius: 8px; display: inline-flex; align-items: center; gap: 7px; }
+        .btn-white-ghost:hover, .btn-white-ghost:focus { background: rgba(255,255,255,0.25); color: #fff; }
+
+        .filter-card { background: #fff; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.06); padding: 18px 22px; margin-bottom: 20px; border-top: 4px solid #2563eb; }
+        .filter-card label { font-size: 12px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 6px; }
+        .filter-card .form-control { border-radius: 8px; border: 1px solid #cbd5e1; font-size: 14px; padding: 9px 12px; height: auto; }
+        .filter-card .form-control:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,0.12); }
+
+        .counter-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
+        .counter-box { background: #fff; border-radius: 10px; padding: 16px 18px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); border-left: 4px solid; }
+        .counter-box.days { border-left-color: #2563eb; }
+        .counter-box.users { border-left-color: #7c3aed; }
+        .counter-box.present { border-left-color: #059669; }
+        .counter-box.leave { border-left-color: #f59e0b; }
+        .counter-box.absent { border-left-color: #dc2626; }
+        .counter-box.pct { border-left-color: #0891b2; }
+        .counter-box .counter-number { font-size: 22px; font-weight: 700; line-height: 1; }
+        .counter-box .counter-label { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 700; margin-top: 6px; }
+        .counter-box.days .counter-number { color: #2563eb; }
+        .counter-box.users .counter-number { color: #7c3aed; }
+        .counter-box.present .counter-number { color: #059669; }
+        .counter-box.leave .counter-number { color: #d97706; }
+        .counter-box.absent .counter-number { color: #dc2626; }
+        .counter-box.pct .counter-number { color: #0891b2; }
+
+        .list-card { background: #fff; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.06); overflow: hidden; }
+        .list-card-head { padding: 16px 20px; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+        .list-card-head h3 { font-size: 15px; font-weight: 700; color: #1e293b; margin: 0; display: flex; align-items: center; gap: 8px; }
+        .list-card-head h3 i { color: #2563eb; }
+        .list-card-head .count-chip { background: #eff6ff; color: #2563eb; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; }
+
+        table.rep-table { width: 100%; margin: 0; border-collapse: separate; border-spacing: 0; }
+        table.rep-table thead th { background: #f8fafc; color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; padding: 11px 14px; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+        table.rep-table thead th.center { text-align: center; }
+        table.rep-table tbody td { padding: 12px 14px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; font-size: 14px; color: #1e293b; }
+        table.rep-table tbody td.center { text-align: center; }
+        table.rep-table tbody tr:hover { background: #f8fafc; }
+        table.rep-table tbody tr:last-child td { border-bottom: none; }
+
+        .user-name-cell { font-weight: 600; color: #1e293b; display: flex; align-items: center; gap: 8px; }
+        .user-name-cell i { color: #64748b; font-size: 13px; }
+        .num-pill { display: inline-flex; align-items: center; justify-content: center; min-width: 40px; padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 700; }
+        .num-pill.p { background: #d1fae5; color: #065f46; }
+        .num-pill.l { background: #fef3c7; color: #92400e; }
+        .num-pill.a { background: #fee2e2; color: #991b1b; }
+        .pct-bar-wrap { background: #f1f5f9; border-radius: 4px; height: 8px; width: 100px; overflow: hidden; display: inline-block; vertical-align: middle; }
+        .pct-bar { height: 100%; background: #059669; }
+        .pct-bar.mid { background: #f59e0b; }
+        .pct-bar.low { background: #dc2626; }
+        .pct-text { font-size: 12px; font-weight: 700; color: #1e293b; margin-left: 8px; }
+
+        .prompt-card {
+            background: #fff; border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+            padding: 60px 30px; text-align: center;
+            border-top: 4px solid #2563eb;
         }
-        .page-break { page-break-before: always; }
+        .prompt-card .prompt-icon {
+            width: 80px; height: 80px;
+            background: #eff6ff; color: #2563eb;
+            border-radius: 50%; display: inline-flex;
+            align-items: center; justify-content: center;
+            font-size: 34px; margin-bottom: 18px;
+        }
+        .prompt-card h4 { font-size: 18px; font-weight: 700; color: #1e293b; margin: 0 0 8px 0; }
+        .prompt-card p { font-size: 14px; color: #64748b; margin: 0; }
+
+        .btn-brand { background: #2563eb; border: 1px solid #2563eb; color: #fff; font-weight: 600; font-size: 13px; padding: 9px 18px; border-radius: 8px; display: inline-flex; align-items: center; gap: 7px; }
+        .btn-brand:hover, .btn-brand:focus { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
+        .btn-ghost { background: #f1f5f9; border: 1px solid #e2e8f0; color: #475569; font-weight: 600; font-size: 13px; padding: 9px 16px; border-radius: 8px; display: inline-flex; align-items: center; gap: 7px; }
+        .btn-ghost:hover, .btn-ghost:focus { background: #e2e8f0; color: #1e293b; }
+
+        .print-header { display: none; }
 
         @media print {
-            body { padding-top: 0; background: #fff; color: black !important; }
-              .navbar,
-    .navbar * {
-        display: none !important;
-      
-    }
-.attendance-table th { 
-        color: black !important;
-        }
-        
-        .attendance-table td {
-           color: black;
-        }
+            @page { margin: 12mm; }
 
- .summary-number { 
-           color: black !important;
-        }
-        .attendance-table { 
-           color: black !important;
-        }
-        
-         .present-summary { color: black !important; }
-        .leave-summary { color: black !important; }
-        .absent-summary { color: black !important;}
-        .total-summary { color: black !important;}
-        .summary-label { 
-           color: black !important; 
-        }
-    .date-header { 
-            color: black !important;
-        }
+            body * { visibility: hidden !important; }
+            .print-area, .print-area * { visibility: visible !important; }
 
-    /* Extra safety for common logo hooks */
-    .navbar-brand,
-    .navbar-brand img,
-    .logo,
-    img.logo {
-        display: none !important;
-       
-    }
-    .col-md-3{display: none !important;}
-            .no-print { display: none !important; color: black !important;}
-            .print-only { display: block !important; color: black !important;}
-            .panel { border: none; color: black !important;}
-            .panel-heading {color: black !important;  }
-            .table-container {  border: none; color: black !important;}
-            .teacher-col { position: static; color: black !important;}
-            .container { width: 100% !important; }
-            a[href]:after { content: ""; color: black !important;}
-        }
-         .panel { 
-            color: black  !important;
-        }
-        
-        .panel-heading { 
-           color: black !important;
+            .print-area {
+                position: absolute !important;
+                left: 0 !important;
+                top: 0 !important;
+                width: 100% !important;
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+
+            .no-print, .page-header-card, .filter-card, .counter-row,
+            .prompt-card, nav, .navbar, header, footer,
+            #navbar, #header, .navbar-fixed-top, .navbar-default { display: none !important; }
+
+            body {
+                background: #fff !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                font-family: Arial, Helvetica, sans-serif;
+                color: #000;
+            }
+
+            .list-card {
+                box-shadow: none !important;
+                border-radius: 0 !important;
+                background: #fff !important;
+                border: none !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                overflow: visible !important;
+            }
+            .list-card-head { display: none !important; }
+
+            .print-header { display: block !important; text-align: center; margin-bottom: 12px; visibility: visible !important; }
+            .print-header h2 { font-size: 16px; font-weight: bold; margin: 0 0 4px 0; color: #000; }
+            .print-header .meta { font-size: 11px; color: #333; }
+
+            table.rep-table {
+                width: 100% !important;
+                border-collapse: collapse !important;
+                font-size: 11px !important;
+                color: #000 !important;
+            }
+            table.rep-table thead th {
+                background: #fff !important;
+                color: #000 !important;
+                border: 1px solid #333 !important;
+                padding: 6px 8px !important;
+                font-size: 11px !important;
+                font-weight: bold !important;
+                text-align: left !important;
+                text-transform: none !important;
+                letter-spacing: normal !important;
+            }
+            table.rep-table thead th.center { text-align: center !important; }
+            table.rep-table tbody td {
+                border: 1px solid #333 !important;
+                padding: 5px 8px !important;
+                font-size: 11px !important;
+                color: #000 !important;
+                background: #fff !important;
+            }
+            table.rep-table tbody td.center { text-align: center !important; }
+            table.rep-table tbody tr:hover { background: #fff !important; }
+
+            .num-pill, .user-name-cell {
+                background: transparent !important;
+                color: #000 !important;
+                padding: 0 !important;
+                border: none !important;
+                font-weight: normal !important;
+                font-family: inherit !important;
+            }
+            .user-name-cell i { display: none !important; }
+            .pct-bar-wrap, .pct-bar { display: none !important; }
+            .pct-text { font-weight: normal !important; color: #000 !important; margin: 0 !important; }
         }
     </style>
 </head>
 <body>
-
     <?php require_once('navbar.php'); ?>
-  
 
-    <div class="container">
-        <div class="row no-print">
-            <div class="col-md-12">
-                <!-- Controls -->
-                <div class="panel panel-primary">
-                    <div class="panel-heading">
-                        <h4 class="panel-title text-white">Attendance Report Controls</h4>
-                    </div>
-                    <div class="panel-body">
-                        <form method="get" class="form-inline">
-                            <div class="form-group">
-                                <label>Report Type:</label>
-                                <select id="type" name="type" class="form-control" style="margin: 0 10px;">
-                                    <option value="daily" <?= $type === 'daily' ? 'selected' : '' ?>>Daily Report</option>
-                                    <option value="weekly" <?= $type === 'weekly' ? 'selected' : '' ?>>Weekly Report</option>
-                                    <option value="monthly" <?= $type === 'monthly' ? 'selected' : '' ?>>Monthly Report</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label>Date:</label>
-                                <input type="date" name="date" value="<?= $date ?>" class="form-control" style="margin: 0 10px;">
-                            </div>
-                            <button type="submit" class="btn btn-success">Generate Report</button>
-                            <button type="button" id="btnPrint" class="btn btn-primary" style="margin-left:10px;">
-                                <span class="glyphicon glyphicon-print"></span> Print
-                            </button>
-                        </form>
+    <div class="container no-print" style="padding: 20px; max-width: 1300px; margin: 0 auto;">
+
+        <div class="page-header-card">
+            <div class="header-left">
+                <div class="header-icon"><i class="fas fa-chart-line"></i></div>
+                <div>
+                    <h1>Teacher Attendance Report</h1>
+                    <div class="subtitle">
+                        <?php if ($submitted && $date_ok): ?>
+                            <?php echo date('d M Y', strtotime($from)); ?> &mdash; <?php echo date('d M Y', strtotime($to)); ?>
+                        <?php else: ?>
+                            Select filters and generate
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>
+            <?php if ($submitted && $date_ok && !empty($rows)): ?>
+            <div class="header-actions">
+                <a href="<?php echo $export_url; ?>&export=csv" class="btn-white-ghost">
+                    <i class="fas fa-file-csv"></i> CSV
+                </a>
+                <a href="<?php echo $export_url; ?>&export=excel" class="btn-white-ghost">
+                    <i class="fas fa-file-excel"></i> Excel
+                </a>
+                <button type="button" class="btn-white" onclick="window.print();">
+                    <i class="fas fa-print"></i> Print
+                </button>
+            </div>
+            <?php endif; ?>
         </div>
 
-        <!-- Print header (only visible on print) -->
-        <div class="print-only">
-            <div class="print-header">
-                <h3 style="margin:0;">Teacher Attendance Report</h3>
-                <div style="font-size:13px; margin-top:4px;"><?= htmlspecialchars($period_title) ?></div>
-            </div>
-            <div class="print-meta">
-                From: <?= htmlspecialchars($start_date) ?> &nbsp; | &nbsp;
-                To: <?= htmlspecialchars($end_date) ?> &nbsp; | &nbsp;
-                Generated: <?= date('Y-m-d H:i') ?>
-            </div>
+        <div class="filter-card">
+            <form method="get" action="">
+                <input type="hidden" name="generate" value="1">
+                <div class="row">
+                    <div class="col-md-3">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label>From</label>
+                            <input type="date" class="form-control" name="from" value="<?php echo htmlspecialchars($from); ?>" required>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label>To</label>
+                            <input type="date" class="form-control" name="to" value="<?php echo htmlspecialchars($to); ?>" required>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label>Username</label>
+                            <input type="text" class="form-control" name="q" value="<?php echo htmlspecialchars($username_search); ?>" placeholder="Search username...">
+                        </div>
+                    </div>
+                    <div class="col-md-2" style="display: flex; align-items: flex-end;">
+                        <button type="submit" class="btn-brand" style="width: 100%; justify-content: center;">
+                            <i class="fas fa-search"></i> Generate
+                        </button>
+                    </div>
+                </div>
+            </form>
         </div>
 
-        <!-- Summary Statistics -->
-        <div id="printArea">
-           
-
-            <!-- Report Table -->
-            <div class="panel panel-default">
-                <div class="panel-heading">
-                    <h4 class="panel-title ">Attendance Register - <?= $period_title ?></h4>
-                </div>
-                <div class="panel-body" style="padding: 0;">
-                    <?php if (empty($attendance)): ?>
-                        <div class="alert alert-warning text-center" style="margin: 20px;">
-                            <h4>No Data Available</h4>
-                            <p>No attendance records found for the selected period.</p>
-                        </div>
-                    <?php else: ?>
-                        <div class="table-container">
-                            <table class="attendance-table">
-                                <thead>
-                                    <tr>
-                                        <th class="teacher-col">Teacher Name</th>
-                                        <?php foreach ($dates as $d): ?>
-                                            <th class="date-header">
-                                                <span class="day"><?= date('d', strtotime($d)) ?></span>
-                                                <span class="month"><?= date('M', strtotime($d)) ?></span>
-                                            </th>
-                                        <?php endforeach; ?>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach ($attendance as $user_id => $data): ?>
-                                        <tr>
-                                            <td class="teacher-col" title="<?= htmlspecialchars($data['name']) ?>">
-                                                <?= htmlspecialchars($data['name']) ?>
-                                            </td>
-                                            <?php foreach ($dates as $d): 
-                                                $status = $data['records'][$d] ?? 'A';
-                                                $status_class = '';
-                                                switch ($status) {
-                                                    case 'P': $status_class = 'present'; break;
-                                                    case 'L': $status_class = 'leave'; break;
-                                                    case 'A': $status_class = 'absent'; break;
-                                                }
-                                            ?>
-                                                <td class="<?= $status_class ?>"><?= $status ?></td>
-                                            <?php endforeach; ?>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
-                        </div>
-
-                        <!-- Monthly Summary -->
-                        <div class="row" style="margin: 20px 10px 10px 10px;">
-                            <div class="col-md-12">
-                                <div class="panel panel-info">
-                                    <div class="panel-heading">
-                                        <h4 class="panel-title ">Monthly Attendance Summary - <?= date('F Y', strtotime($date)) ?></h4>
-                                    </div>
-                                    <div class="panel-body">
-                                        <div class="row text-center">
-                                            <div class="col-md-4">
-                                                <div class="summary-box present-summary">
-                                                    <span class="summary-number"><?= $total_present ?></span>
-                                                    <span class="summary-label">TOTAL PRESENT</span>
-                                                </div>
-                                            </div>
-                                            <div class="col-md-4">
-                                                <div class="summary-box leave-summary">
-                                                    <span class="summary-number"><?= $total_leave ?></span>
-                                                    <span class="summary-label">TOTAL LEAVE</span>
-                                                </div>
-                                            </div>
-                                            <div class="col-md-4">
-                                                <div class="summary-box absent-summary">
-                                                    <span class="summary-number"><?= $total_absent ?></span>
-                                                    <span class="summary-label">TOTAL ABSENT</span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div class="row text-center" style="margin-top: 15px;">
-                                            <div class="col-md-6">
-                                                <div class="well">
-                                                    <h5 style="font-weight: bold; margin: 0;">
-                                                        Total Working Days: <?= $total_days ?>
-                                                    </h5>
-                                                </div>
-                                            </div>
-                                            <div class="col-md-6">
-                                                <div class="well">
-                                                    <h5 style="font-weight: bold; margin: 0;">
-                                                        Total Teachers: <?= $total_teachers ?>
-                                                    </h5>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    <?php endif; ?>
-                </div>
+        <?php if ($submitted && $date_ok && !empty($rows)): ?>
+        <div class="counter-row">
+            <div class="counter-box days">
+                <div class="counter-number"><?php echo $total_days; ?></div>
+                <div class="counter-label">Days in Range</div>
             </div>
-        </div><!-- /#printArea -->
+            <div class="counter-box users">
+                <div class="counter-number"><?php echo count($rows); ?></div>
+                <div class="counter-label">Teachers</div>
+            </div>
+            <div class="counter-box present">
+                <div class="counter-number"><?php echo $sum_present; ?></div>
+                <div class="counter-label">Total Present</div>
+            </div>
+            <div class="counter-box leave">
+                <div class="counter-number"><?php echo $sum_leave; ?></div>
+                <div class="counter-label">Total Leave</div>
+            </div>
+            <div class="counter-box absent">
+                <div class="counter-number"><?php echo $sum_absent; ?></div>
+                <div class="counter-label">Total Absent</div>
+            </div>
+            <div class="counter-box pct">
+                <div class="counter-number"><?php echo $overall_pct; ?>%</div>
+                <div class="counter-label">Overall Attendance</div>
+            </div>
+        </div>
+        <?php endif; ?>
+
     </div>
 
-    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
-    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/js/bootstrap.min.js"></script>
-    <script>
-    $(document).ready(function() {
-        // Auto-submit form when type changes
-        $('#type').change(function() {
-            $(this).closest('form').submit();
-        });
+    <div class="container" style="max-width: 1300px; margin: 0 auto;">
 
-        // Print only the register + summaries (CSS hides controls/navbar)
-        $('#btnPrint').on('click', function() {
-            window.print();
-        });
-    });
-    </script>
+        <?php if (!$submitted): ?>
+            <div class="prompt-card no-print">
+                <div class="prompt-icon"><i class="fas fa-filter"></i></div>
+                <h4>Select Filters to Generate Report</h4>
+                <p>Pick a date range above, then click <strong>Generate</strong>.</p>
+            </div>
+        <?php elseif (!$date_ok): ?>
+            <div class="prompt-card no-print">
+                <div class="prompt-icon" style="background:#fef2f2; color:#dc2626;"><i class="fas fa-exclamation-triangle"></i></div>
+                <h4>Invalid Dates</h4>
+                <p>Please pick valid From and To dates.</p>
+            </div>
+        <?php elseif (empty($rows)): ?>
+            <div class="prompt-card no-print">
+                <div class="prompt-icon" style="background:#f1f5f9; color:#64748b;"><i class="fas fa-inbox"></i></div>
+                <h4>No Data</h4>
+                <p>No teachers matched the selected filters.</p>
+            </div>
+        <?php else: ?>
 
+        <div class="list-card print-area">
+
+            <div class="print-header">
+                <h2>Teacher Attendance Report</h2>
+                <div class="meta">
+                    From <?php echo date('d M Y', strtotime($from)); ?> to <?php echo date('d M Y', strtotime($to)); ?>
+                    &mdash; <?php echo $total_days; ?> day(s)
+                </div>
+            </div>
+
+            <div class="list-card-head">
+                <h3><i class="fas fa-list-ul"></i> Per-Teacher Summary</h3>
+                <span class="count-chip"><?php echo count($rows); ?> teacher(s)</span>
+            </div>
+
+            <div style="overflow-x: auto;">
+                <table class="rep-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 55px;">#</th>
+                            <th>Username</th>
+                            <th class="center">Days in Range</th>
+                            <th class="center">Present</th>
+                            <th class="center">Leave</th>
+                            <th class="center">Absent</th>
+                            <th style="width: 160px;">Attendance</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php $sr = 1; foreach ($rows as $r):
+                            $pct = $r['percentage'];
+                            $bar_class = '';
+                            if ($pct < 60) $bar_class = 'low';
+                            elseif ($pct < 85) $bar_class = 'mid';
+                        ?>
+                        <tr>
+                            <td><?php echo $sr++; ?></td>
+                            <td>
+                                <div class="user-name-cell">
+                                    <i class="fas fa-user-circle"></i>
+                                    <?php echo htmlspecialchars($r['username']); ?>
+                                </div>
+                            </td>
+                            <td class="center"><?php echo $total_days; ?></td>
+                            <td class="center"><span class="num-pill p"><?php echo $r['present']; ?></span></td>
+                            <td class="center"><span class="num-pill l"><?php echo $r['leave']; ?></span></td>
+                            <td class="center"><span class="num-pill a"><?php echo $r['absent']; ?></span></td>
+                            <td>
+                                <span class="pct-bar-wrap"><span class="pct-bar <?php echo $bar_class; ?>" style="width: <?php echo $pct; ?>%;"></span></span>
+                                <span class="pct-text"><?php echo $pct; ?>%</span>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <?php endif; ?>
+    </div>
 </body>
 </html>
-
-<?php
-$conn->close();
-?>
+<?php $conn->close(); ?>

@@ -1,72 +1,96 @@
 <?php
-require_once('security.php');
+/* ---------- Bootstrap: session + DB first, then security ---------- */
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+require_once 'conn_inc.php';
+require_once 'security.php';
 /* ==== AUTHORIZATION GATE ==== */
-require_once('permissions.php');
+require_once 'permissions.php';
 require_action($conn, __FILE__);
 $perms = current_user_perms($conn, __FILE__);
 /* ==== END AUTHORIZATION GATE ==== */
-require_once('conn_inc.php');
 
-// Language handling
-$_SESSION['lang'] = 'en';
-$lang = $_SESSION['lang'];
-
-// Translations
-$translations = [
-    'en' => [
-        'title' => 'Student Registration Form',
-        'print_btn' => 'Print Form',
-        'back_btn' => 'Back',
-        'basic_info' => 'Basic Information',
-        'address_info' => 'Address Information',
-        'guardian_info' => 'Guardian Information',
-        'academic_info' => 'Academic Information',
-        'transport_info' => 'Transport Information',
-        'other_info' => 'Other Information',
-        'branch' => 'Branch',
-        'village_council' => 'Village Council',
-        'session' => 'Session',
-        'class' => 'Class',
-        'name' => 'Student Name',
-        'father_name' => 'Father Name',
-        'mobile' => 'Mobile',
-        'cnic' => 'CNIC',
-        'current_address' => 'Current Address',
-        'permanent_address' => 'Permanent Address',
-        'guardian_name' => 'Guardian Name',
-        'guardian_mobile' => 'Guardian Mobile',
-        'guardian_address' => 'Guardian Address',
-        'guardian_cnic' => 'Guardian CNIC',
-        'previous_schools' => 'Previous Schools',
-        'other_details' => 'Other Details',
-        'student_image' => 'Student Image',
-        'transport_fee' => 'Transport Fee',
-        'using_transport' => 'Using Transport',
-        'registration_date' => 'Registration Date',
-        'yes' => 'Yes',
-        'no' => 'No',
-        'signature' => 'Signature',
-        'date' => 'Date',
-        'place' => 'Place',
-        'form_title' => 'STUDENT REGISTRATION FORM',
-        'school_name' => 'Your School Name',
-        'school_address' => '123 School Road, City, Country',
-        'office_use' => 'For Office Use Only',
-        'registration_no' => 'Registration No.',
-        'form_footer' => 'I hereby declare that the information provided is correct to the best of my knowledge.'
-    ]
+/* ---------- School settings ---------- */
+$school = [
+    'name'    => 'Your School Name',
+    'address' => '123 School Road, City, Country',
+    'logo'    => 'logo2.png',
+    'back'    => 'student_registration.php',
 ];
 
-// Get student data
-$student_data = [];
-if (isset($_GET['id'])) {
-    $id = intval($_GET['id']);
-    $result = $conn->query("
-        SELECT sr.*, 
-               vc.title AS village_title, 
-               b.title AS branch_title,
-               s.title AS session_title,
-               c.title AS class_title,
+/* ---------- Language (en / ur) ---------- */
+$lang = $_GET['lang'] ?? ($_SESSION['lang'] ?? 'en');
+$lang = in_array($lang, ['en', 'ur'], true) ? $lang : 'en';
+$_SESSION['lang'] = $lang;
+$dir = $lang === 'ur' ? 'rtl' : 'ltr';
+
+$T = [
+    'en' => [
+        'title' => 'Student Registration Form', 'form_title' => 'Student Registration Form',
+        'print_btn' => 'Print Form', 'back_btn' => 'Back',
+        'basic_info' => 'Basic Information', 'address_info' => 'Address Information',
+        'guardian_info' => 'Guardian Information', 'academic_info' => 'Academic Information',
+        'transport_info' => 'Transport Information', 'other_info' => 'Other Information',
+        'office_use' => 'For Office Use Only', 'registration_no' => 'Registration No.',
+        'registration_date' => 'Registration Date',
+        'branch' => 'Branch', 'village_council' => 'Village Council', 'session' => 'Session', 'class' => 'Class',
+        'name' => 'Student Name', 'father_name' => 'Father Name', 'mobile' => 'Mobile', 'cnic' => 'CNIC',
+        'current_address' => 'Current Address', 'permanent_address' => 'Permanent Address',
+        'guardian_name' => 'Guardian Name', 'guardian_mobile' => 'Guardian Mobile',
+        'guardian_cnic' => 'Guardian CNIC', 'guardian_address' => 'Guardian Address',
+        'previous_schools' => 'Previous Schools', 'other_details' => 'Other Details',
+        'student_image' => 'Photo', 'using_transport' => 'Using Transport', 'transport_fee' => 'Transport Fee',
+        'yes' => 'Yes', 'no' => 'No', 'signature' => 'Signature', 'date' => 'Date', 'place' => 'Place',
+        'footer' => 'I hereby declare that the information provided is correct to the best of my knowledge.',
+        'not_found' => 'Student not found.',
+    ],
+    'ur' => [
+        'title' => 'داخلہ فارم', 'form_title' => 'طالب علم داخلہ فارم',
+        'print_btn' => 'پرنٹ', 'back_btn' => 'واپس',
+        'basic_info' => 'بنیادی معلومات', 'address_info' => 'پتے کی معلومات',
+        'guardian_info' => 'سرپرست کی معلومات', 'academic_info' => 'تعلیمی معلومات',
+        'transport_info' => 'ٹرانسپورٹ', 'other_info' => 'دیگر معلومات',
+        'office_use' => 'صرف دفتری استعمال کے لیے', 'registration_no' => 'رجسٹریشن نمبر',
+        'registration_date' => 'تاریخ داخلہ',
+        'branch' => 'برانچ', 'village_council' => 'ویلج کونسل', 'session' => 'سیشن', 'class' => 'کلاس',
+        'name' => 'نام طالب علم', 'father_name' => 'والد کا نام', 'mobile' => 'موبائل', 'cnic' => 'شناختی کارڈ',
+        'current_address' => 'موجودہ پتہ', 'permanent_address' => 'مستقل پتہ',
+        'guardian_name' => 'سرپرست کا نام', 'guardian_mobile' => 'سرپرست کا موبائل',
+        'guardian_cnic' => 'سرپرست کا شناختی کارڈ', 'guardian_address' => 'سرپرست کا پتہ',
+        'previous_schools' => 'سابقہ اسکول', 'other_details' => 'دیگر تفصیلات',
+        'student_image' => 'تصویر', 'using_transport' => 'ٹرانسپورٹ استعمال', 'transport_fee' => 'ٹرانسپورٹ فیس',
+        'yes' => 'ہاں', 'no' => 'نہیں', 'signature' => 'دستخط', 'date' => 'تاریخ', 'place' => 'مقام',
+        'footer' => 'میں تصدیق کرتا ہوں کہ فراہم کردہ معلومات میرے علم کے مطابق درست ہیں۔',
+        'not_found' => 'طالب علم نہیں ملا۔',
+    ],
+][$lang];
+
+/* ---------- Helpers ---------- */
+function h($v): string { return htmlspecialchars((string)($v ?? ''), ENT_QUOTES, 'UTF-8'); }
+
+function field(string $label, $value, bool $multiline = false, bool $full = false): void {
+    $v = $multiline ? nl2br(h($value)) : h($value);
+    echo '<div class="field' . ($full ? ' full' : '') . '">'
+       . '<span class="label">' . h($label) . '</span>'
+       . '<span class="value">' . $v . '</span></div>';
+}
+
+function safe_image(?string $path): ?string {
+    if (!$path || preg_match('#(^[a-z]+:|\.\.|^/)#i', $path)) return null;
+    if (!preg_match('/\.(jpe?g|png|gif|webp)$/i', $path)) return null;
+    return is_file($path) ? $path : null;
+}
+
+/* ---------- Load student (prepared statement) ---------- */
+$s = null;
+$id = isset($_GET['id']) ? intval($_GET['id']) : 0;
+
+if ($id > 0) {
+    $sql = "
+        SELECT sr.*,
+               vc.title AS village_title, b.title AS branch_title,
+               s.title AS session_title,  c.title AS class_title,
                co.title AS course_title
         FROM student_registration sr
         LEFT JOIN village_councils vc ON sr.village_council_id = vc.id
@@ -76,405 +100,202 @@ if (isset($_GET['id'])) {
             FROM student_class sc1
             INNER JOIN (
                 SELECT student_registration_id, MAX(id) AS max_id
-                FROM student_class
-                GROUP BY student_registration_id
+                FROM student_class GROUP BY student_registration_id
             ) sc2 ON sc1.id = sc2.max_id
         ) sc ON sr.id = sc.student_registration_id
         LEFT JOIN sessions s ON sc.session_id = s.id
         LEFT JOIN classes c ON sc.class_id = c.id
         LEFT JOIN courses co ON c.course_id = co.id
-        WHERE sr.id = '$id'
-    ");
-    
-    if ($result->num_rows > 0) {
-        $student_data = $result->fetch_assoc();
+        WHERE sr.id = ?
+        LIMIT 1";
+
+    if ($stmt = $conn->prepare($sql)) {
+        $stmt->bind_param('i', $id);
+        $stmt->execute();
+        $res = $stmt->get_result();
+        $s = $res ? $res->fetch_assoc() : null;
+        $stmt->close();
+    } else {
+        error_log('student view query failed: ' . $conn->error);
     }
 }
+
+if ($s) {
+    $img = safe_image($s['image_path'] ?? null);
+    $classLabel = trim(implode(' - ', array_filter([$s['course_title'] ?? '', $s['class_title'] ?? ''])));
+    // NOTE: original treated is_transport == 0 as "Yes". Kept as-is; use === 1 if your schema is 1 = yes.
+    $usesTransport = isset($s['is_transport']) && (int)$s['is_transport'] === 0;
+}
 ?>
-
 <!DOCTYPE html>
-<html lang="en">
+<html lang="<?= h($lang) ?>" dir="<?= $dir ?>">
 <head>
-    <title><?php echo $translations[$lang]['title']; ?></title>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css">
-    <style>
-        body {
-            font-family: Helvetica, Arial, sans-serif;
-            color: #333;
-            line-height: 1.4;
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title><?= h($T['title']) ?></title>
+<style>
+    :root { --ink:#111; --line:#000; --muted:#555; --bg:#eef1f5; }
+    * { box-sizing: border-box; }
+    body {
+        margin: 0; padding: 12px; background: var(--bg); color: var(--ink);
+        font: 12px/1.4 Helvetica, Arial, "Noto Nastaliq Urdu", "Jameel Noori Nastaleeq", sans-serif;
+    }
+    .toolbar, .empty {
+        max-width: 800px; margin: 0 auto 12px; background: #fff; border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0,0,0,.08);
+    }
+    .toolbar { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 14px; }
+    .empty { max-width: 460px; margin-top: 60px; padding: 36px 28px; text-align: center; }
+    .btn { display: inline-block; padding: 6px 14px; border: 1px solid #bbb; border-radius: 4px;
+           background: #f7f7f7; color: #222; font-size: 13px; text-decoration: none; cursor: pointer; }
+    .btn.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
 
-        .print-container {
-            max-width: 850px;
-            margin: 10px auto;
-            padding: 15px;
-            border: 1px solid #2c3e50;
-            background: #fff;
-        }
+    .form-page { max-width: 800px; margin: 0 auto; padding: 16px 18px; background: #fff; border: 1px solid #999; }
+    .head { display: flex; align-items: center; gap: 12px; padding-bottom: 8px;
+            border-bottom: 2px solid var(--line); margin-bottom: 10px; }
+    .head .logo { width: 56px; height: 56px; object-fit: contain; }
+    .head .titles { flex: 1; text-align: center; }
+    .head h1 { margin: 0 0 2px; font-size: 18px; text-transform: uppercase; }
+    .head .sub { font-size: 11px; color: var(--muted); }
+    .photo { width: 80px; height: 100px; border: 1px solid var(--line); display: flex;
+             align-items: center; justify-content: center; font-size: 10px; color: var(--muted);
+             overflow: hidden; flex-shrink: 0; }
+    .photo img { width: 100%; height: 100%; object-fit: cover; }
 
-        .print-header {
-            text-align: center;
-            margin-bottom: 15px;
-            padding-bottom: 10px;
-            border-bottom: 2px solid #2c3e50;
-        }
+    .office { border: 1.5px solid var(--line); border-radius: 2px; padding: 6px 10px; margin-bottom: 10px; }
+    section { margin-bottom: 10px; }
+    h2 { margin: 0 0 6px; padding-bottom: 2px; border-bottom: 1px solid var(--line);
+         font-size: 13px; text-transform: uppercase; }
+    .office h2 { border: 0; margin-bottom: 4px; }
 
-        .school-logo {
-            width: 60px;
-            height: 60px;
-            margin-bottom: 5px;
-        }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; }
+    .field.full { grid-column: 1 / -1; }
+    .label { display: block; font-size: 10.5px; font-weight: 700; text-transform: uppercase; }
+    .value { display: block; min-height: 17px; padding-bottom: 1px; font-size: 12.5px;
+             border-bottom: 1px dotted #888; word-wrap: break-word; }
 
-        .print-title {
-            font-size: 20px;
-            font-weight: 700;
-            color: #2c3e50;
-            text-transform: uppercase;
-            margin: 5px 0;
-        }
+    table.info { width: 100%; border-collapse: collapse; }
+    table.info th, table.info td { border: 1px solid var(--line); padding: 4px 8px; text-align: start; }
+    table.info th { width: 32%; background: #f0f0f0; }
 
-        .school-info {
-            font-size: 11px;
-            color: #555;
-        }
+    .sign { display: flex; gap: 20px; margin-top: 26px; }
+    .sign div { flex: 1; text-align: center; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+    .sign i { display: block; border-top: 1px solid var(--line); margin-bottom: 4px; }
+    .foot { margin-top: 12px; text-align: center; font-size: 10.5px; font-style: italic; color: #333; }
 
-        .form-section {
-            margin-bottom: 10px;
-            padding: 8px;
-            background: #fafafa;
-            border-radius: 3px;
-            page-break-inside: avoid;
-        }
-
-        .section-title {
-            font-size: 15px;
-            font-weight: 600;
-            color: #fff;
-            background: #2c3e50;
-            padding: 5px 10px;
-            margin-bottom: 8px;
-            border-radius: 3px;
-        }
-
-        .form-row {
-            display: flex;
-            flex-wrap: wrap;
-            margin-bottom: 6px;
-        }
-
-        .form-field {
-            flex: 1;
-            min-width: 180px;
-            padding: 0 5px;
-        }
-
-        .label {
-            font-weight: 600;
-            font-size: 13px;
-            color: #2c3e50;
-        }
-
-        .value {
-            font-size: 13px;
-            padding: 3px 0;
-            border-bottom: 1px solid #ccc;
-        }
-
-        .photo-container {
-            width: 100px;
-            height: 120px;
-            border: 1px solid #ccc;
-            margin: 0 8px 5px 0;
-            float: right;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: #fff;
-        }
-
-        .student-photo {
-            max-width: 90px;
-            max-height: 110px;
-        }
-
-        .table-info {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 5px;
-        }
-
-        .table-info th, .table-info td {
-            border: 1px solid #ccc;
-            padding: 4px 6px;
-            font-size: 13px;
-        }
-
-        .table-info th {
-            background: #e7f1fa;
-            font-weight: 600;
-            color: #2c3e50;
-        }
-
-        .signature-area {
-            margin-top: 15px;
-            display: flex;
-            justify-content: space-between;
-            flex-wrap: wrap;
-        }
-
-        .signature-box {
-            width: 180px;
-            text-align: center;
-            padding-top: 3px;
-        }
-
-        .signature-line {
-            border-top: 1px solid #2c3e50;
-            margin-top: 20px;
-        }
-
-        .footer-note {
-            margin: 15px 0 5px;
-            font-size: 10px;
-            font-style: italic;
-            text-align: center;
-            color: #555;
-        }
-
-        .office-use {
-            border: 1px solid #2c3e50;
-            padding: 8px;
-            margin-bottom: 10px;
-            background: #fafafa;
-            border-radius: 3px;
-        }
-
-        @media print {
-            body {
-                margin: 0;
-                background: white;
-                font-size: 10pt;
-            }
-            .no-print {
-                display: none;
-            }
-            .print-container {
-                margin: 0;
-                border: none;
-                padding: 5px;
-            }
-            .form-section {
-                background: none;
-                padding: 5px;
-            }
-            .table-info th, .table-info td {
-                border: 1px solid #000;
-            }
-            .page-break {
-                page-break-after: always;
-            }
-        }
-    </style>
+    @media print {
+        @page { size: A4 portrait; margin: 10mm 12mm; }
+        html, body { background: #fff !important; padding: 0; margin: 0;
+                     -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .no-print { display: none !important; }
+        .form-page { max-width: none; margin: 0; padding: 0; border: 0; }
+        section, .office, .head, .sign, table.info tr { break-inside: avoid; page-break-inside: avoid; }
+    }
+</style>
 </head>
 <body>
-<div class="container no-print" style="margin: 10px 0;">
-    <div class="row">
-        <div class="col-md-12 text-right">
-            <button onclick="window.print();" class="btn btn-primary btn-sm">
-                <span class="glyphicon glyphicon-print"></span> 
-                <?php echo $translations[$lang]['print_btn']; ?>
-            </button>
-            <a href="student_registration.php" class="btn btn-default btn-sm">
-                <span class="glyphicon glyphicon-arrow-left"></span> 
-                <?php echo $translations[$lang]['back_btn']; ?>
-            </a>
-        </div>
-    </div>
-</div>
 
-<div class="print-container">
-    <!-- Header -->
-    <div class="print-header">
-        <img src="logo2.png" class="school-logo" alt="School Logo">
-        <div class="print-title"><?php echo $translations[$lang]['form_title']; ?></div>
-        <div class="school-info"><?php echo $translations[$lang]['school_name']; ?></div>
-        <div class="school-info"><?php echo $translations[$lang]['school_address']; ?></div>
+<?php if (!$s): ?>
+
+    <div class="empty no-print">
+        <h3><?= h($T['not_found']) ?></h3>
+        <a class="btn primary" href="<?= h($school['back']) ?>"><?= h($T['back_btn']) ?></a>
     </div>
 
-    <!-- Office Use Only -->
-    <div class="office-use">
-        <div class="section-title"><?php echo $translations[$lang]['office_use']; ?></div>
-        <div class="form-row">
-            <div class="form-field">
-                <div class="label"><?php echo $translations[$lang]['registration_no']; ?></div>
-                <div class="value"><?php echo isset($student_data['id']) ? htmlspecialchars($student_data['reg_no']) : ''; ?></div>
-            </div>
-            <div class="form-field">
-                <div class="label"><?php echo $translations[$lang]['registration_date']; ?></div>
-                <div class="value"><?php echo isset($student_data['registration_date']) ? htmlspecialchars($student_data['registration_date']) : ''; ?></div>
-            </div>
-        </div>
+<?php else: ?>
+
+    <div class="toolbar no-print">
+        <a class="btn" href="<?= h($school['back']) ?>"><?= h($T['back_btn']) ?></a>
+        <button class="btn primary" onclick="window.print()"><?= h($T['print_btn']) ?></button>
     </div>
 
-    <!-- Student Photo -->
-    <div class="photo-container">
-        <?php if (!empty($student_data['image_path'])): ?>
-            <img src="<?php echo htmlspecialchars($student_data['image_path']); ?>" class="student-photo" alt="Student Photo">
-        <?php else: ?>
-            <span><?php echo $translations[$lang]['student_image']; ?></span>
-        <?php endif; ?>
+    <div class="form-page">
+
+        <div class="head">
+            <img class="logo" src="<?= h($school['logo']) ?>" alt="" onerror="this.style.display='none'">
+            <div class="titles">
+                <h1><?= h($T['form_title']) ?></h1>
+                <div class="sub"><?= h($school['name']) ?></div>
+                <div class="sub"><?= h($school['address']) ?></div>
+            </div>
+            <div class="photo">
+                <?php if ($img): ?><img src="<?= h($img) ?>" alt=""><?php else: ?><?= h($T['student_image']) ?><?php endif; ?>
+            </div>
+        </div>
+
+        <div class="office">
+            <h2><?= h($T['office_use']) ?></h2>
+            <div class="grid">
+                <?php field($T['registration_no'], $s['reg_no'] ?? ''); ?>
+                <?php field($T['registration_date'], $s['registration_date'] ?? ''); ?>
+            </div>
+        </div>
+
+        <section>
+            <h2><?= h($T['basic_info']) ?></h2>
+            <div class="grid">
+                <?php field($T['name'], $s['name'] ?? ''); ?>
+                <?php field($T['father_name'], $s['father_name'] ?? ''); ?>
+                <?php field($T['mobile'], $s['mobile'] ?? ''); ?>
+                <?php field($T['cnic'], $s['cnic'] ?? ''); ?>
+            </div>
+        </section>
+
+        <section>
+            <h2><?= h($T['address_info']) ?></h2>
+            <div class="grid">
+                <?php field($T['current_address'], $s['current_address'] ?? '', true, true); ?>
+                <?php field($T['permanent_address'], $s['permanent_address'] ?? '', true, true); ?>
+            </div>
+        </section>
+
+        <section>
+            <h2><?= h($T['guardian_info']) ?></h2>
+            <div class="grid">
+                <?php field($T['guardian_name'], $s['guardian_name'] ?? ''); ?>
+                <?php field($T['guardian_mobile'], $s['guardian_mobile'] ?? ''); ?>
+                <?php field($T['guardian_cnic'], $s['guardian_cnic'] ?? ''); ?>
+                <?php field($T['guardian_address'], $s['guardian_address'] ?? '', true); ?>
+            </div>
+        </section>
+
+        <section>
+            <h2><?= h($T['academic_info']) ?></h2>
+            <table class="info">
+                <tr><th><?= h($T['branch']) ?></th><td><?= h($s['branch_title'] ?? '') ?></td></tr>
+                <tr><th><?= h($T['village_council']) ?></th><td><?= h($s['village_title'] ?? '') ?></td></tr>
+                <tr><th><?= h($T['session']) ?></th><td><?= h($s['session_title'] ?? '') ?></td></tr>
+                <tr><th><?= h($T['class']) ?></th><td><?= h($classLabel) ?></td></tr>
+            </table>
+        </section>
+
+        <section>
+            <h2><?= h($T['transport_info']) ?></h2>
+            <table class="info">
+                <tr><th><?= h($T['using_transport']) ?></th><td><?= h($usesTransport ? $T['yes'] : $T['no']) ?></td></tr>
+                <tr><th><?= h($T['transport_fee']) ?></th><td><?= h($s['transport_fee'] ?? '') ?></td></tr>
+            </table>
+        </section>
+
+        <section>
+            <h2><?= h($T['other_info']) ?></h2>
+            <div class="grid">
+                <?php field($T['previous_schools'], $s['previous_schools_description'] ?? '', true, true); ?>
+                <?php field($T['other_details'], $s['student_other_description'] ?? '', true, true); ?>
+            </div>
+        </section>
+
+        <div class="sign">
+            <div><i></i><?= h($T['signature']) ?></div>
+            <div><i></i><?= h($T['date']) ?></div>
+            <div><i></i><?= h($T['place']) ?></div>
+        </div>
+
+        <div class="foot"><?= h($T['footer']) ?></div>
     </div>
 
-    <!-- Basic Information -->
-    <div class="form-section">
-        <div class="section-title"><?php echo $translations[$lang]['basic_info']; ?></div>
-        <div class="form-row">
-            <div class="form-field">
-                <div class="label"><?php echo $translations[$lang]['name']; ?></div>
-                <div class="value"><?php echo isset($student_data['name']) ? htmlspecialchars($student_data['name']) : ''; ?></div>
-            </div>
-            <div class="form-field">
-                <div class="label"><?php echo $translations[$lang]['father_name']; ?></div>
-                <div class="value"><?php echo isset($student_data['father_name']) ? htmlspecialchars($student_data['father_name']) : ''; ?></div>
-            </div>
-        </div>
-        <div class="form-row">
-            <div class="form-field">
-                <div class="label"><?php echo $translations[$lang]['mobile']; ?></div>
-                <div class="value"><?php echo isset($student_data['mobile']) ? htmlspecialchars($student_data['mobile']) : ''; ?></div>
-            </div>
-            <div class="form-field">
-                <div class="label"><?php echo $translations[$lang]['cnic']; ?></div>
-                <div class="value"><?php echo isset($student_data['cnic']) ? htmlspecialchars($student_data['cnic']) : ''; ?></div>
-            </div>
-        </div>
-    </div>
+<?php endif; ?>
 
-    <!-- Address Information -->
-    <div class="form-section">
-        <div class="section-title"><?php echo $translations[$lang]['address_info']; ?></div>
-        <div class="form-row">
-            <div class="form-field">
-                <div class="label"><?php echo $translations[$lang]['current_address']; ?></div>
-                <div class="value" style="min-height: 30px;"><?php echo isset($student_data['current_address']) ? nl2br(htmlspecialchars($student_data['current_address'])) : ''; ?></div>
-            </div>
-        </div>
-        <div class="form-row">
-            <div class="form-field">
-                <div class="label"><?php echo $translations[$lang]['permanent_address']; ?></div>
-                <div class="value" style="min-height: 30px;"><?php echo isset($student_data['permanent_address']) ? nl2br(htmlspecialchars($student_data['permanent_address'])) : ''; ?></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Guardian Information -->
-    <div class="form-section">
-        <div class="section-title"><?php echo $translations[$lang]['guardian_info']; ?></div>
-        <div class="form-row">
-            <div class="form-field">
-                <div class="label"><?php echo $translations[$lang]['guardian_name']; ?></div>
-                <div class="value"><?php echo isset($student_data['guardian_name']) ? htmlspecialchars($student_data['guardian_name']) : ''; ?></div>
-            </div>
-            <div class="form-field">
-                <div class="label"><?php echo $translations[$lang]['guardian_mobile']; ?></div>
-                <div class="value"><?php echo isset($student_data['guardian_mobile']) ? htmlspecialchars($student_data['guardian_mobile']) : ''; ?></div>
-            </div>
-        </div>
-        <div class="form-row">
-            <div class="form-field">
-                <div class="label"><?php echo $translations[$lang]['guardian_cnic']; ?></div>
-                <div class="value"><?php echo isset($student_data['guardian_cnic']) ? htmlspecialchars($student_data['guardian_cnic']) : ''; ?></div>
-            </div>
-            <div class="form-field">
-                <div class="label"><?php echo $translations[$lang]['guardian_address']; ?></div>
-                <div class="value" style="min-height: 30px;"><?php echo isset($student_data['guardian_address']) ? nl2br(htmlspecialchars($student_data['guardian_address'])) : ''; ?></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Academic Information -->
-    <div class="form-section">
-        <div class="section-title"><?php echo $translations[$lang]['academic_info']; ?></div>
-        <table class="table-info">
-            <tr>
-                <th><?php echo $translations[$lang]['branch']; ?></th>
-                <td><?php echo isset($student_data['branch_title']) ? htmlspecialchars($student_data['branch_title']) : ''; ?></td>
-            </tr>
-            <tr>
-                <th><?php echo $translations[$lang]['village_council']; ?></th>
-                <td><?php echo isset($student_data['village_title']) ? htmlspecialchars($student_data['village_title']) : ''; ?></td>
-            </tr>
-            <tr>
-                <th><?php echo $translations[$lang]['session']; ?></th>
-                <td><?php echo isset($student_data['session_title']) ? htmlspecialchars($student_data['session_title']) : ''; ?></td>
-            </tr>
-            <tr>
-                <th><?php echo $translations[$lang]['class']; ?></th>
-                <td><?php echo isset($student_data['course_title']) && isset($student_data['class_title']) ? htmlspecialchars($student_data['course_title'] . ' - ' . $student_data['class_title']) : ''; ?></td>
-            </tr>
-        </table>
-    </div>
-
-    <!-- Transport Information -->
-    <div class="form-section">
-        <div class="section-title"><?php echo $translations[$lang]['transport_info']; ?></div>
-        <table class="table-info">
-            <tr>
-                <th><?php echo $translations[$lang]['using_transport']; ?></th>
-                <td><?php echo isset($student_data['is_transport']) ? ($student_data['is_transport'] == 0 ? $translations[$lang]['yes'] : $translations[$lang]['no']) : ''; ?></td>
-            </tr>
-            <tr>
-                <th><?php echo $translations[$lang]['transport_fee']; ?></th>
-                <td><?php echo isset($student_data['transport_fee']) ? htmlspecialchars($student_data['transport_fee']) : ''; ?></td>
-            </tr>
-        </table>
-    </div>
-
-    <!-- Other Information -->
-    <div class="form-section">
-        <div class="section-title"><?php echo $translations[$lang]['other_info']; ?></div>
-        <div class="form-row">
-            <div class="form-field">
-                <div class="label"><?php echo $translations[$lang]['previous_schools']; ?></div>
-                <div class="value" style="min-height: 40px;"><?php echo isset($student_data['previous_schools_description']) ? nl2br(htmlspecialchars($student_data['previous_schools_description'])) : ''; ?></div>
-            </div>
-        </div>
-        <div class="form-row">
-            <div class="form-field">
-                <div class="label"><?php echo $translations[$lang]['other_details']; ?></div>
-                <div class="value" style="min-height: 40px;"><?php echo isset($student_data['student_other_description']) ? nl2br(htmlspecialchars($student_data['student_other_description'])) : ''; ?></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Signature Area -->
-    <div class="signature-area">
-        <div class="signature-box">
-            <div class="signature-line"></div>
-            <div><?php echo $translations[$lang]['signature']; ?></div>
-        </div>
-        <div class="signature-box">
-            <div class="signature-line"></div>
-            <div><?php echo $translations[$lang]['date']; ?></div>
-        </div>
-        <div class="signature-box">
-            <div class="signature-line"></div>
-            <div><?php echo $translations[$lang]['place']; ?></div>
-        </div>
-    </div>
-
-    <!-- Footer Note -->
-    <div class="footer-note">
-        <?php echo $translations[$lang]['form_footer']; ?>
-    </div>
-</div>
-
-<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
-<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/js/bootstrap.min.js"></script>
 </body>
 </html>
-<?php
-$conn->close();
-?>
+<?php $conn->close(); ?>
