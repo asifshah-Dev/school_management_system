@@ -42,6 +42,8 @@ function csv_safe($v): string {
     return ($v !== '' && strpbrk($v[0], "=+-@\t\r") !== false) ? "'" . $v : $v;
 }
 
+/* No more truncation — we keep the full title. */
+
 /* ============================================================
    DAILY RANGE REPORT
    ============================================================ */
@@ -51,10 +53,9 @@ function build_daily_range(mysqli $conn, string $from, string $to, int $class_id
 
     if ($class_id <= 0 || !valid_date($from) || !valid_date($to) || $from > $to) return $empty;
 
-    /* ---------- students in class ---------- */
-    $sql = "SELECT sr.id AS student_id, sr.reg_no, sr.name, sr.father_name
+    $sql = "SELECT DISTINCT sr.id AS student_id, sr.reg_no, sr.name, sr.father_name
             FROM student_class sc JOIN student_registration sr ON sr.id = sc.student_registration_id
-            WHERE sc.class_id = ? AND sr.status = 0 ORDER BY sr.reg_no, sr.name";
+            WHERE sc.class_id = ? AND sr.status = 0 ORDER BY reg_no, name";
     $students = [];
     if ($st = $conn->prepare($sql)) {
         $st->bind_param("i", $class_id);
@@ -65,7 +66,6 @@ function build_daily_range(mysqli $conn, string $from, string $to, int $class_id
     }
     if (!$students) return $empty;
 
-    /* ---------- filter for lecture_attendance ---------- */
     $where = "la.attendance_date BETWEEN ? AND ? AND la.class_id = ?";
     $types = 'ssi';
     $params = [$from, $to, $class_id];
@@ -75,12 +75,11 @@ function build_daily_range(mysqli $conn, string $from, string $to, int $class_id
         $where .= " AND la.subject_id IN (" . implode(',', $clean_subs) . ")";
     }
 
-    /* ---------- lectures held — sorted date, then subject A-Z ---------- */
     $sql = "SELECT DISTINCT la.attendance_date, la.time_slot_id, la.subject_id, s.title AS subject_title
             FROM lecture_attendance la
             LEFT JOIN subjects s ON s.id = la.subject_id
             WHERE $where
-            ORDER BY la.attendance_date ASC, s.title ASC, la.time_slot_id ASC";
+            ORDER BY la.attendance_date ASC, la.time_slot_id ASC, s.title ASC";
     $lectures = [];
     if ($st = $conn->prepare($sql)) {
         $st->bind_param($types, ...$params);
@@ -99,11 +98,9 @@ function build_daily_range(mysqli $conn, string $from, string $to, int $class_id
     }
     if (!$lectures) return ['students' => $students, 'lectures' => [], 'marks' => [], 'date_groups' => []];
 
-    /* ---------- marks ---------- */
     $marks = [];
     $sql = "SELECT la.student_id, la.attendance_date, la.time_slot_id, la.subject_id, la.status, la.remarks
-            FROM lecture_attendance la
-            WHERE $where";
+            FROM lecture_attendance la WHERE $where";
     if ($st = $conn->prepare($sql)) {
         $st->bind_param($types, ...$params);
         $st->execute();
@@ -118,7 +115,6 @@ function build_daily_range(mysqli $conn, string $from, string $to, int $class_id
         $st->close();
     }
 
-    /* ---------- per-student totals ---------- */
     foreach ($students as &$s) {
         $sid = (int)$s['student_id'];
         $p = 0; $l = 0; $a = 0;
@@ -131,14 +127,13 @@ function build_daily_range(mysqli $conn, string $from, string $to, int $class_id
             }
         }
         $s['present'] = $p;
-        $s['leave'] = $l;
-        $s['absent'] = $a;
-        $s['total'] = count($lectures);
-        $s['pct'] = calc_pct($p + $l, count($lectures));
+        $s['leave']   = $l;
+        $s['absent']  = $a;
+        $s['total']   = count($lectures);
+        $s['pct']     = calc_pct($p + $l, count($lectures));
     }
     unset($s);
 
-    /* ---------- group lectures by date for the header ---------- */
     $date_groups = [];
     foreach ($lectures as $idx => $lec) {
         if (!isset($date_groups[$lec['date']])) {
@@ -199,16 +194,18 @@ if ($r = $conn->query("SELECT id, title FROM subjects")) {
     while ($row = $r->fetch_assoc()) $subject_titles[(int)$row['id']] = $row['title'];
 }
 
+$subjects_sql = "SELECT s.id, s.title FROM subjects s
+                 INNER JOIN subject_class sc ON sc.subject_id = s.id
+                 WHERE sc.class_id = ? AND (sc.status = 0 OR sc.status IS NULL) AND (s.status = 0 OR s.status IS NULL)
+                 GROUP BY s.id, s.title ORDER BY s.title";
+
 $subjects = [];
-if ($selected_class_id > 0) {
-    $sql = "SELECT s.id, s.title FROM subjects s INNER JOIN subject_class sc ON sc.subject_id = s.id WHERE sc.class_id = ? AND (sc.status = 0 OR sc.status IS NULL) AND (s.status = 0 OR s.status IS NULL) GROUP BY s.id, s.title ORDER BY s.title";
-    if ($st = $conn->prepare($sql)) {
-        $st->bind_param("i", $selected_class_id);
-        $st->execute();
-        $res = $st->get_result();
-        while ($row = $res->fetch_assoc()) $subjects[(int)$row['id']] = $row['title'];
-        $st->close();
-    }
+if ($selected_class_id > 0 && ($st = $conn->prepare($subjects_sql))) {
+    $st->bind_param("i", $selected_class_id);
+    $st->execute();
+    $res = $st->get_result();
+    while ($row = $res->fetch_assoc()) $subjects[(int)$row['id']] = $row['title'];
+    $st->close();
 }
 
 /* ============================================================
@@ -217,15 +214,12 @@ if ($selected_class_id > 0) {
 if (($_GET['ajax'] ?? '') === 'subjects') {
     $cid = intval($_GET['class_id'] ?? 0);
     $list = [];
-    if ($cid > 0) {
-        $sql = "SELECT s.id, s.title FROM subjects s INNER JOIN subject_class sc ON sc.subject_id = s.id WHERE sc.class_id = ? AND (sc.status = 0 OR sc.status IS NULL) AND (s.status = 0 OR s.status IS NULL) GROUP BY s.id, s.title ORDER BY s.title";
-        if ($st = $conn->prepare($sql)) {
-            $st->bind_param("i", $cid);
-            $st->execute();
-            $res = $st->get_result();
-            while ($row = $res->fetch_assoc()) $list[] = ['id' => (int)$row['id'], 'title' => $row['title']];
-            $st->close();
-        }
+    if ($cid > 0 && ($st = $conn->prepare($subjects_sql))) {
+        $st->bind_param("i", $cid);
+        $st->execute();
+        $res = $st->get_result();
+        while ($row = $res->fetch_assoc()) $list[] = ['id' => (int)$row['id'], 'title' => $row['title']];
+        $st->close();
     }
     while (ob_get_level() > 0) { ob_end_clean(); }
     header('Content-Type: application/json; charset=utf-8');
@@ -234,7 +228,7 @@ if (($_GET['ajax'] ?? '') === 'subjects') {
 }
 
 /* ============================================================
-   EXPORTS — with title header like the print layout
+   EXPORTS
    ============================================================ */
 $export = $_GET['export'] ?? '';
 if ($submitted && $date_ok && in_array($export, ['csv', 'excel'], true)) {
@@ -247,7 +241,7 @@ if ($submitted && $date_ok && in_array($export, ['csv', 'excel'], true)) {
         : 'All subjects';
     $effective_to_exp = ($to > date('Y-m-d')) ? date('Y-m-d') : $to;
 
-    $title_line = 'Daily Attendance Report';
+    $title_line = 'Lecture Attendance Report';
     $meta_line1 = 'From ' . date('d M Y', strtotime($from)) . ' to ' . date('d M Y', strtotime($effective_to_exp))
                 . ' | Class: ' . $class_label_exp
                 . ' | Subjects: ' . $subject_label_exp;
@@ -261,122 +255,95 @@ if ($submitted && $date_ok && in_array($export, ['csv', 'excel'], true)) {
         $out = fopen('php://output', 'w');
         fwrite($out, "\xEF\xBB\xBF");
 
-        /* Title block */
-        fputcsv($out, [$title_line]);
-        fputcsv($out, [$meta_line1]);
-        fputcsv($out, [$meta_line2]);
-        fputcsv($out, []);  // blank spacer
+        $total_cols = 3 + count($data['lectures']) + 4;
+        $mid = (int)floor($total_cols / 2);
 
-        /* Date header row: date name in first column of each date group */
-        $row1 = ['', '', ''];
-        foreach ($data['date_groups'] as $date => $grp) {
-            $row1[] = date('d M Y', strtotime($date));
-            for ($i = 1; $i < $grp['count']; $i++) $row1[] = '';
+        foreach ([$title_line, $meta_line1, $meta_line2] as $txt) {
+            $row = array_fill(0, $total_cols, '');
+            $row[$mid] = $txt;
+            fputcsv($out, $row);
         }
-        $row1[] = 'Totals'; $row1[] = ''; $row1[] = ''; $row1[] = '';
-        fputcsv($out, $row1);
+        fputcsv($out, array_fill(0, $total_cols, ''));
 
-        /* Subject header row */
-        $row2 = ['Reg No', 'Student', 'Father'];
+        $head1 = ['', '', 'Date:'];
         foreach ($data['lectures'] as $lec) {
-            $row2[] = $lec['subject_title'];
+            $head1[] = date('D d M Y', strtotime($lec['date']));
         }
-        $row2[] = 'Present'; $row2[] = 'Leave'; $row2[] = 'Absent'; $row2[] = 'Attendance %';
-        fputcsv($out, $row2);
+        array_push($head1, '', '', '', '');
+        fputcsv($out, $head1);
 
-        /* Data rows */
+        $head2 = ['Reg No', 'Student', 'Father'];
+        foreach ($data['lectures'] as $lec) {
+            $head2[] = $lec['subject_title'];
+        }
+        array_push($head2, 'Attendance %', 'Present', 'Leave', 'Absent');
+        fputcsv($out, $head2);
+
         foreach ($data['students'] as $s) {
             $line = [csv_safe($s['reg_no']), csv_safe($s['name']), csv_safe($s['father_name'])];
             foreach ($data['lectures'] as $lec) {
                 $m = $data['marks'][(int)$s['student_id']][$lec['key']] ?? null;
                 $line[] = $m ? $m['status'] : '';
             }
-            $line[] = $s['present'];
-            $line[] = $s['leave'];
-            $line[] = $s['absent'];
-            $line[] = $s['pct'] === null ? '' : $s['pct'] . '%';
+            array_push($line, $s['pct'] === null ? '' : $s['pct'] . '%', $s['present'], $s['leave'], $s['absent']);
             fputcsv($out, $line);
         }
         fclose($out);
         exit;
     }
 
-    /* ---------- Excel (HTML table with merged date row) ---------- */
+    /* ---------- Excel ---------- */
     header('Content-Type: application/vnd.ms-excel; charset=utf-8');
     header('Content-Disposition: attachment; filename="' . $base . '.xls"');
     echo "\xEF\xBB\xBF";
-    echo '<html><head><meta charset="utf-8">';
-    echo '<style>';
+    echo '<html><head><meta charset="utf-8"><style>';
     echo 'table { border-collapse:collapse; font-family:Arial,sans-serif; font-size:10pt; }';
     echo 'td, th { border:1px solid #333; padding:3px 6px; }';
     echo 'th { background:#f1f5f9; text-align:center; font-weight:bold; }';
     echo 'th.date-hdr { background:#dbeafe; color:#1e40af; }';
+    echo 'th.subj-hdr { background:#e2e8f0; color:#334155; font-size:9pt; }';
     echo 'th.total-hdr { background:#f8fafc; }';
     echo 'td.mark-P { background:#d1fae5; color:#065f46; text-align:center; font-weight:bold; }';
     echo 'td.mark-L { background:#fef3c7; color:#92400e; text-align:center; font-weight:bold; }';
     echo 'td.mark-A { background:#fee2e2; color:#991b1b; text-align:center; font-weight:bold; }';
     echo 'td.mark-empty { background:#f1f5f9; color:#cbd5e1; text-align:center; }';
     echo 'td.center { text-align:center; }';
-    echo '.title { font-family:Arial,sans-serif; font-size:16pt; font-weight:bold; text-align:center; padding:6px 0; }';
-    echo '.meta { font-family:Arial,sans-serif; font-size:9pt; color:#333; text-align:center; }';
-    echo '</style>';
-    echo '</head><body>';
+    echo '.title { font-size:16pt; font-weight:bold; text-align:center; padding:6px 0; }';
+    echo '.meta { font-size:9pt; color:#333; text-align:center; }';
+    echo '</style></head><body>';
 
-    /* Title block */
-    echo '<table style="border:none;border-collapse:collapse;width:100%;margin-bottom:8px;">';
+    echo '<table style="border:none;width:100%;margin-bottom:8px;">';
     echo '<tr><td class="title" style="border:none;">' . h($title_line) . '</td></tr>';
     echo '<tr><td class="meta" style="border:none;">' . h($meta_line1) . '</td></tr>';
     echo '<tr><td class="meta" style="border:none;">' . h($meta_line2) . '</td></tr>';
     echo '</table>';
 
-    /* Main data table */
-    echo '<table>';
-
-    /* Row 1: date header (merged across each date group) */
-    echo '<tr>';
-    echo '<th rowspan="2">Reg No</th>';
-    echo '<th rowspan="2">Student</th>';
-    echo '<th rowspan="2">Father</th>';
+    echo '<table><tr>';
+    echo '<th class="date-hdr" rowspan="2">Reg No</th><th class="date-hdr" rowspan="2">Student</th><th class="date-hdr" rowspan="2">Father</th>';
     foreach ($data['date_groups'] as $date => $grp) {
-        echo '<th class="date-hdr" colspan="' . (int)$grp['count'] . '">' . h(date('d M Y', strtotime($date))) . '</th>';
+        echo '<th class="date-hdr" colspan="' . (int)$grp['count'] . '">' . h(date('D d M Y', strtotime($date))) . '</th>';
     }
-    echo '<th class="total-hdr" colspan="4">Totals</th>';
-    echo '</tr>';
-
-    /* Row 2: subject names */
-    echo '<tr>';
+    echo '<th class="total-hdr" rowspan="2">%</th><th class="total-hdr" rowspan="2">Present</th><th class="total-hdr" rowspan="2">Leave</th><th class="total-hdr" rowspan="2">Absent</th>';
+    echo '</tr><tr>';
     foreach ($data['lectures'] as $lec) {
-        echo '<th class="date-hdr">' . h($lec['subject_title']) . '</th>';
+        echo '<th class="subj-hdr">' . h($lec['subject_title']) . '</th>';
     }
-    echo '<th class="total-hdr">Present</th>';
-    echo '<th class="total-hdr">Leave</th>';
-    echo '<th class="total-hdr">Absent</th>';
-    echo '<th class="total-hdr">Attendance %</th>';
     echo '</tr>';
 
-    /* Student rows */
     foreach ($data['students'] as $s) {
-        echo '<tr>';
-        echo '<td>' . h($s['reg_no']) . '</td>';
-        echo '<td>' . h($s['name']) . '</td>';
-        echo '<td>' . h($s['father_name']) . '</td>';
+        echo '<tr><td>' . h($s['reg_no']) . '</td><td>' . h($s['name']) . '</td><td>' . h($s['father_name']) . '</td>';
         foreach ($data['lectures'] as $lec) {
             $m = $data['marks'][(int)$s['student_id']][$lec['key']] ?? null;
-            $st = $m ? $m['status'] : '';
-            if ($st === 'P')      echo '<td class="mark-P">P</td>';
-            elseif ($st === 'L')  echo '<td class="mark-L">L</td>';
-            elseif ($st === 'A')  echo '<td class="mark-A">A</td>';
+            $mk = $m ? $m['status'] : '';
+            if ($mk === 'P')      echo '<td class="mark-P">P</td>';
+            elseif ($mk === 'L')  echo '<td class="mark-L">L</td>';
+            elseif ($mk === 'A')  echo '<td class="mark-A">A</td>';
             else                  echo '<td class="mark-empty">&middot;</td>';
         }
-        echo '<td class="center">' . $s['present'] . '</td>';
-        echo '<td class="center">' . $s['leave'] . '</td>';
-        echo '<td class="center">' . $s['absent'] . '</td>';
-        echo '<td class="center">' . h(fmt_pct($s['pct'])) . '</td>';
-        echo '</tr>';
+        echo '<td class="center">' . h(fmt_pct($s['pct'])) . '</td>'
+           . '<td class="center">' . $s['present'] . '</td><td class="center">' . $s['leave'] . '</td><td class="center">' . $s['absent'] . '</td></tr>';
     }
-
-    echo '</table>';
-    echo '</body></html>';
+    echo '</table></body></html>';
     exit;
 }
 
@@ -393,7 +360,6 @@ if ($submitted && $date_ok && $selected_class_id > 0) {
     $data = build_daily_range($conn, $from, $to, $selected_class_id, $selected_subject_ids, $subject_titles);
     if ($to > date('Y-m-d')) $effective_to = date('Y-m-d');
 
-    /* Lectures held = DISTINCT lectures (columns), not students × lectures */
     $sum['lec'] = count($data['lectures']);
 
     foreach ($data['students'] as $s) {
@@ -403,11 +369,8 @@ if ($submitted && $date_ok && $selected_class_id > 0) {
         if ($s['pct'] !== null && $s['pct'] < $threshold) $short_rows[] = $s;
     }
 
-    /* Overall % = all P+L marks ÷ (students × lectures) */
     $total_slots = count($data['students']) * count($data['lectures']);
     $overall_pct = calc_pct($sum['p'] + $sum['l'], $total_slots);
-
-    usort($short_rows, fn($a, $b) => $a['pct'] <=> $b['pct']);
 }
 
 $class_label = $selected_class_id > 0 ? ($classes[$selected_class_id] ?? '') : 'No class';
@@ -429,6 +392,74 @@ function pct_cell(?float $p, int $threshold): string {
     $w = $p === null ? 0 : min(100, max(0, $p));
     return '<div class="pbar"><span class="pfill ' . $cls . '" style="width:' . $w . '%"></span></div><span class="ptxt ' . $cls . '">' . h(fmt_pct($p)) . '</span>';
 }
+
+/* ============================================================
+   PRINT CHUNKING — auto-fit, never split a date group
+   ============================================================ */
+$PRINT_LEC_COL_MM   = 6.5;   // width of each lecture column
+$PRINT_PAGE_H_MM    = 287;   // A4 portrait printable height
+$PRINT_HEADER_MM    = 46;    // increased: taller subject header row
+$PRINT_FOOTER_MM    = 12;
+$PRINT_AVAIL_MM     = $PRINT_PAGE_H_MM - $PRINT_HEADER_MM - $PRINT_FOOTER_MM;
+$PRINT_MAX_COLS     = max(1, (int)floor($PRINT_AVAIL_MM / $PRINT_LEC_COL_MM));
+
+$print_pages = [];
+if (!empty($data['lectures'])) {
+    $cur_lectures = [];
+    $cur_dates    = [];
+    $cur_count    = 0;
+
+    foreach ($data['date_groups'] as $date => $grp) {
+        $grp_count = $grp['count'];
+        $grp_lects = [];
+        foreach ($grp['indices'] as $idx) $grp_lects[] = $data['lectures'][$idx];
+
+        if ($cur_count > 0 && ($cur_count + $grp_count) > $PRINT_MAX_COLS) {
+            $print_pages[] = [
+                'lectures'  => $cur_lectures,
+                'date_order'=> $cur_dates,
+                'date_spans'=> array_count_values(array_column($cur_lectures, 'date')),
+            ];
+            $cur_lectures = [];
+            $cur_dates    = [];
+            $cur_count    = 0;
+        }
+
+        if ($grp_count > $PRINT_MAX_COLS) {
+            foreach (array_chunk($grp_lects, $PRINT_MAX_COLS) as $chunk) {
+                if ($cur_count > 0) {
+                    $print_pages[] = [
+                        'lectures'  => $cur_lectures,
+                        'date_order'=> $cur_dates,
+                        'date_spans'=> array_count_values(array_column($cur_lectures, 'date')),
+                    ];
+                    $cur_lectures = [];
+                    $cur_dates    = [];
+                    $cur_count    = 0;
+                }
+                $print_pages[] = [
+                    'lectures'  => $chunk,
+                    'date_order'=> [$date],
+                    'date_spans'=> [$date => count($chunk)],
+                ];
+            }
+            continue;
+        }
+
+        foreach ($grp_lects as $lec) $cur_lectures[] = $lec;
+        $cur_dates[] = $date;
+        $cur_count += $grp_count;
+    }
+    if ($cur_lectures) {
+        $print_pages[] = [
+            'lectures'  => $cur_lectures,
+            'date_order'=> $cur_dates,
+            'date_spans'=> array_count_values(array_column($cur_lectures, 'date')),
+        ];
+    }
+}
+$total_parts = count($print_pages);
+$multi_year = substr($from, 0, 4) !== substr($effective_to, 0, 4);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -534,98 +565,145 @@ function pct_cell(?float $p, int $threshold): string {
     td.stu { position:sticky; left:0; background:#fff; z-index:1; min-width:200px; box-shadow:2px 0 6px rgba(0,0,0,.04); }
     th.stu { position:sticky; left:0; z-index:4; min-width:200px; box-shadow:2px 0 6px rgba(0,0,0,.04); background:#f8fafc; }
     tr:hover td.stu { background:#f8fafc; }
-
     .lec-head small { display:block; font-weight:700; color:#334155; text-transform:none; letter-spacing:0; font-size:11.5px; }
 
     .legend { padding:12px 18px; font-size:12px; color:var(--muted); display:flex; gap:16px; flex-wrap:wrap; align-items:center; border-top:1px solid var(--line); }
-    .legend i { display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:5px; }
     .empty { padding:56px 24px; text-align:center; }
     .empty .ic { width:76px; height:76px; border-radius:50%; background:#eff6ff; color:var(--brand); display:inline-flex; align-items:center; justify-content:center; font-size:32px; margin-bottom:14px; }
     .empty h4 { font-size:18px; font-weight:700; } .empty p { color:var(--muted); font-size:14px; margin:0; }
 
-    .print-head { display:none; }
+    /* Print pages hidden on screen */
+    .print-only { display:none; }
 
-    @page { size: A4 landscape; margin: 6mm; }
+    /* ======================================================================
+       PRINT — A4 PORTRAIT, ROTATED -90°, ONE PHYSICAL PAGE PER SHEET
+       FULL subject names shown vertically (no truncation).
+       ============================================================ */
+    @page { size: A4 portrait; margin: 5mm; }
+
     @media print {
         html, body {
+            background:#fff !important; margin:0 !important; padding:0 !important;
+            font-family:Arial, Helvetica, sans-serif; color:#000;
+            -webkit-print-color-adjust:exact; print-color-adjust:exact;
+        }
+        .no-print, .hero, .filters, .stats, .toolbar, .legend, .screen-only,
+        .navbar, nav, header, footer, #navbar, #header, .navbar-fixed-top, .navbar-default { display:none !important; }
+        .wrap { max-width:none; padding:0; margin:0; }
+        .card-x { box-shadow:none; border-radius:0; background:#fff; }
+        .results { overflow:visible; }
+
+        .print-only { display:block !important; }
+
+        .print-sheet {
+            position: relative;
+            width: 200mm;
+            height: 287mm;
+            overflow: hidden;
+            page-break-after: always;
+            break-after: page;
+            page-break-inside: avoid;
+            break-inside: avoid;
+        }
+        .print-sheet:last-child { page-break-after: auto; break-after: auto; }
+
+        .print-rot {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 287mm;
+            height: 200mm;
+            transform-origin: top left;
+            transform: rotate(-90deg) translate(-287mm, 12mm);
+            padding-top: 4mm;
+            padding-left: 4mm;
+            padding-right: 4mm;
+            box-sizing: border-box;
+        }
+
+        .ph { text-align:center; margin:0 0 3mm; }
+        .ph h2 { font-size:15px; font-weight:700; margin:0 0 2px; }
+        .ph .meta { font-size:10px; color:#222; line-height:1.35; }
+
+        table.ptable {
             width: 100%;
-            background: #fff !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            font-family: Arial, Helvetica, sans-serif;
-            color: #000;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
+            margin: 0 auto;
+            border-collapse: collapse;
+            table-layout: fixed;
         }
-        .no-print, .hero, .filters, .stats, .toolbar, .legend,
-        .navbar, nav, header, footer, #navbar, #header, .navbar-fixed-top, .navbar-default { display: none !important; }
-        .wrap { max-width: none; padding: 0; margin: 0; }
-        .card-x { box-shadow: none; border-radius: 0; }
-        .print-head { display: block; text-align: center; margin-bottom: 6px; }
-        .print-head h2 { font-size: 14px; margin: 0 0 2px; }
-        .print-head .meta { font-size: 9.5px; color: #333; line-height: 1.35; }
+        table.ptable th, table.ptable td {
+            border: 1px solid #333;
+            padding: 3px 4px;
+            font-size: 11px;
+            line-height: 1.25;
+            text-align: center;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        table.ptable thead { display: table-header-group; }
+        table.ptable tr { break-inside: avoid; page-break-inside: avoid; }
+        table.ptable thead th { background: #e9edf3 !important; font-weight: 700; font-size: 11px; }
+        table.ptable thead th.pdate { background: #d6e2f7 !important; font-size: 11px; padding: 3px 0; font-weight: 700; }
+        table.ptable thead th.pdate.alt { background: #c2d3f0 !important; }
 
-        .scroll-x { overflow: visible !important; max-height: none !important; width: 100% !important; }
-        table.rep {
-            width: 100% !important;
-            font-size: 9px;
-            table-layout: auto;
+        /* ---- Subject header cell: FULL NAME, vertical reading ---- */
+        table.ptable thead th.subj {
+            background: #e2e8f0 !important;
+            font-size: 9.5px;
+            font-weight: 600;
+            padding: 2px 1px;
+            /* Tall header cell so long subject names fit vertically */
+            height: 26mm;
+            vertical-align: bottom;
+            overflow: visible;
+            white-space: normal;
+            line-height: 1.05;
         }
-        table.rep thead th {
-            position: static !important;
-            background: #eee !important;
-            color: #000 !important;
-            border: 1px solid #333 !important;
-            padding: 2px 4px !important;
-            font-size: 9px !important;
-            white-space: normal !important;
+        table.ptable thead th.subj span {
+            display: inline-block;
+            writing-mode: vertical-rl;
+            -webkit-writing-mode: vertical-rl;
+            transform: rotate(180deg);
+            white-space: nowrap;
+            max-height: 24mm;      /* clip extremely long names beyond this */
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
-        table.rep thead tr.date-row th {
-            background: #e0e7ff !important;
-            color: #000 !important;
-            font-weight: 700;
-            font-size: 9px !important;
-        }
-        table.rep thead tr.date-row th.date-alt { background: #d0d9f0 !important; }
 
-        table.rep tbody td {
-            border: 1px solid #333 !important;
-            padding: 1px 3px !important;
-            font-size: 9px !important;
-            background: #fff !important;
+        table.ptable td.preg { font-weight: 700; font-size: 11px; }
+        table.ptable td.pname {
+            text-align: left;
+            padding-left: 4px;
+            font-weight: 600;
+            font-size: 11px;
         }
-        table.rep tbody td.date-alt { background: #f5f5f5 !important; }
-        table.rep tr { break-inside: avoid; page-break-inside: avoid; }
-        thead { display: table-header-group; }
+        table.ptable td.pname .pf { font-weight: 400; color: #555; font-size: 9px; }
+        table.ptable tbody tr { height: 7mm; }
+        table.ptable tbody tr:nth-child(even) td { background: #f6f7f9; }
+        table.ptable td.pm { font-weight: 700; font-size: 13px; }
+        table.ptable td.pm.L { background: #fde9b8 !important; }
+        table.ptable td.pm.A { background: #f4b9b9 !important; }
+        table.ptable td.pm.e { color: #aaa; font-weight: 400; }
+        table.ptable td.pt { font-weight: 700; font-size: 11px; }
+        table.ptable td.ppct { font-weight: 700; font-size: 11px; }
+        table.ptable td.ppct.bad { background: #f4b9b9 !important; }
+        table.ptable td.ppct.warn { background: #fde9b8 !important; }
+        table.ptable td.pn { font-size: 10px; color:#444; font-weight:600; }
 
-        td.stu, th.stu { position: static !important; min-width: 0 !important; box-shadow: none !important; }
-        .stu-name { font-size: 9px !important; }
-
-        .mark {
-            border: none;
-            color: #000 !important;
-            background: transparent !important;
-            font-size: 10px !important;
-            width: auto !important; height: auto !important;
-            padding: 0 !important;
-            font-weight: 700;
+        .plegend {
+            margin-top: 4mm;
+            font-size: 10px;
+            color: #333;
+            text-align: center;
         }
-        .mark.P { color: #000 !important; }
-        .mark.L { color: #000 !important; }
-        .mark.A { color: #000 !important; }
-        .mark.empty { color: #999 !important; }
-
-        .num {
-            background: transparent !important;
-            color: #000 !important;
-            padding: 0 !important;
-            min-width: 0 !important;
-            font-weight: 700;
-            font-size: 10px !important;
+        .ppart {
+            text-align: center;
+            font-size: 10px;
+            color: #444;
+            margin-top: 1.5mm;
+            font-style: italic;
         }
-        .reg { background: transparent !important; color: #000 !important; padding: 0 !important; font-size: 9px !important; font-family: inherit !important; }
-        .pbar { display: none !important; }
-        .ptxt { color: #000 !important; font-weight: 700; font-size: 9.5px !important; margin: 0 !important; }
     }
 </style>
 </head>
@@ -748,7 +826,7 @@ function pct_cell(?float $p, int $threshold): string {
 
 <?php else: ?>
 
-    <div class="stats">
+    <div class="stats no-print">
         <div class="stat"><div class="n"><?= (int)$sum['lec'] ?></div><div class="t">Lectures held</div></div>
         <div class="stat s-s"><div class="n"><?= count($data['students']) ?></div><div class="t">Students</div></div>
         <div class="stat s-p"><div class="n"><?= (int)$sum['p'] ?></div><div class="t">Present</div></div>
@@ -760,23 +838,14 @@ function pct_cell(?float $p, int $threshold): string {
 
     <div class="card-x results">
 
-        <div class="print-head">
-            <h2>Lecture Attendance Report</h2>
-            <div class="meta">
-                <?= h(date('d M Y', strtotime($from))) ?> to <?= h(date('d M Y', strtotime($effective_to))) ?> &middot;
-                Class: <?= h($class_label) ?> &middot; Subjects: <?= h($subject_label) ?><br>
-                <?= (int)$sum['lec'] ?> lecture(s) held &middot; <?= count($data['students']) ?> student(s) &middot; Required: <?= (int)$threshold ?>%<br>
-                Printed on <?= h(date('d M Y, h:i A')) ?>
-            </div>
-        </div>
-
-        <div class="toolbar">
+        <div class="toolbar no-print">
             <div class="search" style="flex:0 0 auto;"><i class="fas fa-search"></i><input type="text" id="search" placeholder="Search student…"></div>
             <label class="chk"><input type="checkbox" id="shortOnly"> Only below <?= (int)$threshold ?>%</label>
             <span class="vis-count" id="visCount"></span>
         </div>
 
-        <div class="scroll-x">
+        <!-- ================= SCREEN TABLE ================= -->
+        <div class="scroll-x screen-only">
         <?php
         $date_alternate = [];
         $group_num = 0;
@@ -798,8 +867,8 @@ function pct_cell(?float $p, int $threshold): string {
                     foreach ($data['date_groups'] as $date => $grp):
                         $is_alt = ($group_num % 2 === 1);
                     ?>
-                        <th class="c <?php echo $is_alt ? 'date-alt' : ''; ?>" colspan="<?= (int)$grp['count'] ?>" style="color:#1e40af; font-weight:800; font-size:12px; letter-spacing:.5px;">
-                            <i class="far fa-calendar-alt"></i> <?= h(date('d M Y', strtotime($date))) ?>
+                        <th class="c <?= $is_alt ? 'date-alt' : '' ?>" colspan="<?= (int)$grp['count'] ?>" style="color:#1e40af; font-weight:800; font-size:12px; letter-spacing:.5px;">
+                            <i class="far fa-calendar-alt"></i> <?= h(date('D d M Y', strtotime($date))) ?>
                         </th>
                     <?php $group_num++; endforeach; ?>
                     <th class="c" colspan="4" style="background:#fff;"></th>
@@ -809,14 +878,14 @@ function pct_cell(?float $p, int $threshold): string {
                     <th style="width:44px">#</th>
                     <th class="stu sortable">Student</th>
                     <?php foreach ($data['lectures'] as $i => $lec): ?>
-                        <th class="c lec-head <?php echo isset($date_alternate[$i]) ? 'date-alt' : ''; ?>" title="<?= h(date('d M Y', strtotime($lec['date'])) . ' · ' . $lec['subject_title']) ?>">
+                        <th class="c lec-head <?= isset($date_alternate[$i]) ? 'date-alt' : '' ?>" title="<?= h(date('d M Y', strtotime($lec['date'])) . ' · ' . $lec['subject_title']) ?>">
                             <small><?= h($lec['subject_title']) ?></small>
                         </th>
                     <?php endforeach; ?>
+                    <th class="c sortable" style="min-width:150px">Attendance</th>
                     <th class="c sortable">P</th>
                     <th class="c sortable">L</th>
                     <th class="c sortable">A</th>
-                    <th class="c sortable" style="min-width:150px">Attendance</th>
                 </tr>
             </thead>
             <tbody>
@@ -826,41 +895,126 @@ function pct_cell(?float $p, int $threshold): string {
             ?>
                 <tr data-search="<?= h(mb_strtolower($s['name'] . ' ' . $s['reg_no'] . ' ' . $s['father_name'])) ?>" data-short="<?= $short ? 1 : 0 ?>">
                     <td class="rn" style="color:#94a3b8; font-weight:600;"></td>
-                    <td class="stu">
+                    <td class="stu" data-sort="<?= h(mb_strtolower($s['name'])) ?>">
                         <?= student_cell($s) ?>
                         <span class="reg" style="margin-top:3px;"><?= h($s['reg_no']) ?></span>
                     </td>
                     <?php foreach ($data['lectures'] as $i => $lec):
                         $m = $data['marks'][$sid][$lec['key']] ?? null;
-                        $st = $m ? $m['status'] : '';
+                        $stt = $m ? $m['status'] : '';
                         $rem = $m ? ($m['remarks'] ?? '') : '';
                     ?>
-                        <td class="c <?php echo isset($date_alternate[$i]) ? 'date-alt' : ''; ?>">
-                            <?php if ($st): ?>
-                                <span class="mark <?= h($st) ?>" title="<?= h(date('d M Y', strtotime($lec['date'])) . ' · ' . $lec['subject_title'] . ': ' . ($st === 'P' ? 'Present' : ($st === 'L' ? 'Leave' : 'Absent')) . ($rem ? ' — ' . $rem : '')) ?>">
-                                    <?= h($st) ?>
-                                </span>
+                        <td class="c <?= isset($date_alternate[$i]) ? 'date-alt' : '' ?>">
+                            <?php if ($stt): ?>
+                                <span class="mark <?= h($stt) ?>" title="<?= h(date('d M Y', strtotime($lec['date'])) . ' · ' . $lec['subject_title'] . ': ' . ($stt === 'P' ? 'Present' : ($stt === 'L' ? 'Leave' : 'Absent')) . ($rem ? ' — ' . $rem : '')) ?>"><?= h($stt) ?></span>
                             <?php else: ?>
                                 <span class="mark empty" title="No record for this lecture">·</span>
                             <?php endif; ?>
                         </td>
                     <?php endforeach; ?>
+                    <td data-sort="<?= $s['pct'] === null ? -1 : $s['pct'] ?>"><?= pct_cell($s['pct'], $threshold) ?></td>
                     <td class="c" data-sort="<?= (int)$s['present'] ?>"><span class="num p"><?= (int)$s['present'] ?></span></td>
                     <td class="c" data-sort="<?= (int)$s['leave'] ?>"><span class="num l"><?= (int)$s['leave'] ?></span></td>
                     <td class="c" data-sort="<?= (int)$s['absent'] ?>"><span class="num a"><?= (int)$s['absent'] ?></span></td>
-                    <td data-sort="<?= $s['pct'] === null ? -1 : $s['pct'] ?>"><?= pct_cell($s['pct'], $threshold) ?></td>
                 </tr>
             <?php endforeach; ?>
             </tbody>
         </table>
         </div>
 
-        <div class="legend">
+        <div class="legend no-print">
             <span><span class="mark P" style="width:22px;height:22px;font-size:11px;">P</span> Present</span>
             <span><span class="mark L" style="width:22px;height:22px;font-size:11px;">L</span> Leave</span>
             <span><span class="mark A" style="width:22px;height:22px;font-size:11px;">A</span> Absent</span>
             <span><span class="mark empty" style="width:22px;height:22px;font-size:11px;">·</span> No record</span>
-            <span style="margin-left:auto">Alternating tint marks each date group. Hover a cell for full details.</span>
+            <span style="margin-left:auto">Print: <?= (int)$total_parts ?> page(s). Subject names shown in full, running vertically.</span>
+        </div>
+
+        <!-- ================= PRINT SHEETS ================= -->
+        <div class="print-only">
+        <?php foreach ($print_pages as $pi => $page): ?>
+            <div class="print-sheet">
+                <div class="print-rot">
+                    <div class="ph">
+                        <h2>Lecture Attendance Report</h2>
+                        <div class="meta">
+                            Class: <b><?= h($class_label) ?></b> &middot; Subjects: <?= h($subject_label) ?> &middot;
+                            <?= h(date('d M Y', strtotime($from))) ?> to <?= h(date('d M Y', strtotime($effective_to))) ?><br>
+                            <?= (int)$sum['lec'] ?> lecture(s) &middot; <?= count($data['students']) ?> student(s) &middot; Required: <?= (int)$threshold ?>%
+                            &middot; Printed <?= h(date('d M Y, h:i A')) ?>
+                        </div>
+                    </div>
+
+                    <table class="ptable">
+                        <colgroup>
+                            <col style="width:4%">
+                            <col style="width:9%">
+                            <col style="width:16%">
+                            <?php foreach ($page['lectures'] as $lec): ?><col style="width:<?= round(55 / max(1, count($page['lectures'])), 3) ?>%"><?php endforeach; ?>
+                            <col style="width:6%">
+                            <col style="width:4%">
+                            <col style="width:4%">
+                            <col style="width:4%">
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th rowspan="2">#</th>
+                                <th rowspan="2">Reg No</th>
+                                <th rowspan="2">Student</th>
+                                <?php $gi = 0; foreach ($page['date_order'] as $date):
+                                    $span = $page['date_spans'][$date] ?? 0;
+                                    if ($span <= 0) continue;
+                                    $ts = strtotime($date);
+                                ?>
+                                    <th class="pdate <?= $gi % 2 ? 'alt' : '' ?>" colspan="<?= (int)$span ?>">
+                                        <?= h(date('D', $ts)) ?> <?= h(date('j', $ts)) ?> <?= h(date('M', $ts)) ?><?= $multi_year ? h(" '" . date('y', $ts)) : '' ?>
+                                    </th>
+                                <?php $gi++; endforeach; ?>
+                                <th rowspan="2">%</th>
+                                <th rowspan="2">P</th>
+                                <th rowspan="2">L</th>
+                                <th rowspan="2">A</th>
+                            </tr>
+                            <tr>
+                                <?php foreach ($page['lectures'] as $lec): ?>
+                                    <th class="subj"><span><?= h($lec['subject_title']) ?></span></th>
+                                <?php endforeach; ?>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        <?php $rn = 0; foreach ($data['students'] as $s): $rn++; $sid = (int)$s['student_id']; ?>
+                            <tr>
+                                <td class="pn"><?= $rn ?></td>
+                                <td class="preg"><?= h($s['reg_no']) ?></td>
+                                <td class="pname"><?= h($s['name']) ?><?php if (!empty($s['father_name'])): ?> <span class="pf">S/O <?= h($s['father_name']) ?></span><?php endif; ?></td>
+                                <?php foreach ($page['lectures'] as $lec):
+                                    $m = $data['marks'][$sid][$lec['key']] ?? null;
+                                    $mk = $m ? $m['status'] : '';
+                                    if ($mk === 'P' || $mk === 'L' || $mk === 'A'): ?>
+                                        <td class="pm <?= $mk ?>"><?= $mk ?></td>
+                                    <?php else: ?>
+                                        <td class="pm e">·</td>
+                                    <?php endif;
+                                endforeach; ?>
+                                <td class="ppct <?= $s['pct'] !== null && pct_class($s['pct'], $threshold) !== 'good' ? pct_class($s['pct'], $threshold) : '' ?>"><?= h(fmt_pct($s['pct'])) ?></td>
+                                <td class="pt"><?= (int)$s['present'] ?></td>
+                                <td class="pt"><?= (int)$s['leave'] ?></td>
+                                <td class="pt"><?= (int)$s['absent'] ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                        </tbody>
+                    </table>
+
+                    <div class="plegend">
+                        P = Present &nbsp;&middot;&nbsp; L = Leave &nbsp;&middot;&nbsp; A = Absent &nbsp;&middot;&nbsp; · = No record
+                        &nbsp;&middot;&nbsp; Totals (%, P, L, A) cover the whole date range &nbsp;&middot;&nbsp; Shaded % = below <?= (int)$threshold ?>%
+                    </div>
+                    <?php if ($total_parts > 1): ?>
+                        <div class="ppart">Part <?= ($pi + 1) ?> of <?= (int)$total_parts ?></div>
+                    <?php endif; ?>
+                </div>
+            </div>
+        <?php endforeach; ?>
         </div>
     </div>
 
@@ -922,9 +1076,7 @@ function pct_cell(?float $p, int $threshold): string {
     var classPick = $('#classPick');
     if (classPick) {
         classPick.addEventListener('change', function () {
-            var cid = this.value;
-            var wrap = $('#pills');
-            var tools = $('#pillTools');
+            var cid = this.value, wrap = $('#pills'), tools = $('#pillTools');
             if (cid === '0') {
                 if (wrap) wrap.innerHTML = '<div class="subject-placeholder">Select a class above to see its subjects.</div>';
                 if (tools) tools.style.display = 'none';
@@ -933,10 +1085,9 @@ function pct_cell(?float $p, int $threshold): string {
             }
             if (wrap) wrap.innerHTML = '<div class="subject-placeholder">Loading subjects…</div>';
             if (tools) tools.style.display = 'none';
-
             fetch('?ajax=subjects&class_id=' + encodeURIComponent(cid), { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
                 .then(function (r) { return r.json(); })
-                .then(function (data) { renderPills(data); })
+                .then(renderPills)
                 .catch(function () {
                     if (wrap) wrap.innerHTML = '<div class="subject-placeholder" style="color:#dc2626;">Could not load subjects.</div>';
                 });
@@ -944,9 +1095,8 @@ function pct_cell(?float $p, int $threshold): string {
     }
 
     function numberRows() {
-        var rows = $$('#dailyTable tbody tr');
         var n = 0;
-        rows.forEach(function (tr) {
+        $$('#dailyTable tbody tr').forEach(function (tr) {
             if (tr.style.display === 'none') return;
             n++;
             var c = tr.querySelector('td.rn');
@@ -968,7 +1118,7 @@ function pct_cell(?float $p, int $threshold): string {
     if ($('#search')) $('#search').addEventListener('input', applyFilter);
     if ($('#shortOnly')) $('#shortOnly').addEventListener('change', applyFilter);
 
-    $$('th.sortable').forEach(function (th) {
+    $$('#dailyTable th.sortable').forEach(function (th) {
         th.addEventListener('click', function () {
             var table = th.closest('table');
             var idx = Array.prototype.indexOf.call(th.parentNode.children, th);
@@ -983,8 +1133,7 @@ function pct_cell(?float $p, int $threshold): string {
                 return d !== null ? d : c.textContent.trim();
             }
             rows.sort(function (a, b) {
-                var x = val(a), y = val(b);
-                var nx = parseFloat(x), ny = parseFloat(y);
+                var x = val(a), y = val(b), nx = parseFloat(x), ny = parseFloat(y);
                 var r = (!isNaN(nx) && !isNaN(ny) && String(nx) === String(x).trim() && String(ny) === String(y).trim())
                     ? nx - ny
                     : String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: 'base' });
@@ -1002,7 +1151,7 @@ function pct_cell(?float $p, int $threshold): string {
     window.addEventListener('load', function () { setTimeout(function () { window.print(); }, 400); });
     <?php endif; ?>
 
-    numberRows();
+    if ($('#dailyTable')) numberRows();
 })();
 </script>
 </body>

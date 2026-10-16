@@ -15,8 +15,10 @@ $can_edit = !empty($perms['can_edit']);
 
 /* ============================================================
    POST — save attendance
-   Rule: P and L are stored. A and unmarked both delete the row
-         (implicit absent). Whatever the form shows is the truth.
+   Rule: P, L, A are ALL stored.
+         A is now stored explicitly (no more implicit absent).
+         Unmarked students are stored as A (implicit absent still
+         recorded as an explicit row so reports can rely on rows).
    ============================================================ */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
     $class_id   = intval($_POST['class_id'] ?? 0);
@@ -30,11 +32,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
 
     if ($class_id > 0 && is_array($all_student_ids) && !empty($all_student_ids)) {
 
-        $ins = $conn->prepare("INSERT INTO attendance (student_id, date, status, remarks) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE status = VALUES(status), remarks = VALUES(remarks)");
-        $del = $conn->prepare("DELETE FROM attendance WHERE student_id = ? AND date = ?");
+        /* Insert / update — one row per student per day, including A */
+        $ins = $conn->prepare("INSERT INTO attendance (student_id, date, status, remarks)
+                               VALUES (?, ?, ?, ?)
+                               ON DUPLICATE KEY UPDATE status = VALUES(status), remarks = VALUES(remarks)");
 
-        $saved = 0;
-        $cleared = 0;
+        $saved_p = 0;
+        $saved_l = 0;
+        $saved_a = 0;
 
         foreach ($all_student_ids as $sid_raw) {
             $sid = intval($sid_raw);
@@ -46,7 +51,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
                 $remark = '';
                 if ($ins) {
                     $ins->bind_param("isss", $sid, $date, $st, $remark);
-                    if ($ins->execute()) $saved++;
+                    if ($ins->execute()) $saved_p++;
                 }
             } elseif ($st === 'L') {
                 $remark = trim($remarks[$sid] ?? '');
@@ -57,21 +62,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
                 if ($remark === '') $remark = 'Leave';
                 if ($ins) {
                     $ins->bind_param("isss", $sid, $date, $st, $remark);
-                    if ($ins->execute()) $saved++;
+                    if ($ins->execute()) $saved_l++;
                 }
             } else {
-                /* A or unmarked -> implicit absent -> no row */
-                if ($del) {
-                    $del->bind_param("is", $sid, $date);
-                    if ($del->execute()) $cleared++;
+                /* Unmarked OR explicit A -> store A */
+                $st = 'A';
+                $remark = '';
+                if ($ins) {
+                    $ins->bind_param("isss", $sid, $date, $st, $remark);
+                    if ($ins->execute()) $saved_a++;
                 }
             }
         }
 
         if ($ins) $ins->close();
-        if ($del) $del->close();
 
-        $_SESSION['message'] = 'Attendance saved. ' . $saved . ' present/leave, ' . $cleared . ' absent (no record).';
+        $_SESSION['message'] = 'Attendance saved. Present: ' . $saved_p . ', Leave: ' . $saved_l . ', Absent: ' . $saved_a . '.';
         $_SESSION['message_type'] = 'success';
     } else {
         $_SESSION['message'] = 'No students to save.';
@@ -100,7 +106,6 @@ if ($class_res) {
 
 $date = isset($_GET['date']) ? trim($_GET['date']) : date('Y-m-d');
 if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) $date = date('Y-m-d');
-/* Never allow a future date — clamp to today */
 if ($date > date('Y-m-d')) $date = date('Y-m-d');
 
 $selected_session_id = isset($_GET['session_id']) ? intval($_GET['session_id']) : 0;
@@ -132,7 +137,6 @@ if ($selected_class_id > 0 && $selected_session_id > 0) {
     }
 
     if (!empty($students)) {
-        /* Load attendance rows for this date AND scoped to this class's students */
         $att_sql = "SELECT a.student_id, a.status, a.remarks FROM attendance a JOIN student_class sc ON sc.student_registration_id = a.student_id WHERE a.date = ? AND sc.class_id = ? AND sc.session_id = ?";
         $att_stmt = $conn->prepare($att_sql);
         if ($att_stmt) {
@@ -150,7 +154,6 @@ if ($selected_class_id > 0 && $selected_session_id > 0) {
             $att_stmt->close();
         }
 
-        /* Flag: has attendance been taken for this class+date at all? */
         if (!empty($existing_attendance)) {
             $attendance_taken = true;
         }
@@ -247,14 +250,12 @@ if (isset($_SESSION['message'])) {
         .counter-box.present { border-left-color: #059669; }
         .counter-box.absent { border-left-color: #dc2626; }
         .counter-box.leave { border-left-color: #f59e0b; }
-        .counter-box.unmarked { border-left-color: #94a3b8; }
         .counter-box .counter-number { font-size: 24px; font-weight: 700; color: #1e293b; line-height: 1; }
         .counter-box .counter-label { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 700; margin-top: 6px; }
         .counter-box.total .counter-number { color: #2563eb; }
         .counter-box.present .counter-number { color: #059669; }
         .counter-box.absent .counter-number { color: #dc2626; }
         .counter-box.leave .counter-number { color: #d97706; }
-        .counter-box.unmarked .counter-number { color: #64748b; }
 
         .list-card {
             background: #fff; border-radius: 12px;
@@ -398,7 +399,7 @@ if (isset($_SESSION['message'])) {
                 <div class="header-icon"><i class="fas fa-calendar-check"></i></div>
                 <div>
                     <h1>Class Attendance</h1>
-                    <div class="subtitle">Mark daily attendance &mdash; absent students are those with no record</div>
+                    <div class="subtitle">Mark daily attendance &mdash; P, L, and A are all saved</div>
                 </div>
             </div>
             <?php if ($selected_class_id > 0): ?>
@@ -420,18 +421,18 @@ if (isset($_SESSION['message'])) {
             <?php if ($attendance_taken): ?>
                 <div class="info-note green">
                     <i class="fas fa-check-circle"></i>
-                    <span>Attendance has been <strong>taken</strong> for this class on this date. Students not marked Present or Leave are <strong>Absent</strong>.</span>
+                    <span>Attendance has been <strong>taken</strong> for this class on this date. P, L, and A are all stored.</span>
                 </div>
             <?php else: ?>
                 <div class="info-note amber">
                     <i class="fas fa-exclamation-triangle"></i>
-                    <span>Attendance has <strong>not been taken yet</strong> for this class on this date. Nobody is marked absent until you save.</span>
+                    <span>Attendance has <strong>not been taken yet</strong> for this class on this date.</span>
                 </div>
             <?php endif; ?>
         <?php else: ?>
             <div class="info-note blue">
                 <i class="fas fa-info-circle"></i>
-                <span>Only <strong>Present</strong> and <strong>Leave</strong> are stored. Students without a record for the day are automatically counted as <strong>Absent</strong>.</span>
+                <span><strong>Present</strong>, <strong>Leave</strong>, and <strong>Absent</strong> are all saved. Unmarked students are stored as <strong>Absent</strong> on save.</span>
             </div>
         <?php endif; ?>
 
@@ -497,7 +498,6 @@ if (isset($_SESSION['message'])) {
                     <div class="counter-number" id="counterLeave">0</div>
                     <div class="counter-label">On Leave</div>
                 </div>
-
             </div>
 
             <form method="post" action="" id="attendanceForm">
@@ -552,15 +552,11 @@ if (isset($_SESSION['message'])) {
                                         $cur_remark = $existing_attendance[$sid]['remarks'];
                                     }
 
-                                    /* Row coloring:
-                                       - If a P or L record exists -> green/amber
-                                       - If attendance_taken AND no record -> red (implicit absent)
-                                       - If attendance NOT taken AND no record -> neutral (unmarked)
-                                    */
+                                    /* Row colouring — A is now explicit */
                                     $row_class = '';
                                     if ($cur_status === 'P') $row_class = 'row-present';
+                                    elseif ($cur_status === 'A') $row_class = 'row-absent';
                                     elseif ($cur_status === 'L') $row_class = 'row-leave';
-                                    elseif ($attendance_taken) $row_class = 'row-absent';
 
                                     $remark_is_other = ($cur_status === 'L' && $cur_remark !== '' && !in_array($cur_remark, $leave_reasons));
                                     $remark_select_val = $remark_is_other ? 'Other' : $cur_remark;
@@ -612,7 +608,7 @@ if (isset($_SESSION['message'])) {
                     <?php if ($can_edit): ?>
                         <div class="action-bar">
                             <div style="font-size: 13px; color: #64748b;">
-                                <i class="fas fa-info-circle"></i> Students left unmarked will be saved as <strong>Absent</strong>.
+                                <i class="fas fa-info-circle"></i> Unmarked students will be saved as <strong>Absent</strong>.
                             </div>
                             <div>
                                 <button type="submit" class="btn-success-brand" id="btnSave">
@@ -645,8 +641,6 @@ if (isset($_SESSION['message'])) {
     </div>
 
     <script>
-    var ATTENDANCE_TAKEN = <?php echo $attendance_taken ? 'true' : 'false'; ?>;
-
     $(document).ready(function() {
 
         function updateRowStyling($row, status) {
@@ -654,8 +648,6 @@ if (isset($_SESSION['message'])) {
             if (status === 'P') $row.addClass('row-present');
             else if (status === 'A') $row.addClass('row-absent');
             else if (status === 'L') $row.addClass('row-leave');
-            else if (ATTENDANCE_TAKEN) $row.addClass('row-absent');
-            /* else: leave neutral */
 
             $row.find('.radio-pill').removeClass('checked');
             if (status === 'P') $row.find('.radio-pill.present').addClass('checked');
@@ -673,23 +665,19 @@ if (isset($_SESSION['message'])) {
         }
 
         function updateCounters() {
-            var present = 0, absent = 0, leave = 0, unmarked = 0, total = 0;
+            var present = 0, absent = 0, leave = 0, total = 0;
             $('tr[data-student-id]').each(function() {
                 total++;
                 var val = $(this).find('input[type="radio"]:checked').val();
                 if (val === 'P') present++;
                 else if (val === 'A') absent++;
                 else if (val === 'L') leave++;
-                else {
-                    unmarked++;
-                    if (ATTENDANCE_TAKEN) absent++;
-                }
+                else absent++; /* unmarked -> will be stored as A */
             });
             $('#counterTotal').text(total);
             $('#counterPresent').text(present);
             $('#counterAbsent').text(absent);
             $('#counterLeave').text(leave);
-            $('#counterUnmarked').text(unmarked);
         }
 
         $(document).on('change', 'input[type="radio"][name^="status"]', function() {
