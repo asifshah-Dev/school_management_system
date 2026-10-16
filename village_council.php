@@ -1,11 +1,8 @@
 <?php
-header('Content-Type: text/html; charset=utf-8');
 require_once('security.php');
-/* ==== AUTHORIZATION GATE ==== */
 require_once('permissions.php');
 require_action($conn, __FILE__);
 $perms = current_user_perms($conn, __FILE__);
-/* ==== END AUTHORIZATION GATE ==== */
 require_once('conn_inc.php');
 
 if (session_status() === PHP_SESSION_NONE) {
@@ -47,14 +44,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['title'])) {
         if ($stmt->execute()) {
             $_SESSION['message'] = $translations[$lang]['success'];
             $_SESSION['message_type'] = "success";
-            // Keep the search/sort/page the user was on
-            $back = $_SERVER['PHP_SELF'];
-            $qs = [];
-            if (!empty($_POST['return_q']))       $qs['q']    = $_POST['return_q'];
-            if (!empty($_POST['return_sort']))    $qs['sort'] = $_POST['return_sort'];
-            if (!empty($_POST['return_page']))    $qs['page'] = $_POST['return_page'];
-            if (!empty($qs)) $back .= '?' . http_build_query($qs);
-            header("Location: " . $back);
+            header("Location: village_council.php");
             exit();
         } else {
             $_SESSION['message'] = $translations[$lang]['error'] . $stmt->error;
@@ -80,14 +70,7 @@ if (isset($_GET['delete']) && !empty($perms['can_delete'])) {
         $_SESSION['message_type'] = "danger";
     }
     $stmt->close();
-
-    $back = $_SERVER['PHP_SELF'];
-    $qs = [];
-    if (!empty($_GET['q']))    $qs['q']    = $_GET['q'];
-    if (!empty($_GET['sort'])) $qs['sort'] = $_GET['sort'];
-    if (!empty($_GET['page'])) $qs['page'] = $_GET['page'];
-    if (!empty($qs)) $back .= '?' . http_build_query($qs);
-    header("Location: " . $back);
+    header("Location: village_council.php");
     exit();
 }
 
@@ -98,13 +81,11 @@ $page     = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
 $per_page = 20;
 $offset   = ($page - 1) * $per_page;
 
-/* Whitelist sort */
 $order_sql = "ORDER BY title ASC";
 if ($sort === 'za')     $order_sql = "ORDER BY title DESC";
 if ($sort === 'recent') $order_sql = "ORDER BY id DESC";
 if ($sort === 'oldest') $order_sql = "ORDER BY id ASC";
 
-/* Build where */
 $where_sql = '';
 $params = [];
 $types = '';
@@ -115,7 +96,6 @@ if ($q !== '') {
     $types .= 's';
 }
 
-/* Total count */
 $total_towns = 0;
 $count_sql = "SELECT COUNT(*) AS c FROM village_councils $where_sql";
 if ($stmt = $conn->prepare($count_sql)) {
@@ -129,7 +109,6 @@ if ($stmt = $conn->prepare($count_sql)) {
 $total_pages = max(1, (int)ceil($total_towns / $per_page));
 if ($page > $total_pages) { $page = $total_pages; $offset = ($page - 1) * $per_page; }
 
-/* Fetch page */
 $towns = [];
 $fetch_sql = "SELECT id, title FROM village_councils $where_sql $order_sql LIMIT ? OFFSET ?";
 if ($stmt = $conn->prepare($fetch_sql)) {
@@ -144,12 +123,10 @@ if ($stmt = $conn->prepare($fetch_sql)) {
     $stmt->close();
 }
 
-/* Total towns in DB (unfiltered) — for the header "X total" pill */
 $grand_total = 0;
 $r = $conn->query("SELECT COUNT(*) AS c FROM village_councils");
 if ($r && ($row = $r->fetch_assoc())) $grand_total = (int)$row['c'];
 
-/* Build a querystring helper (preserves current filters) */
 function qs_with($overrides = []) {
     $base = [
         'q'    => isset($_GET['q']) ? $_GET['q'] : '',
@@ -163,6 +140,123 @@ function qs_with($overrides = []) {
         $clean[$k] = $v;
     }
     return '?' . http_build_query($clean);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   AJAX ENDPOINT — returns ONLY the list section HTML
+   ═══════════════════════════════════════════════════════════ */
+if (isset($_GET['ajax']) && $_GET['ajax'] == '1') {
+
+    while (ob_get_level() > 0) { ob_end_clean(); }
+    header('Content-Type: text/html; charset=utf-8');
+    header('X-Is-Ajax: 1');
+    ?>
+<div class="section-header">
+    <div class="icon"><i class="fas fa-list"></i></div>
+    <h2><?= htmlspecialchars($translations[$lang]['list_title']) ?></h2>
+    <div class="count"><?= number_format($grand_total) ?> total</div>
+</div>
+
+<?php if (!empty($towns)): ?>
+    <div class="table-wrap">
+        <table class="town-table">
+            <thead>
+                <tr>
+                    <th class="sr-num"><?= $translations[$lang]['sr_no'] ?></th>
+                    <th><?= htmlspecialchars($translations[$lang]['title_label']) ?></th>
+                    <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+                        <th style="width: 160px; text-align:right;"><?= $translations[$lang]['actions'] ?></th>
+                    <?php endif; ?>
+                </tr>
+            </thead>
+            <tbody>
+                <?php $counter = $offset + 1; foreach ($towns as $row): ?>
+                    <tr data-id="<?= (int)$row['id'] ?>">
+                        <td class="sr-num"><?= $counter++ ?></td>
+                        <td class="title-cell"><?= htmlspecialchars($row['title']) ?></td>
+                        <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+                        <td style="text-align:right; white-space:nowrap;">
+                            <?php if (!empty($perms['can_edit'])): ?>
+                                <button class="btn-icon edit edit-btn" title="Edit"><i class="fas fa-pen"></i></button>
+                                <button class="btn-icon save save-btn d-none" title="Save"><i class="fas fa-check"></i></button>
+                                <button class="btn-icon cancel cancel-btn d-none" title="Cancel"><i class="fas fa-times"></i></button>
+                            <?php endif; ?>
+                            <?php if (!empty($perms['can_delete'])): ?>
+                                <a href="<?= qs_with(['delete' => (int)$row['id']]) ?>" class="btn-icon danger" title="Delete"
+                                   onclick="return confirm('Delete this town?');">
+                                    <i class="fas fa-trash"></i>
+                                </a>
+                            <?php endif; ?>
+                        </td>
+                        <?php endif; ?>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+
+    <?php if ($total_pages > 1): ?>
+    <div class="pagination-bar">
+        <div class="pagination-info">
+            Showing <b><?= number_format($offset + 1) ?></b>–<b><?= number_format(min($offset + $per_page, $total_towns)) ?></b>
+            of <b><?= number_format($total_towns) ?></b>
+            <?php if ($q !== ''): ?> for "<b><?= htmlspecialchars($q) ?></b>"<?php endif; ?>
+        </div>
+        <div class="pagination">
+            <?php
+            if ($page > 1) {
+                echo '<a href="#" data-page="' . ($page - 1) . '" class="ajax-page"><i class="fas fa-chevron-left"></i></a>';
+            }
+            $range = 2;
+            $start = max(1, $page - $range);
+            $end   = min($total_pages, $page + $range);
+            if ($start > 1) {
+                echo '<a href="#" data-page="1" class="ajax-page">1</a>';
+                if ($start > 2) echo '<span class="dots">...</span>';
+            }
+            for ($i = $start; $i <= $end; $i++) {
+                if ($i === $page) {
+                    echo '<span class="current">' . $i . '</span>';
+                } else {
+                    echo '<a href="#" data-page="' . $i . '" class="ajax-page">' . $i . '</a>';
+                }
+            }
+            if ($end < $total_pages) {
+                if ($end < $total_pages - 1) echo '<span class="dots">...</span>';
+                echo '<a href="#" data-page="' . $total_pages . '" class="ajax-page">' . $total_pages . '</a>';
+            }
+            if ($page < $total_pages) {
+                echo '<a href="#" data-page="' . ($page + 1) . '" class="ajax-page"><i class="fas fa-chevron-right"></i></a>';
+            }
+            ?>
+        </div>
+    </div>
+    <?php elseif ($total_towns > 0): ?>
+        <div class="pagination-info" style="margin-top:14px;">
+            Showing <b><?= number_format($total_towns) ?></b>
+            <?= $total_towns === 1 ? 'town' : 'towns' ?>
+            <?php if ($q !== ''): ?> for "<b><?= htmlspecialchars($q) ?></b>"<?php endif; ?>
+        </div>
+    <?php endif; ?>
+
+<?php else: ?>
+    <div class="empty-state">
+        <div class="big">&#127961;&#65039;</div>
+        <div class="msg">
+            <?= $q !== '' ? htmlspecialchars($translations[$lang]['no_match']) : htmlspecialchars($translations[$lang]['no_records']) ?>
+        </div>
+        <div class="hint">
+            <?php if ($q !== ''): ?>
+                <a href="#" id="clearSearchAjax" style="color:#1e40af;font-weight:700;">Clear search</a>
+            <?php else: ?>
+                Add your first town above.
+            <?php endif; ?>
+        </div>
+    </div>
+<?php endif; ?>
+    <?php
+    if (isset($conn)) $conn->close();
+    exit;
 }
 ?>
 <!DOCTYPE html>
@@ -181,7 +275,6 @@ function qs_with($overrides = []) {
     body { background: #eef1f5; font-family: 'Inter', sans-serif; color: #1e293b; margin: 0; padding: 0; }
     .wrap { max-width: 1000px; margin: 30px auto; padding: 0 20px; }
 
-    /* Header */
     .page-head {
         background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
         color: #fff; padding: 26px 32px;
@@ -198,7 +291,6 @@ function qs_with($overrides = []) {
     .page-head h1 { font-size: 24px; font-weight: 700; margin: 0; }
     .page-head .sub { font-size: 13px; opacity: 0.9; margin-top: 5px; }
 
-    /* Card */
     .card {
         background: #fff;
         padding: 28px 32px 32px;
@@ -207,7 +299,6 @@ function qs_with($overrides = []) {
         margin-bottom: 30px;
     }
 
-    /* Form */
     .form-label {
         font-size: 11px; font-weight: 700; color: #64748b;
         text-transform: uppercase; letter-spacing: 0.6px;
@@ -245,7 +336,6 @@ function qs_with($overrides = []) {
     }
     .btn-secondary:hover { background: #f1f5f9; color: #1e293b; text-decoration: none; }
 
-    /* Section header */
     .section-header {
         display: flex; align-items: center; gap: 10px;
         margin: 30px 0 16px;
@@ -267,7 +357,6 @@ function qs_with($overrides = []) {
         font-size: 12px; font-weight: 700;
     }
 
-    /* Search + Sort bar */
     .toolbar {
         display: grid;
         grid-template-columns: 1fr 200px;
@@ -314,7 +403,6 @@ function qs_with($overrides = []) {
         box-shadow: 0 0 0 3px rgba(30,64,175,0.10);
     }
 
-    /* Table */
     .table-wrap { overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 10px; }
     table.town-table { width: 100%; margin: 0; border-collapse: collapse; }
     table.town-table thead th {
@@ -341,7 +429,6 @@ function qs_with($overrides = []) {
     }
     .title-cell { font-weight: 700; color: #0f172a; }
 
-    /* Inline edit input */
     .edit-input {
         height: 36px;
         border: 1.5px solid #1e40af;
@@ -357,7 +444,6 @@ function qs_with($overrides = []) {
         box-shadow: 0 0 0 3px rgba(30,64,175,0.12);
     }
 
-    /* Icon buttons */
     .btn-icon {
         display: inline-flex; align-items: center; justify-content: center;
         width: 36px; height: 36px;
@@ -381,7 +467,6 @@ function qs_with($overrides = []) {
     .btn-icon.danger { background: #fee2e2; color: #dc2626; }
     .btn-icon.danger:hover { background: #dc2626; color: #fff; text-decoration: none; }
 
-    /* Alerts */
     .alert {
         border-radius: 8px; font-size: 13.5px;
         padding: 12px 16px; margin-bottom: 20px;
@@ -391,7 +476,6 @@ function qs_with($overrides = []) {
     .alert-danger { background: #fee2e2; color: #991b1b; }
     .alert-info { background: #dbeafe; color: #1e40af; }
 
-    /* Empty */
     .empty-state {
         padding: 60px 20px;
         text-align: center;
@@ -401,7 +485,6 @@ function qs_with($overrides = []) {
     .empty-state .msg { font-weight: 600; color: #475569; font-size: 15px; }
     .empty-state .hint { font-size: 13px; margin-top: 6px; }
 
-    /* Pagination */
     .pagination-bar {
         display: flex; align-items: center; justify-content: space-between;
         gap: 16px; margin-top: 18px; flex-wrap: wrap;
@@ -427,6 +510,7 @@ function qs_with($overrides = []) {
         font-size: 13px;
         font-weight: 700;
         transition: all .15s;
+        cursor: pointer;
     }
     .pagination a:hover {
         background: #eff6ff;
@@ -444,6 +528,9 @@ function qs_with($overrides = []) {
         cursor: default;
         color: #94a3b8;
     }
+
+    #listSection { position: relative; transition: opacity 0.15s; }
+    #listSection.loading { opacity: 0.5; pointer-events: none; }
 
     @media (max-width: 768px) {
         .wrap { padding: 0 12px; margin: 16px auto; }
@@ -477,12 +564,8 @@ function qs_with($overrides = []) {
             <?php unset($_SESSION['message'], $_SESSION['message_type']); ?>
         <?php endif; ?>
 
-        <!-- ═══════════ FORM ═══════════ -->
+        <!-- Add form -->
         <form method="post" action="">
-            <input type="hidden" name="return_q" value="<?= htmlspecialchars($q) ?>">
-            <input type="hidden" name="return_sort" value="<?= htmlspecialchars($sort) ?>">
-            <input type="hidden" name="return_page" value="<?= (int)$page ?>">
-
             <h2 style="font-size:15px;font-weight:700;margin:0 0 18px 0;color:#0f172a;">
                 <i class="fas fa-plus-circle" style="color:#1e40af;margin-right:6px;"></i>
                 <?= htmlspecialchars($translations[$lang]['title']) ?>
@@ -508,131 +591,129 @@ function qs_with($overrides = []) {
             </div>
         </form>
 
-        <!-- ═══════════ LIST ═══════════ -->
-        <div class="section-header">
-            <div class="icon"><i class="fas fa-list"></i></div>
-            <h2><?= htmlspecialchars($translations[$lang]['list_title']) ?></h2>
-            <div class="count"><?= number_format($grand_total) ?> total</div>
-        </div>
-
-        <!-- Search + Sort toolbar -->
-        <form method="get" action="" class="toolbar" id="filterForm">
+        <!-- Search + Sort (no form) -->
+        <div class="toolbar" style="margin-top:30px;">
             <div class="search-box">
                 <i class="fas fa-search"></i>
-                <input type="text" name="q" id="searchInput"
+                <input type="text" id="searchInput"
                        placeholder="Search towns..."
                        value="<?= htmlspecialchars($q) ?>"
                        autocomplete="off">
             </div>
-            <select name="sort" id="sortSelect">
+            <select id="sortSelect">
                 <option value="az"     <?= $sort === 'az'     ? 'selected' : '' ?>>A → Z</option>
                 <option value="za"     <?= $sort === 'za'     ? 'selected' : '' ?>>Z → A</option>
                 <option value="recent" <?= $sort === 'recent' ? 'selected' : '' ?>>Newest First</option>
                 <option value="oldest" <?= $sort === 'oldest' ? 'selected' : '' ?>>Oldest First</option>
             </select>
-        </form>
+        </div>
 
-        <?php if (!empty($towns)): ?>
-            <div class="table-wrap">
-                <table class="town-table">
-                    <thead>
-                        <tr>
-                            <th class="sr-num"><?= $translations[$lang]['sr_no'] ?></th>
-                            <th><?= htmlspecialchars($translations[$lang]['title_label']) ?></th>
-                            <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
-                                <th style="width: 160px; text-align:right;"><?= $translations[$lang]['actions'] ?></th>
-                            <?php endif; ?>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php $counter = $offset + 1; foreach ($towns as $row): ?>
-                            <tr data-id="<?= (int)$row['id'] ?>">
-                                <td class="sr-num"><?= $counter++ ?></td>
-                                <td class="title-cell"><?= htmlspecialchars($row['title']) ?></td>
+        <!-- AJAX-replaceable list -->
+        <div id="listSection">
+            <div class="section-header">
+                <div class="icon"><i class="fas fa-list"></i></div>
+                <h2><?= htmlspecialchars($translations[$lang]['list_title']) ?></h2>
+                <div class="count"><?= number_format($grand_total) ?> total</div>
+            </div>
+
+            <?php if (!empty($towns)): ?>
+                <div class="table-wrap">
+                    <table class="town-table">
+                        <thead>
+                            <tr>
+                                <th class="sr-num"><?= $translations[$lang]['sr_no'] ?></th>
+                                <th><?= htmlspecialchars($translations[$lang]['title_label']) ?></th>
                                 <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
-                                <td style="text-align:right; white-space:nowrap;">
-                                    <?php if (!empty($perms['can_edit'])): ?>
-                                        <button class="btn-icon edit edit-btn" title="Edit"><i class="fas fa-pen"></i></button>
-                                        <button class="btn-icon save save-btn d-none" title="Save"><i class="fas fa-check"></i></button>
-                                        <button class="btn-icon cancel cancel-btn d-none" title="Cancel"><i class="fas fa-times"></i></button>
-                                    <?php endif; ?>
-                                    <?php if (!empty($perms['can_delete'])): ?>
-                                        <a href="<?= qs_with(['delete' => (int)$row['id']]) ?>" class="btn-icon danger" title="Delete"
-                                           onclick="return confirm('Delete this town?');">
-                                            <i class="fas fa-trash"></i>
-                                        </a>
-                                    <?php endif; ?>
-                                </td>
+                                    <th style="width: 160px; text-align:right;"><?= $translations[$lang]['actions'] ?></th>
                                 <?php endif; ?>
                             </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
+                        </thead>
+                        <tbody>
+                            <?php $counter = $offset + 1; foreach ($towns as $row): ?>
+                                <tr data-id="<?= (int)$row['id'] ?>">
+                                    <td class="sr-num"><?= $counter++ ?></td>
+                                    <td class="title-cell"><?= htmlspecialchars($row['title']) ?></td>
+                                    <?php if (!empty($perms['can_edit']) || !empty($perms['can_delete'])): ?>
+                                    <td style="text-align:right; white-space:nowrap;">
+                                        <?php if (!empty($perms['can_edit'])): ?>
+                                            <button class="btn-icon edit edit-btn" title="Edit"><i class="fas fa-pen"></i></button>
+                                            <button class="btn-icon save save-btn d-none" title="Save"><i class="fas fa-check"></i></button>
+                                            <button class="btn-icon cancel cancel-btn d-none" title="Cancel"><i class="fas fa-times"></i></button>
+                                        <?php endif; ?>
+                                        <?php if (!empty($perms['can_delete'])): ?>
+                                            <a href="<?= qs_with(['delete' => (int)$row['id']]) ?>" class="btn-icon danger" title="Delete"
+                                               onclick="return confirm('Delete this town?');">
+                                                <i class="fas fa-trash"></i>
+                                            </a>
+                                        <?php endif; ?>
+                                    </td>
+                                    <?php endif; ?>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
 
-            <!-- Pagination -->
-            <?php if ($total_pages > 1): ?>
-            <div class="pagination-bar">
-                <div class="pagination-info">
-                    Showing <b><?= number_format($offset + 1) ?></b>–<b><?= number_format(min($offset + $per_page, $total_towns)) ?></b>
-                    of <b><?= number_format($total_towns) ?></b>
-                    <?php if ($q !== ''): ?> for "<b><?= htmlspecialchars($q) ?></b>"<?php endif; ?>
-                </div>
-                <div class="pagination">
-                    <?php
-                    // Prev
-                    if ($page > 1) {
-                        echo '<a href="' . qs_with(['page' => $page - 1]) . '"><i class="fas fa-chevron-left"></i></a>';
-                    }
-                    // Pages with ellipsis
-                    $range = 2;
-                    $start = max(1, $page - $range);
-                    $end   = min($total_pages, $page + $range);
-                    if ($start > 1) {
-                        echo '<a href="' . qs_with(['page' => 1]) . '">1</a>';
-                        if ($start > 2) echo '<span class="dots">...</span>';
-                    }
-                    for ($i = $start; $i <= $end; $i++) {
-                        if ($i === $page) {
-                            echo '<span class="current">' . $i . '</span>';
-                        } else {
-                            echo '<a href="' . qs_with(['page' => $i]) . '">' . $i . '</a>';
+                <?php if ($total_pages > 1): ?>
+                <div class="pagination-bar">
+                    <div class="pagination-info">
+                        Showing <b><?= number_format($offset + 1) ?></b>–<b><?= number_format(min($offset + $per_page, $total_towns)) ?></b>
+                        of <b><?= number_format($total_towns) ?></b>
+                        <?php if ($q !== ''): ?> for "<b><?= htmlspecialchars($q) ?></b>"<?php endif; ?>
+                    </div>
+                    <div class="pagination">
+                        <?php
+                        if ($page > 1) {
+                            echo '<a href="#" data-page="' . ($page - 1) . '" class="ajax-page"><i class="fas fa-chevron-left"></i></a>';
                         }
-                    }
-                    if ($end < $total_pages) {
-                        if ($end < $total_pages - 1) echo '<span class="dots">...</span>';
-                        echo '<a href="' . qs_with(['page' => $total_pages]) . '">' . $total_pages . '</a>';
-                    }
-                    // Next
-                    if ($page < $total_pages) {
-                        echo '<a href="' . qs_with(['page' => $page + 1]) . '"><i class="fas fa-chevron-right"></i></a>';
-                    }
-                    ?>
+                        $range = 2;
+                        $start = max(1, $page - $range);
+                        $end   = min($total_pages, $page + $range);
+                        if ($start > 1) {
+                            echo '<a href="#" data-page="1" class="ajax-page">1</a>';
+                            if ($start > 2) echo '<span class="dots">...</span>';
+                        }
+                        for ($i = $start; $i <= $end; $i++) {
+                            if ($i === $page) {
+                                echo '<span class="current">' . $i . '</span>';
+                            } else {
+                                echo '<a href="#" data-page="' . $i . '" class="ajax-page">' . $i . '</a>';
+                            }
+                        }
+                        if ($end < $total_pages) {
+                            if ($end < $total_pages - 1) echo '<span class="dots">...</span>';
+                            echo '<a href="#" data-page="' . $total_pages . '" class="ajax-page">' . $total_pages . '</a>';
+                        }
+                        if ($page < $total_pages) {
+                            echo '<a href="#" data-page="' . ($page + 1) . '" class="ajax-page"><i class="fas fa-chevron-right"></i></a>';
+                        }
+                        ?>
+                    </div>
                 </div>
-            </div>
-            <?php elseif ($total_towns > 0): ?>
-                <div class="pagination-info" style="margin-top:14px;">
-                    Showing <b><?= number_format($total_towns) ?></b>
-                    <?= $total_towns === 1 ? 'town' : 'towns' ?>
-                    <?php if ($q !== ''): ?> for "<b><?= htmlspecialchars($q) ?></b>"<?php endif; ?>
+                <?php elseif ($total_towns > 0): ?>
+                    <div class="pagination-info" style="margin-top:14px;">
+                        Showing <b><?= number_format($total_towns) ?></b>
+                        <?= $total_towns === 1 ? 'town' : 'towns' ?>
+                        <?php if ($q !== ''): ?> for "<b><?= htmlspecialchars($q) ?></b>"<?php endif; ?>
+                    </div>
+                <?php endif; ?>
+
+            <?php else: ?>
+                <div class="empty-state">
+                    <div class="big">&#127961;&#65039;</div>
+                    <div class="msg">
+                        <?= $q !== '' ? htmlspecialchars($translations[$lang]['no_match']) : htmlspecialchars($translations[$lang]['no_records']) ?>
+                    </div>
+                    <div class="hint">
+                        <?php if ($q !== ''): ?>
+                            <a href="#" id="clearSearchAjax" style="color:#1e40af;font-weight:700;">Clear search</a>
+                        <?php else: ?>
+                            Add your first town above.
+                        <?php endif; ?>
+                    </div>
                 </div>
             <?php endif; ?>
-
-        <?php else: ?>
-            <div class="empty-state">
-                <div class="big">&#127961;&#65039;</div>
-                <div class="msg">
-                    <?= $q !== '' ? htmlspecialchars($translations[$lang]['no_match']) : htmlspecialchars($translations[$lang]['no_records']) ?>
-                </div>
-                <div class="hint">
-                    <?php if ($q !== ''): ?>
-                        <a href="village_councils.php" style="color:#1e40af;font-weight:700;">Clear search</a>
-                    <?php else: ?>
-                        Add your first town above.
-                    <?php endif; ?>
-                </div>
-            </div>
-        <?php endif; ?>
+        </div>
 
     </div>
 </div>
@@ -640,24 +721,78 @@ function qs_with($overrides = []) {
 <script>
 $(document).ready(function () {
 
-    /* ─────── Auto-submit on search typing (debounced) ─────── */
-    var searchTimer = null;
+    var $listSection = $('#listSection');
     var $searchInput = $('#searchInput');
-    var $filterForm = $('#filterForm');
+    var $sortSelect  = $('#sortSelect');
 
+    function loadList(q, sort, page, pushState) {
+        $listSection.addClass('loading');
+
+        var url = 'village_council.php?ajax=1'
+                + '&q='    + encodeURIComponent(q || '')
+                + '&sort=' + encodeURIComponent(sort || 'az')
+                + '&page=' + encodeURIComponent(page || 1);
+
+        $.ajax({
+            url: url,
+            type: 'GET',
+            dataType: 'html',
+            cache: false,
+            success: function (html) {
+                $listSection.html(html);
+                $listSection.removeClass('loading');
+
+                if (pushState !== false) {
+                    var clean = 'village_council.php?'
+                        + 'q='    + encodeURIComponent(q || '')
+                        + '&sort=' + encodeURIComponent(sort || 'az')
+                        + '&page=' + encodeURIComponent(page || 1);
+                    window.history.pushState({ q: q, sort: sort, page: page }, '', clean);
+                }
+            },
+            error: function (xhr, status, err) {
+                $listSection.removeClass('loading');
+                console.log('AJAX error:', status, err);
+                console.log('Response:', xhr.responseText ? xhr.responseText.substring(0, 500) : '(empty)');
+                alert('Could not load list.\nStatus: ' + status + '\nCheck console for details.');
+            }
+        });
+    }
+
+    var searchTimer = null;
     $searchInput.on('input', function () {
+        var val = $(this).val();
         clearTimeout(searchTimer);
         searchTimer = setTimeout(function () {
-            // Reset to page 1 when searching
-            $filterForm.find('input[name="page"]').remove();
-            $filterForm.submit();
-        }, 400);
+            loadList(val, $sortSelect.val(), 1);
+        }, 350);
     });
 
-    /* ─────── Auto-submit on sort change ─────── */
-    $('#sortSelect').on('change', function () {
-        $filterForm.find('input[name="page"]').remove();
-        $filterForm.submit();
+    $sortSelect.on('change', function () {
+        loadList($searchInput.val(), $(this).val(), 1);
+    });
+
+    $(document).on('click', '.ajax-page', function (e) {
+        e.preventDefault();
+        var p = parseInt($(this).data('page')) || 1;
+        loadList($searchInput.val(), $sortSelect.val(), p);
+    });
+
+    $(document).on('click', '#clearSearchAjax', function (e) {
+        e.preventDefault();
+        $searchInput.val('');
+        loadList('', $sortSelect.val(), 1);
+    });
+
+    window.addEventListener('popstate', function (e) {
+        var params = new URLSearchParams(window.location.search);
+        var q = params.get('q') || '';
+        var sort = params.get('sort') || 'az';
+        var page = parseInt(params.get('page')) || 1;
+
+        $searchInput.val(q);
+        $sortSelect.val(sort);
+        loadList(q, sort, page, false);
     });
 
     /* ─────── Inline edit: START ─────── */
@@ -716,7 +851,6 @@ $(document).ready(function () {
         });
     });
 
-    /* Enter → save */
     $(document).on('keypress', '.edit-input', function (e) {
         if (e.which === 13) {
             e.preventDefault();
@@ -724,14 +858,12 @@ $(document).ready(function () {
         }
     });
 
-    /* Escape → cancel */
     $(document).on('keyup', '.edit-input', function (e) {
         if (e.which === 27) {
             $(this).closest('tr').find('.cancel-btn').click();
         }
     });
 
-    /* Focus search input with Ctrl+K / Cmd+K */
     $(document).on('keydown', function (e) {
         if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
             e.preventDefault();

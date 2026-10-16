@@ -13,6 +13,8 @@ if (session_status() === PHP_SESSION_NONE) {
 
 /* ============================================================
    REPORT BUILDER
+   Days = calendar days in range
+   Absent = Days - Present - Leave
    ============================================================ */
 function build_student_report($conn, $from, $to, $class_id, $session_id) {
     $rows = [];
@@ -26,20 +28,12 @@ function build_student_report($conn, $from, $to, $class_id, $session_id) {
     }
     $total_days = $dt_from->diff($dt_to)->days + 1;
 
-    $sql = "SELECT sr.id AS student_id, sr.reg_no, sr.name, sr.father_name, sr.admission_date, c.title AS class_title FROM student_class sc JOIN student_registration sr ON sr.id = sc.student_registration_id JOIN classes c ON c.id = sc.class_id WHERE sr.status = 0";
+    $sql = "SELECT sr.id AS student_id, sr.reg_no, sr.name, sr.father_name, c.title AS class_title FROM student_class sc JOIN student_registration sr ON sr.id = sc.student_registration_id JOIN classes c ON c.id = sc.class_id WHERE sr.status = 0";
     $params = [];
     $types = '';
 
-    if ($class_id > 0) {
-        $sql .= " AND sc.class_id = ?";
-        $params[] = $class_id;
-        $types .= 'i';
-    }
-    if ($session_id > 0) {
-        $sql .= " AND sc.session_id = ?";
-        $params[] = $session_id;
-        $types .= 'i';
-    }
+    if ($class_id > 0) { $sql .= " AND sc.class_id = ?"; $params[] = $class_id; $types .= 'i'; }
+    if ($session_id > 0) { $sql .= " AND sc.session_id = ?"; $params[] = $session_id; $types .= 'i'; }
     $sql .= " ORDER BY c.title, sr.reg_no, sr.name";
 
     $stmt = $conn->prepare($sql);
@@ -59,52 +53,37 @@ function build_student_report($conn, $from, $to, $class_id, $session_id) {
     $id_list = implode(',', array_map('intval', $student_ids));
 
     $attendance = [];
-    $att_sql = "SELECT student_id, date, status FROM attendance WHERE date >= ? AND date <= ? AND student_id IN (" . $id_list . ")";
-    $att_stmt = $conn->prepare($att_sql);
-    if ($att_stmt) {
-        $att_stmt->bind_param("ss", $from, $to);
-        $att_stmt->execute();
-        $att_res = $att_stmt->get_result();
-        if ($att_res) {
-            while ($r = $att_res->fetch_assoc()) {
+    $a_sql = "SELECT student_id, status FROM attendance WHERE date >= ? AND date <= ? AND student_id IN (" . $id_list . ")";
+    $a_stmt = $conn->prepare($a_sql);
+    if ($a_stmt) {
+        $a_stmt->bind_param("ss", $from, $to);
+        $a_stmt->execute();
+        $a_res = $a_stmt->get_result();
+        if ($a_res) {
+            while ($r = $a_res->fetch_assoc()) {
                 $sid = intval($r['student_id']);
-                if (!isset($attendance[$sid])) $attendance[$sid] = [];
-                $attendance[$sid][$r['date']] = $r['status'];
+                if (!isset($attendance[$sid])) $attendance[$sid] = ['P' => 0, 'L' => 0];
+                if ($r['status'] === 'P') $attendance[$sid]['P']++;
+                elseif ($r['status'] === 'L') $attendance[$sid]['L']++;
             }
         }
-        $att_stmt->close();
+        $a_stmt->close();
     }
 
     foreach ($students as $s) {
         $sid = intval($s['student_id']);
-        $present = 0;
-        $leave = 0;
-
-        $student_days = $total_days;
-        if (!empty($s['admission_date']) && $s['admission_date'] > $from && $s['admission_date'] <= $to) {
-            $dt_adm = new DateTime($s['admission_date']);
-            $student_days = $dt_adm->diff($dt_to)->days + 1;
-        }
-
-        if (isset($attendance[$sid])) {
-            foreach ($attendance[$sid] as $date => $status) {
-                if ($status === 'P') $present++;
-                elseif ($status === 'L') $leave++;
-            }
-        }
-
-        $absent = $student_days - $present - $leave;
+        $present = $attendance[$sid]['P'] ?? 0;
+        $leave = $attendance[$sid]['L'] ?? 0;
+        $absent = $total_days - $present - $leave;
         if ($absent < 0) $absent = 0;
-        $pct = 0;
-        if ($student_days > 0) {
-            $pct = round((($present + $leave) / $student_days) * 100, 1);
-        }
+        $pct = $total_days > 0 ? round((($present + $leave) / $total_days) * 100, 1) : 0;
 
         $rows[] = [
             'reg_no' => $s['reg_no'],
             'name' => $s['name'],
             'father_name' => $s['father_name'],
             'class_title' => $s['class_title'],
+            'days' => $total_days,
             'present' => $present,
             'leave' => $leave,
             'absent' => $absent,
@@ -143,9 +122,10 @@ if ($submitted && $date_ok && isset($_GET['export']) && in_array($_GET['export']
         header('Content-Type: text/csv; charset=utf-8');
         header('Content-Disposition: attachment; filename="' . $filename_base . '.csv"');
         $out = fopen('php://output', 'w');
-        fputcsv($out, ['Reg No', 'Student Name', 'Father Name', 'Class', 'Days in Range', 'Present', 'Leave', 'Absent', 'Attendance %']);
+        fwrite($out, "\xEF\xBB\xBF");
+        fputcsv($out, ['Reg No', 'Student Name', 'Father Name', 'Class', 'Days', 'Present', 'Leave', 'Absent', 'Attendance %']);
         foreach ($data['rows'] as $r) {
-            fputcsv($out, [$r['reg_no'], $r['name'], $r['father_name'], $r['class_title'], $data['total_days'], $r['present'], $r['leave'], $r['absent'], $r['percentage'] . '%']);
+            fputcsv($out, [$r['reg_no'], $r['name'], $r['father_name'], $r['class_title'], $r['days'], $r['present'], $r['leave'], $r['absent'], $r['percentage'] . '%']);
         }
         fclose($out);
         exit;
@@ -158,7 +138,7 @@ if ($submitted && $date_ok && isset($_GET['export']) && in_array($_GET['export']
         echo '<html><head><meta charset="utf-8"></head><body>';
         echo '<table border="1" cellpadding="4" cellspacing="0">';
         echo '<tr style="background:#f1f5f9; font-weight:bold;">';
-        echo '<th>Reg No</th><th>Student Name</th><th>Father Name</th><th>Class</th><th>Days in Range</th><th>Present</th><th>Leave</th><th>Absent</th><th>Attendance %</th>';
+        echo '<th>Reg No</th><th>Student Name</th><th>Father Name</th><th>Class</th><th>Days</th><th>Present</th><th>Leave</th><th>Absent</th><th>Attendance %</th>';
         echo '</tr>';
         foreach ($data['rows'] as $r) {
             echo '<tr>';
@@ -166,7 +146,7 @@ if ($submitted && $date_ok && isset($_GET['export']) && in_array($_GET['export']
             echo '<td>' . htmlspecialchars($r['name']) . '</td>';
             echo '<td>' . htmlspecialchars($r['father_name']) . '</td>';
             echo '<td>' . htmlspecialchars($r['class_title']) . '</td>';
-            echo '<td align="center">' . $data['total_days'] . '</td>';
+            echo '<td align="center">' . $r['days'] . '</td>';
             echo '<td align="center">' . $r['present'] . '</td>';
             echo '<td align="center">' . $r['leave'] . '</td>';
             echo '<td align="center">' . $r['absent'] . '</td>';
@@ -179,7 +159,7 @@ if ($submitted && $date_ok && isset($_GET['export']) && in_array($_GET['export']
 }
 
 /* ============================================================
-   LOAD FILTER DROPDOWNS
+   LOAD DROPDOWNS
    ============================================================ */
 $classes = [];
 $c_res = $conn->query("SELECT id, title FROM classes WHERE status = 0 OR status IS NULL ORDER BY title");
@@ -197,6 +177,7 @@ $total_days = 0;
 $sum_present = 0;
 $sum_leave = 0;
 $sum_absent = 0;
+$sum_days = 0;
 $overall_pct = 0;
 
 if ($submitted && $date_ok) {
@@ -208,10 +189,10 @@ if ($submitted && $date_ok) {
         $sum_present += $r['present'];
         $sum_leave += $r['leave'];
         $sum_absent += $r['absent'];
+        $sum_days += $r['days'];
     }
-    $students_count = count($rows);
-    if ($students_count > 0 && $total_days > 0) {
-        $overall_pct = round((($sum_present + $sum_leave) / ($students_count * $total_days)) * 100, 1);
+    if ($sum_days > 0) {
+        $overall_pct = round((($sum_present + $sum_leave) / $sum_days) * 100, 1);
     }
 }
 
@@ -231,22 +212,16 @@ $export_url = '?from=' . urlencode($from) . '&to=' . urlencode($to) . '&class_id
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #f5f7fa; padding-bottom: 60px; }
 
-        .page-header-card {
-            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-            border-radius: 12px; padding: 22px 26px; color: #fff;
-            margin-bottom: 20px; display: flex; align-items: center;
-            justify-content: space-between; flex-wrap: wrap; gap: 16px;
-            box-shadow: 0 6px 22px rgba(37, 99, 235, 0.25);
-        }
+        .page-header-card { background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); border-radius: 12px; padding: 22px 26px; color: #fff; margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; box-shadow: 0 6px 22px rgba(37, 99, 235, 0.25); }
         .page-header-card .header-left { display: flex; align-items: center; gap: 16px; }
         .page-header-card .header-icon { width: 52px; height: 52px; background: rgba(255,255,255,0.18); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
         .page-header-card h1 { font-size: 21px; font-weight: 700; margin: 0; }
         .page-header-card .subtitle { font-size: 13px; opacity: 0.85; margin-top: 4px; }
         .page-header-card .header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-        .btn-white { background: #fff; color: #2563eb; border: 1px solid #fff; font-weight: 600; font-size: 13px; padding: 9px 16px; border-radius: 8px; display: inline-flex; align-items: center; gap: 7px; }
-        .btn-white:hover, .btn-white:focus { background: #f1f5f9; color: #1d4ed8; }
-        .btn-white-ghost { background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.3); font-weight: 600; font-size: 13px; padding: 9px 16px; border-radius: 8px; display: inline-flex; align-items: center; gap: 7px; }
-        .btn-white-ghost:hover, .btn-white-ghost:focus { background: rgba(255,255,255,0.25); color: #fff; }
+        .btn-white { background: #fff; color: #2563eb; border: 1px solid #fff; font-weight: 600; font-size: 13px; padding: 9px 16px; border-radius: 8px; display: inline-flex; align-items: center; gap: 7px; text-decoration: none; }
+        .btn-white:hover, .btn-white:focus { background: #f1f5f9; color: #1d4ed8; text-decoration: none; }
+        .btn-white-ghost { background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.3); font-weight: 600; font-size: 13px; padding: 9px 16px; border-radius: 8px; display: inline-flex; align-items: center; gap: 7px; text-decoration: none; }
+        .btn-white-ghost:hover, .btn-white-ghost:focus { background: rgba(255,255,255,0.25); color: #fff; text-decoration: none; }
 
         .filter-card { background: #fff; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.06); padding: 18px 22px; margin-bottom: 20px; border-top: 4px solid #2563eb; }
         .filter-card label { font-size: 12px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 6px; }
@@ -297,109 +272,38 @@ $export_url = '?from=' . urlencode($from) . '&to=' . urlencode($to) . '&class_id
         .pct-bar.low { background: #dc2626; }
         .pct-text { font-size: 12px; font-weight: 700; color: #1e293b; margin-left: 8px; }
 
-        .prompt-card {
-            background: #fff; border-radius: 12px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.06);
-            padding: 60px 30px; text-align: center;
-            border-top: 4px solid #2563eb;
-        }
-        .prompt-card .prompt-icon {
-            width: 80px; height: 80px;
-            background: #eff6ff; color: #2563eb;
-            border-radius: 50%; display: inline-flex;
-            align-items: center; justify-content: center;
-            font-size: 34px; margin-bottom: 18px;
-        }
+        .prompt-card { background: #fff; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.06); padding: 60px 30px; text-align: center; border-top: 4px solid #2563eb; }
+        .prompt-card .prompt-icon { width: 80px; height: 80px; background: #eff6ff; color: #2563eb; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 34px; margin-bottom: 18px; }
         .prompt-card h4 { font-size: 18px; font-weight: 700; color: #1e293b; margin: 0 0 8px 0; }
         .prompt-card p { font-size: 14px; color: #64748b; margin: 0; }
 
-        .btn-brand { background: #2563eb; border: 1px solid #2563eb; color: #fff; font-weight: 600; font-size: 13px; padding: 9px 18px; border-radius: 8px; display: inline-flex; align-items: center; gap: 7px; }
-        .btn-brand:hover, .btn-brand:focus { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
-        .btn-ghost { background: #f1f5f9; border: 1px solid #e2e8f0; color: #475569; font-weight: 600; font-size: 13px; padding: 9px 16px; border-radius: 8px; display: inline-flex; align-items: center; gap: 7px; }
-        .btn-ghost:hover, .btn-ghost:focus { background: #e2e8f0; color: #1e293b; }
+        .btn-brand { background: #2563eb; border: 1px solid #2563eb; color: #fff; font-weight: 600; font-size: 13px; padding: 9px 18px; border-radius: 8px; display: inline-flex; align-items: center; gap: 7px; text-decoration: none; }
+        .btn-brand:hover, .btn-brand:focus { background: #1d4ed8; border-color: #1d4ed8; color: #fff; text-decoration: none; }
 
         .print-header { display: none; }
 
         @media print {
             @page { margin: 12mm; }
-
-            /* Hide EVERYTHING, then reveal only the report */
             body * { visibility: hidden !important; }
             .print-area, .print-area * { visibility: visible !important; }
-
-            .print-area {
-                position: absolute !important;
-                left: 0 !important;
-                top: 0 !important;
-                width: 100% !important;
-                margin: 0 !important;
-                padding: 0 !important;
-            }
-
-            /* Belt + suspenders — force-hide chrome by display too */
-            .no-print, .page-header-card, .filter-card, .counter-row,
-            .prompt-card, nav, .navbar, header, footer,
+            .print-area { position: absolute !important; left: 0 !important; top: 0 !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
+            .no-print, .page-header-card, .filter-card, .counter-row, .prompt-card, nav, .navbar, header, footer,
             #navbar, #header, .navbar-fixed-top, .navbar-default { display: none !important; }
-
-            body {
-                background: #fff !important;
-                padding: 0 !important;
-                margin: 0 !important;
-                font-family: Arial, Helvetica, sans-serif;
-                color: #000;
-            }
-
-            .list-card {
-                box-shadow: none !important;
-                border-radius: 0 !important;
-                background: #fff !important;
-                border: none !important;
-                padding: 0 !important;
-                margin: 0 !important;
-                overflow: visible !important;
-            }
+            body { background: #fff !important; padding: 0 !important; margin: 0 !important; font-family: Arial, Helvetica, sans-serif; color: #000; }
+            .list-card { box-shadow: none !important; border-radius: 0 !important; background: #fff !important; border: none !important; padding: 0 !important; margin: 0 !important; overflow: visible !important; }
             .list-card-head { display: none !important; }
-
             .print-header { display: block !important; text-align: center; margin-bottom: 12px; visibility: visible !important; }
             .print-header h2 { font-size: 16px; font-weight: bold; margin: 0 0 4px 0; color: #000; }
             .print-header .meta { font-size: 11px; color: #333; }
 
-            table.rep-table {
-                width: 100% !important;
-                border-collapse: collapse !important;
-                font-size: 11px !important;
-                color: #000 !important;
-            }
-            table.rep-table thead th {
-                background: #fff !important;
-                color: #000 !important;
-                border: 1px solid #333 !important;
-                padding: 6px 8px !important;
-                font-size: 11px !important;
-                font-weight: bold !important;
-                text-align: left !important;
-                text-transform: none !important;
-                letter-spacing: normal !important;
-            }
+            table.rep-table { width: 100% !important; border-collapse: collapse !important; font-size: 11px !important; color: #000 !important; }
+            table.rep-table thead th { background: #fff !important; color: #000 !important; border: 1px solid #333 !important; padding: 6px 8px !important; font-size: 11px !important; font-weight: bold !important; text-align: left !important; text-transform: none !important; letter-spacing: normal !important; }
             table.rep-table thead th.center { text-align: center !important; }
-            table.rep-table tbody td {
-                border: 1px solid #333 !important;
-                padding: 5px 8px !important;
-                font-size: 11px !important;
-                color: #000 !important;
-                background: #fff !important;
-            }
+            table.rep-table tbody td { border: 1px solid #333 !important; padding: 5px 8px !important; font-size: 11px !important; color: #000 !important; background: #fff !important; }
             table.rep-table tbody td.center { text-align: center !important; }
             table.rep-table tbody tr:hover { background: #fff !important; }
 
-            .reg-badge, .num-pill, .student-name, .student-sub {
-                background: transparent !important;
-                color: #000 !important;
-                padding: 0 !important;
-                border: none !important;
-                font-weight: normal !important;
-                font-family: inherit !important;
-            }
+            .reg-badge, .num-pill, .student-name, .student-sub { background: transparent !important; color: #000 !important; padding: 0 !important; border: none !important; font-weight: normal !important; font-family: inherit !important; }
             .pct-bar-wrap, .pct-bar { display: none !important; }
             .pct-text { font-weight: normal !important; color: #000 !important; margin: 0 !important; }
         }
@@ -490,7 +394,7 @@ $export_url = '?from=' . urlencode($from) . '&to=' . urlencode($to) . '&class_id
         <div class="counter-row">
             <div class="counter-box days">
                 <div class="counter-number"><?php echo $total_days; ?></div>
-                <div class="counter-label">Days in Range</div>
+                <div class="counter-label">Days</div>
             </div>
             <div class="counter-box students">
                 <div class="counter-number"><?php echo count($rows); ?></div>
@@ -589,7 +493,7 @@ $export_url = '?from=' . urlencode($from) . '&to=' . urlencode($to) . '&class_id
                                 <?php endif; ?>
                             </td>
                             <td><?php echo htmlspecialchars($r['class_title']); ?></td>
-                            <td class="center"><?php echo $total_days; ?></td>
+                            <td class="center"><?php echo $r['days']; ?></td>
                             <td class="center"><span class="num-pill p"><?php echo $r['present']; ?></span></td>
                             <td class="center"><span class="num-pill l"><?php echo $r['leave']; ?></span></td>
                             <td class="center"><span class="num-pill a"><?php echo $r['absent']; ?></span></td>

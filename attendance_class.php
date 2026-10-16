@@ -22,6 +22,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
     $class_id   = intval($_POST['class_id'] ?? 0);
     $session_id = intval($_POST['session_id'] ?? 0);
     $date       = trim($_POST['date'] ?? date('Y-m-d'));
+    if ($date > date('Y-m-d')) $date = date('Y-m-d');
     $statuses   = $_POST['status'] ?? [];
     $remarks    = $_POST['remarks'] ?? [];
     $remarks_other = $_POST['remarks_other'] ?? [];
@@ -99,6 +100,8 @@ if ($class_res) {
 
 $date = isset($_GET['date']) ? trim($_GET['date']) : date('Y-m-d');
 if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) $date = date('Y-m-d');
+/* Never allow a future date — clamp to today */
+if ($date > date('Y-m-d')) $date = date('Y-m-d');
 
 $selected_session_id = isset($_GET['session_id']) ? intval($_GET['session_id']) : 0;
 if ($selected_session_id <= 0 && !empty($sessions)) {
@@ -438,7 +441,7 @@ if (isset($_SESSION['message'])) {
                     <div class="col-md-3">
                         <div class="form-group" style="margin-bottom: 0;">
                             <label for="date">Date</label>
-                            <input type="date" class="form-control" name="date" id="date" value="<?php echo htmlspecialchars($date); ?>" required>
+                            <input type="date" class="form-control" name="date" id="date" value="<?php echo htmlspecialchars($date); ?>" max="<?php echo date('Y-m-d'); ?>" required>
                         </div>
                     </div>
                     <div class="col-md-3">
@@ -494,7 +497,7 @@ if (isset($_SESSION['message'])) {
                     <div class="counter-number" id="counterLeave">0</div>
                     <div class="counter-label">On Leave</div>
                 </div>
-               
+
             </div>
 
             <form method="post" action="" id="attendanceForm">

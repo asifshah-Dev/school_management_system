@@ -86,6 +86,7 @@ $perms = current_user_perms($conn, __FILE__);
     .ico-subj  { background: #ede9fe; color: #6d28d9; }
     .ico-tch   { background: #fce7f3; color: #9d174d; }
     .ico-time  { background: #fef3c7; color: #b45309; }
+    .ico-print { background: #e0f2fe; color: #0369a1; }
     .ico-prom  { background: #d1fae5; color: #047857; }
     .ico-status{ background: #f1f5f9; color: #334155; }
 </style>
@@ -114,7 +115,7 @@ $perms = current_user_perms($conn, __FILE__);
                     <div class="ico ico-year"><i class="fas fa-calendar-alt"></i></div>
                     <div class="body">
                         <div class="t">Academic Years</div>
-                        <div class="d">Add, edit, and view academic sessions like 2026–2027</div>
+                        <div class="d">Add, edit, and view academic sessions like 2026&ndash;2027</div>
                     </div>
                     <i class="fas fa-arrow-right arrow"></i>
                 </div>
@@ -125,7 +126,7 @@ $perms = current_user_perms($conn, __FILE__);
                     <div class="ico ico-class"><i class="fas fa-chalkboard"></i></div>
                     <div class="body">
                         <div class="t">Classes</div>
-                        <div class="d">Add classes (Play Group, Nursery, Grade 1…) and their sections</div>
+                        <div class="d">Add classes (Play Group, Nursery, Grade 1&hellip;) and their sections</div>
                     </div>
                     <i class="fas fa-arrow-right arrow"></i>
                 </div>
@@ -136,7 +137,7 @@ $perms = current_user_perms($conn, __FILE__);
                     <div class="ico ico-sec"><i class="fas fa-layer-group"></i></div>
                     <div class="body">
                         <div class="t">Sections</div>
-                        <div class="d">Master list of sections (A, B, C…) used across all classes</div>
+                        <div class="d">Master list of sections (A, B, C&hellip;) used across all classes</div>
                     </div>
                     <i class="fas fa-arrow-right arrow"></i>
                 </div>
@@ -155,7 +156,7 @@ $perms = current_user_perms($conn, __FILE__);
                     <div class="ico ico-subj"><i class="fas fa-book-open"></i></div>
                     <div class="body">
                         <div class="t">Subjects</div>
-                        <div class="d">Subject master — standalone or composite with sub-subjects</div>
+                        <div class="d">Subject master &mdash; standalone or composite with sub-subjects</div>
                     </div>
                     <i class="fas fa-arrow-right arrow"></i>
                 </div>
@@ -189,6 +190,17 @@ $perms = current_user_perms($conn, __FILE__);
                     <div class="body">
                         <div class="t">Subject Timetable</div>
                         <div class="d">Build the weekly timetable per class with subject and teacher</div>
+                    </div>
+                    <i class="fas fa-arrow-right arrow"></i>
+                </div>
+            </a>
+
+            <a href="print_timetable.php" class="tile">
+                <div class="head-row">
+                    <div class="ico ico-print"><i class="fas fa-print"></i></div>
+                    <div class="body">
+                        <div class="t">Print Timetable</div>
+                        <div class="d">Printable class timetable for the wall &mdash; A4 landscape</div>
                     </div>
                     <i class="fas fa-arrow-right arrow"></i>
                 </div>

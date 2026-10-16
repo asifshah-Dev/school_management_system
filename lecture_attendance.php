@@ -16,6 +16,7 @@ $current_user_id = intval($_SESSION['user_id'] ?? 0);
 
 /* ============================================================
    POST — save attendance for one slot
+   Stores P, L, and A explicitly. Absent is now written, not deleted.
    ============================================================ */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
     $class_id     = intval($_POST['class_id'] ?? 0);
@@ -35,17 +36,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
         $day_id = intval(date('N', strtotime($date)));
         $class_section_id = 0;
 
+        /* Single upsert for all three statuses */
         $ins = $conn->prepare("INSERT INTO lecture_attendance (student_id, class_id, class_section_id, session_id, subject_id, time_slot_id, attendance_date, day_id, status, remarks, marked_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE status = VALUES(status), remarks = VALUES(remarks), marked_by = VALUES(marked_by), marked_at = NOW()");
-        $del = $conn->prepare("DELETE FROM lecture_attendance WHERE student_id = ? AND attendance_date = ? AND subject_id = ? AND time_slot_id = ?");
 
         $saved = 0;
-        $cleared = 0;
 
         foreach ($all_student_ids as $sid_raw) {
             $sid = intval($sid_raw);
             if ($sid <= 0) continue;
 
-            $st = isset($statuses[$sid]) ? trim($statuses[$sid]) : '';
+            /* Default to A when no status posted for the student */
+            $st = isset($statuses[$sid]) ? trim($statuses[$sid]) : 'A';
+            if ($st === '' || !in_array($st, ['P', 'L', 'A'], true)) $st = 'A';
 
             if ($st === 'P') {
                 $remark = '';
@@ -65,17 +67,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $can_edit) {
                     if ($ins->execute()) $saved++;
                 }
             } else {
-                if ($del) {
-                    $del->bind_param("iisi", $sid, $date, $subject_id, $time_slot_id);
-                    if ($del->execute()) $cleared++;
+                /* Absent — stored explicitly, no remark */
+                $remark = '';
+                if ($ins) {
+                    $ins->bind_param("iiiiiisissi", $sid, $class_id, $class_section_id, $session_id, $subject_id, $time_slot_id, $date, $day_id, $st, $remark, $current_user_id);
+                    if ($ins->execute()) $saved++;
                 }
             }
         }
 
         if ($ins) $ins->close();
-        if ($del) $del->close();
 
-        $_SESSION['message'] = 'Lecture attendance saved. ' . $saved . ' marked, ' . $cleared . ' left absent.';
+        $_SESSION['message'] = 'Lecture attendance saved. ' . $saved . ' record(s) written (Present / Leave / Absent).';
         $_SESSION['message_type'] = 'success';
     } else {
         $_SESSION['message'] = 'Missing required fields.';
@@ -461,7 +464,7 @@ if (isset($_SESSION['message'])) {
             <?php else: ?>
                 <div class="info-note amber">
                     <i class="fas fa-exclamation-triangle"></i>
-                    <span>Attendance has <strong>not been taken yet</strong> for this lecture. Nobody is marked absent until you save.</span>
+                    <span>Attendance has <strong>not been taken yet</strong> for this lecture. Unmarked students default to <strong>Absent</strong> when you save.</span>
                 </div>
             <?php endif; ?>
 
@@ -536,7 +539,7 @@ if (isset($_SESSION['message'])) {
                                     $row_class = '';
                                     if ($cur_status === 'P') $row_class = 'row-present';
                                     elseif ($cur_status === 'L') $row_class = 'row-leave';
-                                    elseif ($attendance_taken) $row_class = 'row-absent';
+                                    elseif ($cur_status === 'A') $row_class = 'row-absent';
 
                                     $remark_is_other = ($cur_status === 'L' && $cur_remark !== '' && !in_array($cur_remark, $leave_reasons));
                                     $remark_select_val = $remark_is_other ? 'Other' : $cur_remark;
@@ -588,7 +591,7 @@ if (isset($_SESSION['message'])) {
                     <?php if ($can_edit): ?>
                         <div class="action-bar">
                             <div style="font-size: 13px; color: #64748b;">
-                                <i class="fas fa-info-circle"></i> Unmarked students are saved as <strong>Absent</strong> (no record).
+                                <i class="fas fa-info-circle"></i> Every student is saved: <strong>P</strong>, <strong>L</strong>, or <strong>A</strong>.
                             </div>
                             <div>
                                 <button type="submit" class="btn-success-brand" id="btnSave"><i class="fas fa-save"></i> Save Attendance</button>
@@ -627,8 +630,6 @@ if (isset($_SESSION['message'])) {
     </div>
 
     <script>
-    var ATTENDANCE_TAKEN = <?php echo $attendance_taken ? 'true' : 'false'; ?>;
-
     $(document).ready(function() {
         $('#dateInput, #sessionSelect, #classSelect').on('change', function() {
             $('#filterForm').submit();
@@ -638,7 +639,7 @@ if (isset($_SESSION['message'])) {
             $row.removeClass('row-present row-leave row-absent');
             if (status === 'P') $row.addClass('row-present');
             else if (status === 'L') $row.addClass('row-leave');
-            else if (status === 'A' || ATTENDANCE_TAKEN) $row.addClass('row-absent');
+            else if (status === 'A') $row.addClass('row-absent');
 
             $row.find('.radio-pill').removeClass('checked');
             if (status === 'P') $row.find('.radio-pill.present').addClass('checked');
@@ -659,7 +660,7 @@ if (isset($_SESSION['message'])) {
                 if (val === 'P') present++;
                 else if (val === 'A') absent++;
                 else if (val === 'L') leave++;
-                else { unmarked++; if (ATTENDANCE_TAKEN) absent++; }
+                else unmarked++;
             });
             $('#counterTotal').text(total);
             $('#counterPresent').text(present);
