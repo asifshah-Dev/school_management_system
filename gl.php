@@ -93,36 +93,45 @@ $sql = "SELECT id, code, name, account_type, parent_id, is_postable, is_system, 
  */
 function gl_suggest_next_code(mysqli $conn, string $parentCode): ?string {
     $codeLen = strlen($parentCode);
+    if ($codeLen < 2) return '1010';
     $sharedPrefix = substr($parentCode, 0, 2);
 
-    $stmt = $conn->prepare("
-        SELECT code FROM gl_accounts
-        WHERE code COLLATE utf8mb4_general_ci LIKE CONCAT(? COLLATE utf8mb4_general_ci, '%')
-          AND code COLLATE utf8mb4_general_ci <> ? COLLATE utf8mb4_general_ci
-          AND LENGTH(code) = ?
-        ORDER BY CAST(SUBSTRING(code, 3) AS UNSIGNED) DESC
-        LIMIT 1
-    ");
-    $stmt->bind_param("ssi", $sharedPrefix, $parentCode, $codeLen);
-    $stmt->execute();
-    $row = $stmt->get_result()->fetch_assoc();
-    $stmt->close();
-
-    if (!$row) {
+    $stmt = $conn->prepare("SELECT code FROM gl_accounts WHERE LENGTH(code) = ?");
+    if (!$stmt) return $sharedPrefix . '10';
+    $stmt->bind_param("i", $codeLen);
+    if (!$stmt->execute()) {
+        $stmt->close();
+        return $sharedPrefix . '10';
+    }
+    $res = $stmt->get_result();
+    if (!$res) {
+        $stmt->close();
         return $sharedPrefix . '10';
     }
 
-    $lastCode  = $row['code'];
-    $suffixStr = substr($lastCode, 2);
-    $suffixNum = (int)$suffixStr;
-    $nextNum   = $suffixNum + 10;
+    $maxSuffix = 0;
+    $found = false;
+    while ($row = $res->fetch_assoc()) {
+        $code = $row['code'];
+        if (strlen($code) !== $codeLen) continue;
+        if (substr($code, 0, 2) !== $sharedPrefix) continue;
+        if ($code === $parentCode) continue;
+        $suffixStr = substr($code, 2);
+        if (!ctype_digit($suffixStr)) continue;
+        $suffixNum = (int)$suffixStr;
+        if ($suffixNum > $maxSuffix) $maxSuffix = $suffixNum;
+        $found = true;
+    }
+    $stmt->close();
 
-    if ($nextNum > 99) {
-        $baseCode = (int)$lastCode;
-        $nextBase = (floor($baseCode / 100) + 1) * 100;
-        return str_pad((string)$nextBase, $codeLen, '0', STR_PAD_LEFT);
+    if (!$found) {
+        return $sharedPrefix . '10';
     }
 
+    $nextNum = $maxSuffix + 10;
+    if ($nextNum > 99) {
+        return $sharedPrefix . str_pad((string)$nextNum, $codeLen - 2, '0', STR_PAD_LEFT);
+    }
     return $sharedPrefix . str_pad((string)$nextNum, 2, '0', STR_PAD_LEFT);
 }
 
