@@ -11,9 +11,10 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-/* ============================================================
-   FILTERS
-   ============================================================ */
+$mode = isset($_GET['mode']) ? $_GET['mode'] : 'single';
+if (!in_array($mode, ['single', 'multi', 'teacher'], true)) $mode = 'single';
+
+/* ─────────── Session ─────────── */
 $session_id = (int)($_GET['session_id'] ?? 0);
 if ($session_id === 0) {
     $r = $conn->query("SELECT id FROM sessions WHERE status = 0 ORDER BY id DESC LIMIT 1");
@@ -24,84 +25,184 @@ $sessions = [];
 $s_res = $conn->query("SELECT id, title FROM sessions ORDER BY id DESC");
 if ($s_res) while ($r = $s_res->fetch_assoc()) $sessions[$r['id']] = $r['title'];
 
+$session_title = $sessions[$session_id] ?? '';
+
+/* ─────────── Class options (hybrid) ─────────── */
 $class_options = [];
 $q = $conn->query("SELECT c.id AS class_id, c.title AS class_title, COALESCE(cs.id, 0) AS class_section_id, s.title AS section_title, CASE WHEN cs.id IS NULL THEN c.title ELSE CONCAT(c.title, ' - ', s.title) END AS display_label FROM classes c LEFT JOIN class_sections cs ON cs.class_id = c.id AND (cs.status = 0 OR cs.status IS NULL) LEFT JOIN sections s ON s.id = cs.section_id WHERE c.status = 0 OR c.status IS NULL ORDER BY c.title, s.title");
 if ($q) while ($r = $q->fetch_assoc()) $class_options[] = $r;
 
-$sel_class_id         = (int)($_GET['class_id'] ?? 0);
-$sel_class_section_id = (int)($_GET['class_section_id'] ?? 0);
-
+/* ─────────── Time slots & days ─────────── */
 $time_slots = [];
 $q = $conn->query("SELECT id, title, start_time, end_time FROM time_slots ORDER BY start_time");
 if ($q) while ($r = $q->fetch_assoc()) $time_slots[] = $r;
 
 $days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-$sel_label = '';
-foreach ($class_options as $co) {
-    if ((int)$co['class_id'] === $sel_class_id && (int)$co['class_section_id'] === $sel_class_section_id) {
-        $sel_label = $co['display_label'];
-        break;
+/* ─────────── Teachers ─────────── */
+$teachers_list = [];
+$q = $conn->query("SELECT id, username FROM users WHERE role_id = 3 AND (status = 0 OR status IS NULL) ORDER BY username COLLATE utf8mb4_general_ci");
+if ($q) while ($r = $q->fetch_assoc()) $teachers_list[] = $r;
+
+/* ─────────── Selected classes / teachers ─────────── */
+function parse_class_picks($raw) {
+    /* each entry "class_id|class_section_id" */
+    $out = [];
+    if (!is_array($raw)) return $out;
+    foreach ($raw as $v) {
+        $parts = explode('|', (string)$v);
+        $cid = isset($parts[0]) ? (int)$parts[0] : 0;
+        $csid = isset($parts[1]) ? (int)$parts[1] : 0;
+        if ($cid > 0) $out[] = ['class_id' => $cid, 'class_section_id' => $csid];
+    }
+    return $out;
+}
+
+$selected_classes = [];
+if ($mode === 'single') {
+    $cid  = (int)($_GET['class_id'] ?? 0);
+    $csid = (int)($_GET['class_section_id'] ?? 0);
+    if ($cid > 0) $selected_classes[] = ['class_id' => $cid, 'class_section_id' => $csid];
+} elseif ($mode === 'multi') {
+    if (!empty($_GET['picks'])) {
+        $selected_classes = parse_class_picks($_GET['picks']);
+    } elseif (isset($_GET['class_id']) && (int)$_GET['class_id'] > 0) {
+        /* fallback from Edit button */
+        $selected_classes[] = [
+            'class_id'         => (int)$_GET['class_id'],
+            'class_section_id' => (int)($_GET['class_section_id'] ?? 0)
+        ];
     }
 }
-$session_title = $sessions[$session_id] ?? '';
 
-/* ============================================================
-   TIMETABLE DATA
-   ============================================================ */
-$timetable_data = [];
-if ($sel_class_id > 0) {
-    if ($sel_class_section_id > 0) {
-        $stmt = $conn->prepare("SELECT t.day_id, t.time_slot_id, t.room_no, s.title AS subject_title, u.username AS teacher_name FROM timetable t LEFT JOIN subjects s ON s.id = t.subject_id LEFT JOIN users u ON u.id = t.teacher_id WHERE t.class_id = ? AND t.class_section_id = ?");
-        $stmt->bind_param("ii", $sel_class_id, $sel_class_section_id);
+$selected_teachers = [];
+if ($mode === 'teacher') {
+    if (!empty($_GET['teacher_ids']) && is_array($_GET['teacher_ids'])) {
+        foreach ($_GET['teacher_ids'] as $tid) {
+            $tid = (int)$tid;
+            if ($tid > 0) $selected_teachers[] = $tid;
+        }
+    }
+}
+
+/* ─────────── Label helpers ─────────── */
+function class_label_lookup($class_options) {
+    $m = [];
+    foreach ($class_options as $co) {
+        $m[$co['class_id'] . '|' . $co['class_section_id']] = $co['display_label'];
+    }
+    return $m;
+}
+$class_labels = class_label_lookup($class_options);
+
+function teacher_name_lookup($teachers_list) {
+    $m = [];
+    foreach ($teachers_list as $t) $m[(int)$t['id']] = $t['username'];
+    return $m;
+}
+$teacher_names = teacher_name_lookup($teachers_list);
+
+/* ─────────── Load timetable data ─────────── */
+function load_timetable_for_class($conn, $class_id, $class_section_id) {
+    $rows = [];
+    if ($class_section_id > 0) {
+        $stmt = $conn->prepare("SELECT t.day_id, t.time_slot_id, t.room_no, t.subject_id, t.teacher_id, s.title AS subject_title, u.username AS teacher_name FROM timetable t LEFT JOIN subjects s ON s.id = t.subject_id LEFT JOIN users u ON u.id = t.teacher_id WHERE t.class_id = ? AND t.class_section_id = ?");
+        $stmt->bind_param("ii", $class_id, $class_section_id);
     } else {
-        $stmt = $conn->prepare("SELECT t.day_id, t.time_slot_id, t.room_no, s.title AS subject_title, u.username AS teacher_name FROM timetable t LEFT JOIN subjects s ON s.id = t.subject_id LEFT JOIN users u ON u.id = t.teacher_id WHERE t.class_id = ? AND t.class_section_id IS NULL");
-        $stmt->bind_param("i", $sel_class_id);
+        $stmt = $conn->prepare("SELECT t.day_id, t.time_slot_id, t.room_no, t.subject_id, t.teacher_id, s.title AS subject_title, u.username AS teacher_name FROM timetable t LEFT JOIN subjects s ON s.id = t.subject_id LEFT JOIN users u ON u.id = t.teacher_id WHERE t.class_id = ? AND t.class_section_id IS NULL");
+        $stmt->bind_param("i", $class_id);
     }
-    if ($stmt) {
-        $stmt->execute();
-        $res = $stmt->get_result();
-        if ($res) {
-            while ($row = $res->fetch_assoc()) {
-                $timetable_data[(int)$row['day_id']][(int)$row['time_slot_id']] = $row;
-            }
+    if (!$stmt) return $rows;
+    $stmt->execute();
+    $res = $stmt->get_result();
+    if ($res) {
+        while ($row = $res->fetch_assoc()) {
+            $rows[(int)$row['day_id']][(int)$row['time_slot_id']] = $row;
         }
-        $stmt->close();
     }
+    $stmt->close();
+    return $rows;
 }
 
-/* Build export grid — plain array, reused by JS for CSV + XLSX */
+/* Per-class data keyed by "cid|csid" */
+$class_timetables = [];
+foreach ($selected_classes as $sc) {
+    $key = $sc['class_id'] . '|' . $sc['class_section_id'];
+    $class_timetables[$key] = [
+        'class_id'         => $sc['class_id'],
+        'class_section_id' => $sc['class_section_id'],
+        'label'            => $class_labels[$key] ?? ('Class ' . $sc['class_id']),
+        'data'             => load_timetable_for_class($conn, $sc['class_id'], $sc['class_section_id']),
+    ];
+}
+
+/* Teacher data: fetch all timetable rows where teacher_id = ? */
+function load_timetable_for_teacher($conn, $teacher_id) {
+    $rows = [];
+    $stmt = $conn->prepare("SELECT t.day_id, t.time_slot_id, t.room_no, t.class_id, t.class_section_id, s.title AS subject_title, c.title AS class_title, sec.title AS section_title FROM timetable t LEFT JOIN subjects s ON s.id = t.subject_id LEFT JOIN classes c ON c.id = t.class_id LEFT JOIN sections sec ON sec.id = (SELECT section_id FROM class_sections WHERE id = t.class_section_id) WHERE t.teacher_id = ? ORDER BY t.day_id, t.time_slot_id");
+    if (!$stmt) return $rows;
+    $stmt->bind_param("i", $teacher_id);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    if ($res) {
+        while ($row = $res->fetch_assoc()) {
+            $rows[(int)$row['day_id']][(int)$row['time_slot_id']] = $row;
+        }
+    }
+    $stmt->close();
+    return $rows;
+}
+
+$teacher_timetables = [];
+foreach ($selected_teachers as $tid) {
+    $teacher_timetables[$tid] = [
+        'teacher_id' => $tid,
+        'label'      => $teacher_names[$tid] ?? ('Teacher ' . $tid),
+        'data'       => load_timetable_for_teacher($conn, $tid),
+    ];
+}
+
+/* ─────────── Export grid for single-class mode (unchanged behavior) ─────────── */
 $grid_rows = [];
-foreach ($time_slots as $slot) {
-    $slot_id = (int)$slot['id'];
-    $period_label = ($slot['title'] ?: ('Period ' . $slot_id)) . ' (' . date('H:i', strtotime($slot['start_time'])) . '-' . date('H:i', strtotime($slot['end_time'])) . ')';
-
-    $row = ['period' => $period_label, 'cells' => []];
-    foreach ($days as $di => $day) {
-        $day_id = $di + 1;
-        $cell = $timetable_data[$day_id][$slot_id] ?? null;
-        $val = '';
-        if ($cell) {
-            $parts = [];
-            if (!empty($cell['subject_title'])) $parts[] = $cell['subject_title'];
-            if (!empty($cell['teacher_name'])) $parts[] = $cell['teacher_name'];
-            if (!empty($cell['room_no'])) $parts[] = 'Room ' . $cell['room_no'];
-            $val = implode(' / ', $parts);
-        }
-        $row['cells'][] = $val;
-    }
-    $grid_rows[] = $row;
-}
-
 $export_title = 'School Management System - Class Timetable';
-$export_meta  = 'Class: ' . ($sel_label ?: '-') . '   |   Session: ' . ($session_title ?: '-') . '   |   Printed: ' . date('d M Y');
-$export_filename = 'timetable_' . preg_replace('/[^A-Za-z0-9_-]+/', '_', $sel_label ?: 'class') . '_' . date('Y-m-d');
+$export_meta = '';
+$export_filename = 'timetable_' . date('Y-m-d');
+
+if ($mode === 'single' && !empty($class_timetables)) {
+    $key = array_key_first($class_timetables);
+    $single = $class_timetables[$key];
+    $timetable_data = $single['data'];
+    $sel_label = $single['label'];
+
+    foreach ($time_slots as $slot) {
+        $slot_id = (int)$slot['id'];
+        $period_label = ($slot['title'] ?: ('Period ' . $slot_id)) . ' (' . date('H:i', strtotime($slot['start_time'])) . '-' . date('H:i', strtotime($slot['end_time'])) . ')';
+        $row = ['period' => $period_label, 'cells' => []];
+        foreach ($days as $di => $day) {
+            $day_id = $di + 1;
+            $cell = $timetable_data[$day_id][$slot_id] ?? null;
+            $val = '';
+            if ($cell) {
+                $parts = [];
+                if (!empty($cell['subject_title'])) $parts[] = $cell['subject_title'];
+                if (!empty($cell['teacher_name'])) $parts[] = $cell['teacher_name'];
+                if (!empty($cell['room_no'])) $parts[] = 'Room ' . $cell['room_no'];
+                $val = implode(' / ', $parts);
+            }
+            $row['cells'][] = $val;
+        }
+        $grid_rows[] = $row;
+    }
+
+    $export_meta = 'Class: ' . $sel_label . '   |   Session: ' . ($session_title ?: '-') . '   |   Printed: ' . date('d M Y');
+    $export_filename = 'timetable_' . preg_replace('/[^A-Za-z0-9_-]+/', '_', $sel_label ?: 'class') . '_' . date('Y-m-d');
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Print Timetable<?php echo $sel_label ? ' — ' . htmlspecialchars($sel_label) : ''; ?></title>
+<title>Print Timetable</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -118,27 +219,66 @@ $export_filename = 'timetable_' . preg_replace('/[^A-Za-z0-9_-]+/', '_', $sel_la
         display: flex; justify-content: space-between; align-items: flex-end;
         gap: 20px; flex-wrap: wrap;
     }
-    .head h1 { font-size: 26px; font-weight: 700; }
+    .head h1 { font-size: 24px; font-weight: 700; }
     .head .sub { font-size: 14px; opacity: 0.9; margin-top: 6px; }
     .head .actions { display: flex; gap: 10px; flex-wrap: wrap; }
     .btn-white { background: #fff; color: #1e40af; border: 1px solid #fff; font-weight: 700; font-size: 13px; padding: 10px 20px; border-radius: 8px; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; text-decoration: none; font-family: inherit; }
-    .btn-white:hover, .btn-white:focus { background: #f1f5f9; color: #1e3a8a; }
+    .btn-white:hover, .btn-white:focus { background: #f1f5f9; color: #1e3a8a; text-decoration: none; }
     .btn-white-ghost { background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.3); font-weight: 700; font-size: 13px; padding: 10px 20px; border-radius: 8px; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; text-decoration: none; font-family: inherit; }
-    .btn-white-ghost:hover, .btn-white-ghost:focus { background: rgba(255,255,255,0.25); color: #fff; }
+    .btn-white-ghost:hover, .btn-white-ghost:focus { background: rgba(255,255,255,0.25); color: #fff; text-decoration: none; }
 
     .card { background: #fff; padding: 26px 32px 34px 32px; border-radius: 0 0 12px 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
 
     .selector { display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap; padding-bottom: 20px; margin-bottom: 22px; border-bottom: 1px solid #e2e8f0; }
-    .selector .field { min-width: 260px; }
+    .selector .field { min-width: 240px; }
     .selector label { display: block; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
     .selector select { width: 100%; height: 42px; padding: 0 14px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px; font-family: inherit; background: #fff; }
     .selector select:focus { outline: none; border-color: #1e40af; box-shadow: 0 0 0 4px rgba(30,64,175,0.1); }
+
+    /* Multi-select checkbox grid */
+    .pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-bottom: 22px; }
+    .pick-card {
+        display: flex; align-items: center; gap: 10px;
+        padding: 10px 14px; background: #fff;
+        border: 1.5px solid #e2e8f0; border-radius: 10px;
+        cursor: pointer; transition: all 0.15s; user-select: none;
+        font-size: 13px; font-weight: 600; color: #1e293b;
+    }
+    .pick-card:hover { border-color: #93c5fd; background: #f8fafc; }
+    .pick-card input[type="checkbox"] { width: 16px; height: 16px; accent-color: #1e40af; cursor: pointer; margin: 0; }
+    .pick-card:has(input:checked) { border-color: #1e40af; background: #eff6ff; }
+    .pick-card:has(input:checked) { color: #1e3a8a; }
+
+    .pick-toolbar { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+    .pick-toolbar button {
+        background: #f1f5f9; border: 1px solid #e2e8f0; color: #475569;
+        padding: 7px 14px; border-radius: 8px; font-size: 12px; font-weight: 700;
+        cursor: pointer; font-family: inherit;
+    }
+    .pick-toolbar button:hover { background: #e2e8f0; color: #1e293b; }
 
     .empty { padding: 60px 20px; text-align: center; color: #94a3b8; }
     .empty .big { font-size: 44px; opacity: 0.4; margin-bottom: 10px; }
     .empty h3 { font-size: 17px; color: #475569; font-weight: 600; margin-bottom: 6px; }
 
-    .print-area { background: #fff; }
+    /* Each class/teacher block */
+    .print-block {
+        margin-bottom: 30px;
+        padding-bottom: 22px;
+        border-bottom: 2px dashed #cbd5e1;
+        position: relative;
+    }
+    .print-block:last-child { border-bottom: none; margin-bottom: 0; }
+    .print-block .block-tools {
+        display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 10px;
+    }
+    .print-block .block-tools button {
+        background: #1e40af; border: 1px solid #1e40af; color: #fff;
+        padding: 6px 12px; border-radius: 7px; font-size: 11.5px; font-weight: 700;
+        cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 5px;
+    }
+    .print-block .block-tools button:hover { background: #1e3a8a; }
+
     .print-head { text-align: center; padding-bottom: 14px; border-bottom: 2px solid #000; margin-bottom: 14px; }
     .print-head .school { font-size: 20px; font-weight: 800; letter-spacing: 0.5px; color: #000; text-transform: uppercase; }
     .print-head .doctype { font-size: 13px; font-weight: 600; color: #000; margin-top: 4px; }
@@ -160,15 +300,19 @@ $export_filename = 'timetable_' . preg_replace('/[^A-Za-z0-9_-]+/', '_', $sel_la
     .cell-room { font-size: 10px; color: #666; margin-top: 2px; }
     .cell-empty { font-size: 12px; color: #cbd5e1; text-align: center; }
 
+    /* ---------- PRINT ---------- */
     @media print {
         @page { size: A4 landscape; margin: 10mm; }
         body { background: #fff !important; padding: 0 !important; margin: 0 !important; }
         body * { visibility: hidden !important; }
         .print-area, .print-area * { visibility: visible !important; }
         .print-area { position: absolute !important; left: 0 !important; top: 0 !important; width: 100% !important; padding: 0 !important; margin: 0 !important; background: #fff !important; }
-        .no-print, .head, .selector, nav, .navbar, header, footer,
+        .no-print, .head, .selector, .pick-grid, .pick-toolbar, nav, .navbar, header, footer,
         #navbar, #header, .navbar-fixed-top, .navbar-default { display: none !important; }
         .card { box-shadow: none !important; padding: 0 !important; border-radius: 0 !important; }
+        .print-block { margin: 0 0 8mm 0 !important; padding: 0 !important; border-bottom: none !important; page-break-after: always !important; break-after: page !important; }
+        .print-block:last-child { page-break-after: auto !important; break-after: auto !important; }
+        .print-block .block-tools { display: none !important; }
         .print-head { border-bottom: 2px solid #000 !important; margin-bottom: 10px !important; }
         .print-head .school { font-size: 16px !important; }
         .print-head .doctype { font-size: 12px !important; }
@@ -182,6 +326,12 @@ $export_filename = 'timetable_' . preg_replace('/[^A-Za-z0-9_-]+/', '_', $sel_la
         .cell-subj { font-size: 11px !important; }
         .cell-tch  { font-size: 10px !important; }
         .cell-room { font-size: 9px !important; }
+
+        /* Hide everything except the block being individually printed */
+        body.print-one .print-block { display: none !important; visibility: hidden !important; }
+        body.print-one .print-block.print-target { display: block !important; visibility: visible !important; page-break-after: auto !important; break-after: auto !important; }
+        body.print-one .print-block.print-target,
+        body.print-one .print-block.print-target * { visibility: visible !important; }
     }
 </style>
 </head>
@@ -192,25 +342,29 @@ $export_filename = 'timetable_' . preg_replace('/[^A-Za-z0-9_-]+/', '_', $sel_la
 
     <div class="head no-print">
         <div>
-            <h1><i class="fas fa-print"></i> Print Timetable</h1>
+            <h1>
+                <i class="fas fa-print"></i>
+                <?php if ($mode === 'multi'): ?>Print Multiple Classes
+                <?php elseif ($mode === 'teacher'): ?>Print Teacher Timetables
+                <?php else: ?>Print Timetable<?php endif; ?>
+            </h1>
             <div class="sub">
-                <?php echo $sel_label ? htmlspecialchars($sel_label) : 'Pick a class'; ?>
-                <?php if ($session_title): ?> &middot; <?php echo htmlspecialchars($session_title); ?><?php endif; ?>
+                <?php if ($session_title): ?>Session: <?= htmlspecialchars($session_title); ?><?php endif; ?>
             </div>
         </div>
         <div class="actions">
-            <a href="create_timetable.php?session_id=<?php echo (int)$session_id; ?><?php echo $sel_class_id ? '&class_id=' . (int)$sel_class_id . '&class_section_id=' . (int)$sel_class_section_id : ''; ?>" class="btn-white-ghost">
+            <a href="create_timetable.php?session_id=<?= (int)$session_id; ?><?php if ($mode === 'single' && !empty($selected_classes)): ?>&class_id=<?= (int)$selected_classes[0]['class_id']; ?>&class_section_id=<?= (int)$selected_classes[0]['class_section_id']; ?><?php endif; ?>" class="btn-white-ghost">
                 <i class="fas fa-pen"></i> Edit
             </a>
-            <?php if ($sel_class_id > 0 && !empty($time_slots)): ?>
-                <button type="button" class="btn-white-ghost" id="btnExportCsv">
-                    <i class="fas fa-file-csv"></i> CSV
-                </button>
-                <button type="button" class="btn-white-ghost" id="btnExportXlsx">
-                    <i class="fas fa-file-excel"></i> Excel
-                </button>
+            <a href="print_timetable.php?mode=multi&session_id=<?= (int)$session_id; ?>" class="btn-white-ghost">
+                <i class="fas fa-layer-group"></i> Multiple Classes
+            </a>
+            <a href="print_timetable.php?mode=teacher&session_id=<?= (int)$session_id; ?>" class="btn-white-ghost">
+                <i class="fas fa-user-tie"></i> By Teacher
+            </a>
+            <?php if (($mode === 'multi' && !empty($class_timetables)) || ($mode === 'teacher' && !empty($teacher_timetables)) || ($mode === 'single' && !empty($class_timetables))): ?>
                 <button type="button" class="btn-white" onclick="window.print();">
-                    <i class="fas fa-print"></i> Print
+                    <i class="fas fa-print"></i> Print All
                 </button>
             <?php endif; ?>
         </div>
@@ -218,44 +372,18 @@ $export_filename = 'timetable_' . preg_replace('/[^A-Za-z0-9_-]+/', '_', $sel_la
 
     <div class="card">
 
-        <form method="get" class="selector no-print">
+        <!-- Session selector -->
+        <form method="get" class="selector no-print" id="filterForm">
+            <input type="hidden" name="mode" value="<?= htmlspecialchars($mode); ?>">
             <div class="field">
                 <label>Session</label>
                 <select name="session_id" onchange="this.form.submit()">
                     <?php foreach ($sessions as $sid => $sname): ?>
-                        <option value="<?php echo (int)$sid; ?>" <?php echo ((int)$sid === $session_id) ? 'selected' : ''; ?>><?php echo htmlspecialchars($sname); ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-            <div class="field">
-                <label>Class / Class-Section</label>
-                <select name="pick" onchange="onPick(this)">
-                    <option value="">— Select —</option>
-                    <?php foreach ($class_options as $co):
-                        $val = $co['class_id'] . '|' . $co['class_section_id'];
-                        $sel = ((int)$co['class_id'] === $sel_class_id && (int)$co['class_section_id'] === $sel_class_section_id);
-                    ?>
-                        <option value="<?php echo htmlspecialchars($val); ?>" <?php echo $sel ? 'selected' : ''; ?>><?php echo htmlspecialchars($co['display_label']); ?></option>
+                        <option value="<?= (int)$sid; ?>" <?= ((int)$sid === $session_id) ? 'selected' : ''; ?>><?= htmlspecialchars($sname); ?></option>
                     <?php endforeach; ?>
                 </select>
             </div>
         </form>
-        <form method="get" id="pickForm" style="display:none;">
-            <input type="hidden" name="session_id" value="<?php echo (int)$session_id; ?>">
-            <input type="hidden" name="class_id" id="p_class_id">
-            <input type="hidden" name="class_section_id" id="p_class_section_id">
-        </form>
-
-        <script>
-        function onPick(sel) {
-            var v = sel.value || '';
-            if (!v) { location.href = 'print_timetable.php?session_id=' + <?php echo (int)$session_id; ?>; return; }
-            var p = v.split('|');
-            document.getElementById('p_class_id').value = p[0] || 0;
-            document.getElementById('p_class_section_id').value = p[1] || 0;
-            document.getElementById('pickForm').submit();
-        }
-        </script>
 
         <?php if (empty($time_slots)): ?>
             <div class="empty no-print">
@@ -263,164 +391,306 @@ $export_filename = 'timetable_' . preg_replace('/[^A-Za-z0-9_-]+/', '_', $sel_la
                 <h3>No time slots defined</h3>
                 <p>Add periods in Time Slots first.</p>
             </div>
-        <?php elseif ($sel_class_id === 0): ?>
-            <div class="empty no-print">
-                <div class="big"><i class="fas fa-graduation-cap"></i></div>
-                <h3>Pick a class to preview</h3>
+
+        <?php elseif ($mode === 'single'): ?>
+            <!-- SINGLE MODE — unchanged selector -->
+            <form method="get" class="selector no-print">
+                <input type="hidden" name="mode" value="single">
+                <div class="field">
+                    <label>Session</label>
+                    <select name="session_id" onchange="this.form.submit()">
+                        <?php foreach ($sessions as $sid => $sname): ?>
+                            <option value="<?= (int)$sid; ?>" <?= ((int)$sid === $session_id) ? 'selected' : ''; ?>><?= htmlspecialchars($sname); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="field">
+                    <label>Class / Class-Section</label>
+                    <select name="pick" onchange="onPick(this)">
+                        <option value="">— Select —</option>
+                        <?php foreach ($class_options as $co):
+                            $val = $co['class_id'] . '|' . $co['class_section_id'];
+                            $sel = !empty($selected_classes)
+                                && (int)$co['class_id'] === (int)$selected_classes[0]['class_id']
+                                && (int)$co['class_section_id'] === (int)$selected_classes[0]['class_section_id'];
+                        ?>
+                            <option value="<?= htmlspecialchars($val); ?>" <?= $sel ? 'selected' : ''; ?>><?= htmlspecialchars($co['display_label']); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            </form>
+            <form method="get" id="pickForm" style="display:none;">
+                <input type="hidden" name="mode" value="single">
+                <input type="hidden" name="session_id" value="<?= (int)$session_id; ?>">
+                <input type="hidden" name="class_id" id="p_class_id">
+                <input type="hidden" name="class_section_id" id="p_class_section_id">
+            </form>
+            <script>
+            function onPick(sel) {
+                var v = sel.value || '';
+                if (!v) { location.href = 'print_timetable.php?mode=single&session_id=' + <?= (int)$session_id; ?>; return; }
+                var p = v.split('|');
+                document.getElementById('p_class_id').value = p[0] || 0;
+                document.getElementById('p_class_section_id').value = p[1] || 0;
+                document.getElementById('pickForm').submit();
+            }
+            </script>
+
+            <?php if (empty($class_timetables)): ?>
+                <div class="empty no-print">
+                    <div class="big"><i class="fas fa-graduation-cap"></i></div>
+                    <h3>Pick a class to preview</h3>
+                </div>
+            <?php endif; ?>
+
+        <?php elseif ($mode === 'multi'): ?>
+            <!-- MULTI MODE — pick classes -->
+            <div class="no-print" style="margin-bottom: 20px;">
+                <h3 style="font-size:15px; font-weight:700; color:#1e293b; margin-bottom:10px;">
+                    <i class="fas fa-check-square" style="color:#1e40af;"></i> Select Classes to Print
+                </h3>
+                <div class="pick-toolbar">
+                    <button type="button" onclick="$('.pick-grid input[type=checkbox]').prop('checked', true);">Select All</button>
+                    <button type="button" onclick="$('.pick-grid input[type=checkbox]').prop('checked', false);">Clear</button>
+                </div>
+                <form method="get" id="multiForm">
+                    <input type="hidden" name="mode" value="multi">
+                    <input type="hidden" name="session_id" value="<?= (int)$session_id; ?>">
+                    <div class="pick-grid">
+                        <?php
+                        $picked_keys = [];
+                        foreach ($selected_classes as $sc) $picked_keys[] = $sc['class_id'] . '|' . $sc['class_section_id'];
+                        foreach ($class_options as $co):
+                            $val = $co['class_id'] . '|' . $co['class_section_id'];
+                            $checked = in_array($val, $picked_keys, true);
+                        ?>
+                            <label class="pick-card">
+                                <input type="checkbox" name="picks[]" value="<?= htmlspecialchars($val); ?>" <?= $checked ? 'checked' : ''; ?>>
+                                <span><?= htmlspecialchars($co['display_label']); ?></span>
+                            </label>
+                        <?php endforeach; ?>
+                    </div>
+                    <button type="submit" style="background:#1e40af; color:#fff; border:none; padding:10px 22px; border-radius:8px; font-weight:700; font-size:13px; cursor:pointer;">
+                        <i class="fas fa-print"></i> Load Selected
+                    </button>
+                </form>
             </div>
-        <?php else: ?>
+        <?php elseif ($mode === 'teacher'): ?>
+            <!-- TEACHER MODE — pick teachers -->
+            <div class="no-print" style="margin-bottom: 20px;">
+                <h3 style="font-size:15px; font-weight:700; color:#1e293b; margin-bottom:10px;">
+                    <i class="fas fa-user-tie" style="color:#1e40af;"></i> Select Teachers to Print
+                </h3>
+                <div class="pick-toolbar">
+                    <button type="button" onclick="$('.pick-grid input[type=checkbox]').prop('checked', true);">Select All</button>
+                    <button type="button" onclick="$('.pick-grid input[type=checkbox]').prop('checked', false);">Clear</button>
+                </div>
+                <form method="get" id="teacherForm">
+                    <input type="hidden" name="mode" value="teacher">
+                    <input type="hidden" name="session_id" value="<?= (int)$session_id; ?>">
+                    <div class="pick-grid">
+                        <?php foreach ($teachers_list as $t):
+                            $checked = in_array((int)$t['id'], $selected_teachers, true);
+                        ?>
+                            <label class="pick-card">
+                                <input type="checkbox" name="teacher_ids[]" value="<?= (int)$t['id']; ?>" <?= $checked ? 'checked' : ''; ?>>
+                                <span><?= htmlspecialchars($t['username']); ?></span>
+                            </label>
+                        <?php endforeach; ?>
+                    </div>
+                    <button type="submit" style="background:#1e40af; color:#fff; border:none; padding:10px 22px; border-radius:8px; font-weight:700; font-size:13px; cursor:pointer;">
+                        <i class="fas fa-print"></i> Load Selected
+                    </button>
+                </form>
+            </div>
+        <?php endif; ?>
 
-            <div class="print-area">
+        <!-- ═══════════════════════════════════════════════════════════
+             RENDER — one print-block per selected class or teacher
+             ═══════════════════════════════════════════════════════════ -->
 
-                <div class="print-head">
-                    <div class="school">School Management System</div>
-                    <div class="doctype">Class Timetable</div>
-                    <div class="meta">
-                        <span><strong>Class:</strong> <?php echo htmlspecialchars($sel_label ?: '—'); ?></span>
-                        <span><strong>Session:</strong> <?php echo htmlspecialchars($session_title ?: '—'); ?></span>
-                        <span><strong>Printed:</strong> <?php echo date('d M Y'); ?></span>
+        <?php if ($mode === 'single' && !empty($class_timetables)): ?>
+            <?php $single = reset($class_timetables); $timetable_data = $single['data']; $sel_label = $single['label']; ?>
+            <div class="print-area" id="printArea">
+                <div class="print-block print-target" data-label="<?= htmlspecialchars($single['label']); ?>">
+                    <div class="print-head">
+                        <div class="school">School Management System</div>
+                        <div class="doctype">Class Timetable</div>
+                        <div class="meta">
+                            <span><strong>Class:</strong> <?= htmlspecialchars($single['label']); ?></span>
+                            <span><strong>Session:</strong> <?= htmlspecialchars($session_title ?: '—'); ?></span>
+                            <span><strong>Printed:</strong> <?= date('d M Y'); ?></span>
+                        </div>
+                    </div>
+                    <div class="tbl-wrap">
+                        <table class="tt">
+                            <thead><tr><th class="period-head">Period</th><?php foreach ($days as $day): ?><th><?= htmlspecialchars($day); ?></th><?php endforeach; ?></tr></thead>
+                            <tbody>
+                                <?php foreach ($time_slots as $slot): $slot_id = (int)$slot['id']; $is_break = stripos($slot['title'] ?? '', 'break') !== false; ?>
+                                    <tr>
+                                        <td class="period-cell <?= $is_break ? 'is-break' : ''; ?>">
+                                            <div class="pt"><?= htmlspecialchars($slot['title'] ?: ('Period ' . $slot_id)); ?></div>
+                                            <div class="ptime"><?= date('H:i', strtotime($slot['start_time'])); ?>&ndash;<?= date('H:i', strtotime($slot['end_time'])); ?></div>
+                                        </td>
+                                        <?php foreach ($days as $di => $day): $day_id = $di + 1; $cell = $timetable_data[$day_id][$slot_id] ?? null; ?>
+                                            <td>
+                                                <?php if ($cell): ?>
+                                                    <div class="cell-subj"><?= htmlspecialchars($cell['subject_title'] ?? '—'); ?></div>
+                                                    <?php if (!empty($cell['teacher_name'])): ?><div class="cell-tch"><?= htmlspecialchars($cell['teacher_name']); ?></div><?php endif; ?>
+                                                    <?php if (!empty($cell['room_no'])): ?><div class="cell-room">Room: <?= htmlspecialchars($cell['room_no']); ?></div><?php endif; ?>
+                                                <?php else: ?>
+                                                    <div class="cell-empty">&mdash;</div>
+                                                <?php endif; ?>
+                                            </td>
+                                        <?php endforeach; ?>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
-
-                <div class="tbl-wrap">
-                    <table class="tt">
-                        <thead>
-                            <tr>
-                                <th class="period-head">Period</th>
-                                <?php foreach ($days as $day): ?>
-                                    <th><?php echo htmlspecialchars($day); ?></th>
-                                <?php endforeach; ?>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($time_slots as $slot):
-                                $slot_id = (int)$slot['id'];
-                                $is_break = (stripos($slot['title'] ?? '', 'break') !== false);
-                            ?>
-                            <tr>
-                                <td class="period-cell <?php echo $is_break ? 'is-break' : ''; ?>">
-                                    <div class="pt"><?php echo htmlspecialchars($slot['title'] ?: ('Period ' . $slot_id)); ?></div>
-                                    <div class="ptime"><?php echo date('H:i', strtotime($slot['start_time'])); ?>&ndash;<?php echo date('H:i', strtotime($slot['end_time'])); ?></div>
-                                </td>
-                                <?php foreach ($days as $di => $day):
-                                    $day_id = $di + 1;
-                                    $cell = $timetable_data[$day_id][$slot_id] ?? null;
-                                ?>
-                                <td>
-                                    <?php if ($cell): ?>
-                                        <div class="cell-subj"><?php echo htmlspecialchars($cell['subject_title'] ?? '—'); ?></div>
-                                        <?php if (!empty($cell['teacher_name'])): ?>
-                                            <div class="cell-tch"><?php echo htmlspecialchars($cell['teacher_name']); ?></div>
-                                        <?php endif; ?>
-                                        <?php if (!empty($cell['room_no'])): ?>
-                                            <div class="cell-room">Room: <?php echo htmlspecialchars($cell['room_no']); ?></div>
-                                        <?php endif; ?>
-                                    <?php else: ?>
-                                        <div class="cell-empty">&mdash;</div>
-                                    <?php endif; ?>
-                                </td>
-                                <?php endforeach; ?>
-                            </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
-
             </div>
 
+        <?php elseif ($mode === 'multi' && !empty($class_timetables)): ?>
+            <div class="print-area" id="printArea">
+                <?php foreach ($class_timetables as $key => $ct): ?>
+                    <div class="print-block print-target" data-label="<?= htmlspecialchars($ct['label']); ?>">
+                        <div class="block-tools no-print">
+                            <button type="button" onclick="printOne(this);"><i class="fas fa-print"></i> Print this class</button>
+                        </div>
+                        <div class="print-head">
+                            <div class="school">School Management System</div>
+                            <div class="doctype">Class Timetable</div>
+                            <div class="meta">
+                                <span><strong>Class:</strong> <?= htmlspecialchars($ct['label']); ?></span>
+                                <span><strong>Session:</strong> <?= htmlspecialchars($session_title ?: '—'); ?></span>
+                                <span><strong>Printed:</strong> <?= date('d M Y'); ?></span>
+                            </div>
+                        </div>
+                        <div class="tbl-wrap">
+                            <table class="tt">
+                                <thead><tr><th class="period-head">Period</th><?php foreach ($days as $day): ?><th><?= htmlspecialchars($day); ?></th><?php endforeach; ?></tr></thead>
+                                <tbody>
+                                    <?php foreach ($time_slots as $slot): $slot_id = (int)$slot['id']; $is_break = stripos($slot['title'] ?? '', 'break') !== false; ?>
+                                        <tr>
+                                            <td class="period-cell <?= $is_break ? 'is-break' : ''; ?>">
+                                                <div class="pt"><?= htmlspecialchars($slot['title'] ?: ('Period ' . $slot_id)); ?></div>
+                                                <div class="ptime"><?= date('H:i', strtotime($slot['start_time'])); ?>&ndash;<?= date('H:i', strtotime($slot['end_time'])); ?></div>
+                                            </td>
+                                            <?php foreach ($days as $di => $day): $day_id = $di + 1; $cell = $ct['data'][$day_id][$slot_id] ?? null; ?>
+                                                <td>
+                                                    <?php if ($cell): ?>
+                                                        <div class="cell-subj"><?= htmlspecialchars($cell['subject_title'] ?? '—'); ?></div>
+                                                        <?php if (!empty($cell['teacher_name'])): ?><div class="cell-tch"><?= htmlspecialchars($cell['teacher_name']); ?></div><?php endif; ?>
+                                                        <?php if (!empty($cell['room_no'])): ?><div class="cell-room">Room: <?= htmlspecialchars($cell['room_no']); ?></div><?php endif; ?>
+                                                    <?php else: ?>
+                                                        <div class="cell-empty">&mdash;</div>
+                                                    <?php endif; ?>
+                                                </td>
+                                            <?php endforeach; ?>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+
+        <?php elseif ($mode === 'teacher' && !empty($teacher_timetables)): ?>
+            <div class="print-area" id="printArea">
+                <?php foreach ($teacher_timetables as $tid => $tt): ?>
+                    <div class="print-block print-target" data-label="<?= htmlspecialchars($tt['label']); ?>">
+                        <div class="block-tools no-print">
+                            <button type="button" onclick="printOne(this);"><i class="fas fa-print"></i> Print this teacher</button>
+                        </div>
+                        <div class="print-head">
+                            <div class="school">School Management System</div>
+                            <div class="doctype">Teacher Timetable</div>
+                            <div class="meta">
+                                <span><strong>Teacher:</strong> <?= htmlspecialchars($tt['label']); ?></span>
+                                <span><strong>Session:</strong> <?= htmlspecialchars($session_title ?: '—'); ?></span>
+                                <span><strong>Printed:</strong> <?= date('d M Y'); ?></span>
+                            </div>
+                        </div>
+                        <div class="tbl-wrap">
+                            <table class="tt">
+                                <thead><tr><th class="period-head">Period</th><?php foreach ($days as $day): ?><th><?= htmlspecialchars($day); ?></th><?php endforeach; ?></tr></thead>
+                                <tbody>
+                                    <?php foreach ($time_slots as $slot): $slot_id = (int)$slot['id']; $is_break = stripos($slot['title'] ?? '', 'break') !== false; ?>
+                                        <tr>
+                                            <td class="period-cell <?= $is_break ? 'is-break' : ''; ?>">
+                                                <div class="pt"><?= htmlspecialchars($slot['title'] ?: ('Period ' . $slot_id)); ?></div>
+                                                <div class="ptime"><?= date('H:i', strtotime($slot['start_time'])); ?>&ndash;<?= date('H:i', strtotime($slot['end_time'])); ?></div>
+                                            </td>
+                                            <?php foreach ($days as $di => $day): $day_id = $di + 1; $cell = $tt['data'][$day_id][$slot_id] ?? null; ?>
+                                                <td>
+                                                    <?php if ($cell): ?>
+                                                        <div class="cell-subj"><?= htmlspecialchars($cell['class_title'] ?? '—'); ?><?= !empty($cell['section_title']) ? ' - ' . htmlspecialchars($cell['section_title']) : ''; ?></div>
+                                                        <?php if (!empty($cell['subject_title'])): ?><div class="cell-tch"><?= htmlspecialchars($cell['subject_title']); ?></div><?php endif; ?>
+                                                        <?php if (!empty($cell['room_no'])): ?><div class="cell-room">Room: <?= htmlspecialchars($cell['room_no']); ?></div><?php endif; ?>
+                                                    <?php else: ?>
+                                                        <div class="cell-empty">&mdash;</div>
+                                                    <?php endif; ?>
+                                                </td>
+                                            <?php endforeach; ?>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+
+        <?php elseif ($mode !== 'single'): ?>
+            <div class="empty no-print">
+                <div class="big"><i class="fas fa-print"></i></div>
+                <h3>Select <?= $mode === 'teacher' ? 'teachers' : 'classes' ?> above and click Load Selected</h3>
+            </div>
         <?php endif; ?>
 
     </div>
 </div>
 
-<?php if ($sel_class_id > 0 && !empty($time_slots)): ?>
 <script>
-/* Export data (already computed server-side, embedded here for JS) */
-var TT_EXPORT = {
-    title:    <?php echo json_encode($export_title, JSON_UNESCAPED_UNICODE); ?>,
-    meta:     <?php echo json_encode($export_meta, JSON_UNESCAPED_UNICODE); ?>,
-    days:     <?php echo json_encode($days, JSON_UNESCAPED_UNICODE); ?>,
-    rows:     <?php echo json_encode($grid_rows, JSON_UNESCAPED_UNICODE); ?>,
-    filename: <?php echo json_encode($export_filename, JSON_UNESCAPED_UNICODE); ?>
-};
+/* Print a single .print-block */
+function printOne(btn) {
+    var block = btn.closest('.print-block');
+    document.body.classList.add('print-one');
+    document.querySelectorAll('.print-block').forEach(function(b){ b.classList.remove('print-target'); });
+    block.classList.add('print-target');
+    setTimeout(function(){
+        window.print();
+        setTimeout(function(){
+            document.body.classList.remove('print-one');
+            document.querySelectorAll('.print-block').forEach(function(b){ b.classList.add('print-target'); });
+        }, 200);
+    }, 50);
+}
 
-/* Build 2D array: 
-   row 0: title
-   row 1: meta
-   row 2: blank
-   row 3: header (Period + days)
-   row 4+: period + cells
-*/
+/* Existing single-mode export buttons (unchanged) */
+<?php if ($mode === 'single' && !empty($class_timetables)): ?>
+var TT_EXPORT = {
+    title:    <?= json_encode($export_title, JSON_UNESCAPED_UNICODE); ?>,
+    meta:     <?= json_encode($export_meta, JSON_UNESCAPED_UNICODE); ?>,
+    days:     <?= json_encode($days, JSON_UNESCAPED_UNICODE); ?>,
+    rows:     <?= json_encode($grid_rows, JSON_UNESCAPED_UNICODE); ?>,
+    filename: <?= json_encode($export_filename, JSON_UNESCAPED_UNICODE); ?>
+};
 function buildMatrix() {
     var m = [];
     var header = ['Period'].concat(TT_EXPORT.days);
     var blank = new Array(header.length).fill('');
-
     m.push([TT_EXPORT.title].concat(new Array(header.length - 1).fill('')));
     m.push([TT_EXPORT.meta].concat(new Array(header.length - 1).fill('')));
     m.push(blank.slice());
     m.push(header);
-
-    TT_EXPORT.rows.forEach(function(r) {
-        m.push([r.period].concat(r.cells));
-    });
-
+    TT_EXPORT.rows.forEach(function(r) { m.push([r.period].concat(r.cells)); });
     return m;
 }
-
-/* ---------- EXCEL (SheetJS) ---------- */
-document.getElementById('btnExportXlsx').addEventListener('click', function() {
-    var matrix = buildMatrix();
-    var ws = XLSX.utils.aoa_to_sheet(matrix);
-
-    /* Column widths */
-    var cols = [{ wch: 28 }];
-    TT_EXPORT.days.forEach(function() { cols.push({ wch: 24 }); });
-    ws['!cols'] = cols;
-
-    /* Merged title + meta rows */
-    var total_cols = TT_EXPORT.days.length + 1;
-    ws['!merges'] = [
-        { s: { r: 0, c: 0 }, e: { r: 0, c: total_cols - 1 } },
-        { s: { r: 1, c: 0 }, e: { r: 1, c: total_cols - 1 } }
-    ];
-
-    /* Row heights */
-    ws['!rows'] = [];
-    ws['!rows'][0] = { hpt: 26 };
-    ws['!rows'][1] = { hpt: 18 };
-    ws['!rows'][3] = { hpt: 22 };
-
-    var wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Timetable');
-    XLSX.writeFile(wb, TT_EXPORT.filename + '.xlsx');
-});
-
-/* ---------- CSV ---------- */
-document.getElementById('btnExportCsv').addEventListener('click', function() {
-    var matrix = buildMatrix();
-    var csv = matrix.map(function(row) {
-        return row.map(function(cell) {
-            var v = (cell === null || cell === undefined) ? '' : String(cell);
-            if (v.indexOf(',') !== -1 || v.indexOf('"') !== -1 || v.indexOf('\n') !== -1) {
-                v = '"' + v.replace(/"/g, '""') + '"';
-            }
-            return v;
-        }).join(',');
-    }).join('\n');
-
-    var blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement('a');
-    a.href = url;
-    a.download = TT_EXPORT.filename + '.csv';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-});
-</script>
 <?php endif; ?>
+</script>
 
 </body>
 </html>

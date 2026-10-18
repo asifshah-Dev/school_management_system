@@ -345,14 +345,20 @@ foreach ($sessions as $s) if ((int)$s['id'] === $session_id) $session_title = $s
 <?php require_once('navbar.php'); ?>
 <div class="wrap">
     <div class="head no-print">
-        <div>
-            <h1><i class="fas fa-table"></i> Timetable Editor</h1>
-            <div class="sub"><?= $sel_label ? htmlspecialchars($sel_label) : 'Pick a class' ?> · <?= htmlspecialchars($session_title) ?></div>
-        </div>
-        <div>
-            <a href="time_slots.php" class="hb"><i class="fas fa-clock"></i> Time Slots</a>
-        </div>
+    <div>
+        <h1><i class="fas fa-table"></i> Timetable Editor</h1>
+        <div class="sub"><?= $sel_label ? htmlspecialchars($sel_label) : 'Pick a class' ?> &middot; <?= htmlspecialchars($session_title) ?></div>
     </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <a href="print_timetable.php?mode=multi&amp;session_id=<?= (int)$session_id; ?>" class="hb">
+            <i class="fas fa-print"></i> Print / Export
+        </a>
+        <a href="print_timetable.php?mode=teacher&amp;session_id=<?= (int)$session_id; ?>" class="hb">
+            <i class="fas fa-user-tie"></i> By Teacher
+        </a>
+        <a href="time_slots.php" class="hb"><i class="fas fa-clock"></i> Time Slots</a>
+    </div>
+</div>
     <div class="card">
 
         <form method="get" class="selector">
